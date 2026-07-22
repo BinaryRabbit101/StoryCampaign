@@ -1,0 +1,23 @@
+{
+    "name": "StoryCampaign",
+    "short_name": "StoryCampaign",
+    "description": "A living-world idle RPG. The world changes while you're away.",
+    "start_url": "/campaigns",
+    "display": "standalone",
+    "background_color": "#0a0a0a",
+    "theme_color": "#0a0a0a",
+    "icons": [
+        {
+            "src": "/icons/icon-192.png",
+            "sizes": "192x192",
+            "type": "image/png",
+            "purpose": "any maskable"
+        },
+        {
+            "src": "/icons/icon-512.png",
+            "sizes": "512x512",
+            "type": "image/png",
+            "purpose": "any maskable"
+        }
+    ]
+}
