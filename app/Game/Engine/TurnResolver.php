@@ -42,8 +42,14 @@ class TurnResolver
                 'time_slowed' => false,
                 'hastened' => false,
                 'readied' => false,
+                'shielded' => false,
+                'shield_actor_id' => null,
                 'prior_failure' => false,
             ];
+
+            // Captives held before this turn may struggle free at its end —
+            // a fresh grip always survives the turn it was won.
+            $heldBefore = $scene->actors()->where('status', 'restrained')->pluck('id')->all();
 
             $outcomes = [];
             $trigger = null;
@@ -96,8 +102,10 @@ class TurnResolver
                 }
             }
 
-            // The scene answers: active enemies react to the player's beats.
+            // The scene answers: active enemies react to the player's beats,
+            // and long-held captives strain against the grip.
             $enemyFacts = $this->enemyReaction($character, $scene, $dice, $conditions, $moved);
+            $enemyFacts = array_merge($enemyFacts, $this->captiveStruggle($scene, $dice, $heldBefore));
 
             // Living-world texture: a zone-level actor may join mid-scene.
             $newThreat = null;
@@ -137,7 +145,8 @@ class TurnResolver
 
         if (($target['type'] ?? null) === 'actor') {
             $actor = Actor::find($target['id']);
-            if ($actor === null || $actor->status !== 'active') {
+            // Restrained is a live state: captive-leverage cards stay legal.
+            if ($actor === null || ! in_array($actor->status, ['active', 'restrained'], true)) {
                 return "{$target['name']} is no longer a factor.";
             }
         }
@@ -168,7 +177,7 @@ class TurnResolver
         }
 
         // Tempo and quiet beats auto-succeed; everything else rolls.
-        if (in_array($verb, ['time_slow', 'haste', 'ready', 'examine', 'wait', 'catch_breath', 'reposition'], true)) {
+        if (in_array($verb, ['time_slow', 'haste', 'ready', 'examine', 'wait', 'catch_breath', 'reposition', 'shield'], true)) {
             return $this->quietBeat($card, $character, $scene, $conditions);
         }
 
@@ -236,6 +245,11 @@ class TurnResolver
                 break;
             case 'reposition':
                 $facts[] = 'They shifted to safer footing.';
+                break;
+            case 'shield':
+                $conditions['shielded'] = true;
+                $conditions['shield_actor_id'] = $card['target']['id'] ?? null;
+                $facts[] = 'They kept their captive between themselves and the danger.';
                 break;
         }
 
@@ -400,6 +414,37 @@ class TurnResolver
                     : 'There was no one left worth searching.';
                 break;
 
+            case 'hurl':
+                // Spending the captive as a weapon: however it lands, the
+                // hold is over — success downs them, failure frees them.
+                $captive = Actor::find($card['target']['id']);
+                $other = $captive === null ? null : $scene->actors()
+                    ->where('status', 'active')->where('kind', 'enemy')
+                    ->where('id', '!=', $captive->id)->first();
+                if ($succeeded && $captive !== null) {
+                    $captive->update(['status' => 'defeated']);
+                    if ($other !== null) {
+                        $damage = $degree === BeatOutcome::STRONG ? 3 : 2;
+                        $stats = $other->stats;
+                        $stats['health']['current'] = max(0, $stats['health']['current'] - $damage);
+                        $other->update(['stats' => $stats]);
+                        if ($stats['health']['current'] === 0) {
+                            $other->update(['status' => 'defeated']);
+                            $facts[] = "They hurled {$captive->name} into {$other->name} — both went down and stayed down.";
+                        } else {
+                            $facts[] = "They hurled {$captive->name} into {$other->name}; the captive did not rise, and {$other->name} staggered ({$stats['health']['current']}/{$stats['health']['max']} left).";
+                        }
+                    } else {
+                        $facts[] = "They hurled {$captive->name} aside — the captive went down hard and did not rise.";
+                    }
+                } elseif ($captive !== null) {
+                    $captive->update(['status' => 'active']);
+                    $facts[] = $degree === BeatOutcome::PARTIAL
+                        ? "The throw went wrong — {$captive->name} twisted loose mid-swing and landed free."
+                        : "{$captive->name} wrenched out of the grip as the throw began — the hold is lost.";
+                }
+                break;
+
             case 'improvise':
                 // Base stats, no special bonus — never better than a real
                 // enumerated option, so there's no incentive to game it.
@@ -429,7 +474,8 @@ class TurnResolver
             $dodge = 12
                 + ($conditions['elevated'] ? 3 : 0)
                 + ($conditions['concealed'] ? 3 : 0)
-                + ($conditions['readied'] ? 2 : 0);
+                + ($conditions['readied'] ? 2 : 0)
+                + ($conditions['shielded'] ? 2 : 0);
 
             $roll = $dice->d20();
             if ($conditions['time_slowed']) {
@@ -439,10 +485,46 @@ class TurnResolver
 
             if ($attack >= $dodge) {
                 $damage = max(1, (int) ($enemy->stats['attack'] ?? 1));
-                Meters::damage($character, $damage);
-                $facts[] = "{$enemy->name} answered and drew blood ({$damage} damage).";
+                $shield = $conditions['shielded'] ? Actor::find($conditions['shield_actor_id'] ?? 0) : null;
+                if ($shield !== null && $shield->status === 'restrained') {
+                    // The captive absorbs the blow meant for the player.
+                    $stats = $shield->stats;
+                    $stats['health']['current'] = max(0, $stats['health']['current'] - $damage);
+                    $shield->update(['stats' => $stats]);
+                    if ($stats['health']['current'] === 0) {
+                        $shield->update(['status' => 'defeated']);
+                        $facts[] = "{$enemy->name} struck — but the blow found {$shield->name}, held in the way, and the captive crumpled.";
+                    } else {
+                        $facts[] = "{$enemy->name} struck — {$shield->name}, held in the way, took the blow meant for them.";
+                    }
+                } else {
+                    Meters::damage($character, $damage);
+                    $facts[] = "{$enemy->name} answered and drew blood ({$damage} damage).";
+                }
             } else {
                 $facts[] = "{$enemy->name} pressed in but found nothing to hit.";
+            }
+        }
+
+        return $facts;
+    }
+
+    /**
+     * The grapple clock: captives held since before this turn strain against
+     * the hold, and sometimes wrench loose. Elites escape more easily.
+     *
+     * @param  list<int>  $heldBefore
+     * @return list<string>
+     */
+    private function captiveStruggle(Scene $scene, Dice $dice, array $heldBefore): array
+    {
+        $facts = [];
+
+        $captives = $scene->actors()->where('status', 'restrained')->whereIn('id', $heldBefore)->get();
+        foreach ($captives as $captive) {
+            if ($dice->d20() + ($captive->tier === 'elite' ? 4 : 0) >= 16) {
+                $captive->update(['status' => 'active']);
+                $facts[] = "{$captive->name} wrenched free of the hold and is loose again.";
             }
         }
 
@@ -549,6 +631,11 @@ class TurnResolver
         $parts[] = $enemies->isEmpty()
             ? 'No open threat stands against you.'
             : 'Facing you: '.$enemies->join(', ').'.';
+
+        $captives = $scene->actors()->where('status', 'restrained')->pluck('name');
+        if ($captives->isNotEmpty()) {
+            $parts[] = 'In your grip: '.$captives->join(', ').'.';
+        }
 
         // Ground the offered options: name the bystanders and features the
         // cards will reference, so nothing appears narratively unannounced.

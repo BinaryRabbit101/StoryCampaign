@@ -44,6 +44,14 @@ class CardComposer
             }
         }
 
+        // A held captive is an affordance too: the grip itself opens options.
+        $captives = $scene->actors()->where('status', 'restrained')->get();
+        foreach ($captives as $captive) {
+            foreach ($this->captiveCards($capabilities, $captive, $actors, $features) as $card) {
+                $cards[$card->slot->value][] = $card;
+            }
+        }
+
         foreach ($this->tempoCards($character, $capabilities) as $card) {
             $cards[$card->slot->value][] = $card;
         }
@@ -320,6 +328,72 @@ class CardComposer
                         );
                         break;
                     }
+                }
+            }
+        }
+
+        return $cards;
+    }
+
+    /**
+     * Options a restrained captive affords. The grapple is a live state the
+     * engine decays (they struggle free over time) — these cards are how the
+     * player spends the hold before it slips.
+     *
+     * @return list<ActionCard>
+     */
+    private function captiveCards(array $capabilities, Actor $captive, $actors, $features): array
+    {
+        $cards = [];
+        $target = ['type' => 'actor', 'id' => $captive->id, 'name' => $captive->name];
+
+        // Pre: keep the captive between you and the danger.
+        $cards[] = new ActionCard(
+            slot: TurnSlot::Pre,
+            verb: 'shield',
+            label: "Shield yourself with {$captive->name}",
+            description: "Keep {$captive->name} between you and whatever answers — blows meant for you find your captive first.",
+            target: $target,
+            capability: 'restrain',
+            composed: true,
+        );
+
+        // Main: spend the captive as a weapon. Either way the grip is over.
+        if (isset($capabilities['lift']) || ($capabilities['carry_extra']->magnitude ?? 0) >= 1) {
+            $hasOtherEnemy = $actors->contains(fn (Actor $a) => $a->kind === 'enemy' && $a->id !== $captive->id);
+            $cards[] = new ActionCard(
+                slot: TurnSlot::Main,
+                verb: 'hurl',
+                label: "Hurl {$captive->name}".($hasOtherEnemy ? ' into the fray' : ' aside'),
+                description: $hasOtherEnemy
+                    ? "Send {$captive->name} crashing into their allies. The hold ends — one way or the other."
+                    : "Throw {$captive->name} hard. The hold ends — one way or the other.",
+                target: $target,
+                capability: isset($capabilities['lift']) ? 'lift' : 'carry_extra',
+                risk: 'risky',
+                composed: true,
+                modifiers: [$this->approachModifier()],
+            );
+        }
+
+        // Pre, composed: take the captive up with you — grip + carry + a way up.
+        if (($capabilities['carry_extra']->magnitude ?? 0) >= 1) {
+            foreach ($features as $feature) {
+                $vias = $feature->affordances['reachable_via'] ?? [];
+                $canGo = collect($vias)->contains(fn ($via) => isset($capabilities[$via]));
+                if ($canGo && ! ($feature->state['destroyed'] ?? false)) {
+                    $cards[] = new ActionCard(
+                        slot: TurnSlot::Pre,
+                        verb: 'haul',
+                        label: "Drag {$captive->name} up to {$feature->name}",
+                        description: "Take your captive with you to {$feature->name} — height, leverage, and a hostage in hand.",
+                        target: $target,
+                        capability: 'carry_extra',
+                        risk: 'risky',
+                        composed: true,
+                        modifiers: [$this->approachModifier()],
+                    );
+                    break;
                 }
             }
         }

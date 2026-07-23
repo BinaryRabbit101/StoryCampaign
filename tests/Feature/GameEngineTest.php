@@ -247,6 +247,32 @@ class GameEngineTest extends TestCase
                 ->where('latestChapter.kind', 'chapter'));
     }
 
+    public function test_a_held_captive_opens_shield_hurl_and_drag_options()
+    {
+        $campaign = $this->createCatCampaign();
+        app(TurnStarter::class)->openFirstTurn($campaign);
+        $scene = $campaign->activeScene;
+
+        $captive = $scene->actors()->where('kind', 'enemy')->first();
+        $captive->update(['status' => 'restrained']);
+
+        $cards = app(CardComposer::class)->compose($campaign->character, $scene->fresh());
+
+        $preVerbs = collect($cards['pre'])->pluck('verb');
+        $mainCards = collect($cards['main']);
+
+        // The grip itself is an affordance: shield with the captive, spend
+        // them as a weapon, or take them up with you (carry_extra + a way up).
+        $this->assertTrue($preVerbs->contains('shield'));
+        $this->assertTrue($mainCards->pluck('verb')->contains('hurl'));
+        $this->assertTrue($preVerbs->contains('haul'));
+
+        // Captive-leverage cards target a restrained actor and must stay
+        // legal at resolution time (restrained is a live state, not removal).
+        $shield = collect($cards['pre'])->first(fn ($c) => $c['verb'] === 'shield');
+        $this->assertSame($captive->id, $shield['target']['id']);
+    }
+
     public function test_chapter_events_derive_from_resolution_and_anchors_strip_from_prose()
     {
         $campaign = $this->createCatCampaign();

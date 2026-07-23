@@ -38,6 +38,8 @@ class ChapterEvents
         'haste' => 'tempo',
         'ready' => 'tempo',
         'improvise' => 'gambit',
+        'hurl' => 'force',
+        'shield' => 'defense',
     ];
 
     /** @return list<Event> */
@@ -70,10 +72,16 @@ class ChapterEvents
 
         foreach ($resolution['scene_reaction'] ?? [] as $fact) {
             $wounded = preg_match('/drew blood \((\d+) damage\)/', $fact, $m) === 1;
+            [$icon, $label] = match (true) {
+                $wounded => ['injury', "Wounded — {$m[1]} damage taken"],
+                str_contains($fact, 'wrenched free') => ['threat', 'The hold broke'],
+                str_contains($fact, 'held in the way') => ['defense', 'The captive took the blow'],
+                default => ['defense', 'Attack evaded'],
+            };
             $events[] = [
                 'id' => 'e'.++$n,
-                'icon' => $wounded ? 'injury' : 'defense',
-                'label' => $wounded ? "Wounded — {$m[1]} damage taken" : 'Attack evaded',
+                'icon' => $icon,
+                'label' => $label,
                 'slot' => null,
                 'verb' => null,
                 'degree' => null,
