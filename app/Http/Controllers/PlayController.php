@@ -107,6 +107,29 @@ class PlayController extends Controller
     }
 
     /**
+     * The impatience valve: resolve a committed turn on demand instead of
+     * waiting out the cadence window. Only a locked turn with a stored
+     * submission qualifies — an open form has nothing to resolve, so no
+     * Claude run can ever fire without a player choice behind it.
+     */
+    public function resolveNow(Request $request, Campaign $campaign): RedirectResponse
+    {
+        abort_unless($campaign->user_id === $request->user()->id, 403);
+        abort_unless($campaign->status === 'active', 400);
+
+        $turn = $campaign->currentTurn;
+        abort_unless(
+            $turn !== null && $turn->status === Turn::STATUS_LOCKED && $turn->submitted_at !== null,
+            409,
+            'There is no committed turn waiting to resolve.',
+        );
+
+        $this->resolveInline($turn);
+
+        return redirect()->route('play.show', $campaign);
+    }
+
+    /**
      * A submitted card must be one the engine actually offered for that slot;
      * chosen modifier values must come from the card's own options.
      *

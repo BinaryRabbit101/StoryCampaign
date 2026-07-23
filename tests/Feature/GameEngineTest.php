@@ -10,6 +10,7 @@ use App\Models\Campaign;
 use App\Models\Character;
 use App\Models\Turn;
 use App\Models\User;
+use App\Services\Claude\Narrator;
 use App\Services\TurnStarter;
 use Database\Seeders\WorldSeeder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -202,6 +203,30 @@ class GameEngineTest extends TestCase
             ->post("/play/{$campaign->id}", ['main' => ['card_id' => 'forged-card-id']])
             ->assertRedirect("/play/{$campaign->id}")
             ->assertSessionHasErrors('main');
+    }
+
+    public function test_a_committed_turn_can_be_resolved_on_demand()
+    {
+        $campaign = $this->createCatCampaign();
+        $turn = app(TurnStarter::class)->openFirstTurn($campaign);
+        $main = collect($turn->cards['main'])->first(fn ($c) => $c['verb'] === 'wait');
+
+        config(['game.turn_cadence_minutes' => 30]);
+        $this->actingAs($campaign->user);
+        $this->mock(Narrator::class)->shouldReceive('narrate');
+
+        // Nothing committed yet: resolve-now must refuse (no Claude run
+        // can ever fire without a player choice behind it).
+        $this->post("/play/{$campaign->id}/resolve-now")->assertStatus(409);
+
+        $this->post("/play/{$campaign->id}", ['main' => ['card_id' => $main['id']]]);
+        $this->assertSame(Turn::STATUS_LOCKED, $turn->fresh()->status);
+
+        $this->post("/play/{$campaign->id}/resolve-now")
+            ->assertRedirect("/play/{$campaign->id}");
+
+        $this->assertSame(Turn::STATUS_COMPLETE, $turn->fresh()->status);
+        $this->assertSame(Turn::STATUS_AWAITING, $campaign->fresh()->currentTurn->status);
     }
 
     public function test_widget_endpoint_requires_a_valid_token()

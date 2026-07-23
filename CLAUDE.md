@@ -1,11 +1,11 @@
 # StoryCampaign — Living-World Idle RPG
 
-Turn-based idle RPG with a living world: scheduled Claude CLI runs evolve the
-game (narrated in-world as the Chronicle) and narrate turn resolutions into
+Turn-based idle RPG: scheduled Claude CLI runs narrate turn resolutions into
 chapters. Players act through one structured form per turn (contextual action
 cards, never free text); the engine owns all mechanics and outcomes; Claude
-owns narration and world evolution. Every chapter is persisted and compiles
-into a keepsake book at campaign end.
+owns narration. Every chapter is persisted and compiles into a keepsake book
+at campaign end. World evolution (`game:evolve`, `WorldEvolver`, Chronicle)
+exists in code but is deliberately unscheduled — manual runs only.
 
 Full design rationale: `design/DESIGN_BIBLE.md` (guardrails) and the original
 spec decisions embedded as comments in the code.
@@ -19,7 +19,7 @@ same as sibling projects). Fortify auth, Wayfinder, PHPUnit 12, SQLite, PWA
 - Dev: `npm run dev` + `php artisan serve` (or Herd). Build: `npm run build`.
 - Tests: `php artisan test`. Format: `vendor/bin/pint --dirty`.
 - Scheduler (prod): `php artisan schedule:work` — runs `game:resolve-due`
-  every 5 min, `game:evolve daily` at 03:00, `game:evolve weekly` Sundays.
+  every 5 min. `game:evolve` is not scheduled (only ever run manually).
 - `GAME_TURN_CADENCE_MINUTES=0` in `.env` resolves turns inline on submit
   (dev convenience). Production default is 30.
 - Claude CLI config: `CLAUDE_BINARY` / `CLAUDE_MODEL` in `.env`; VAPID keys

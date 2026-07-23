@@ -86,6 +86,20 @@ onUnmounted(() => {
     if (timer) clearInterval(timer);
 });
 
+const resolvingNow = ref(false);
+
+// The impatience valve: skip the rest of the idle wait. The engine still
+// resolves only the committed submission — this changes when, never what.
+function resolveNow() {
+    if (resolvingNow.value) return;
+    resolvingNow.value = true;
+    router.post(
+        `/play/${props.campaign.id}/resolve-now`,
+        {},
+        { onFinish: () => (resolvingNow.value = false) },
+    );
+}
+
 function submit() {
     if (!main.value || submitting.value) return;
     submitting.value = true;
@@ -209,8 +223,17 @@ const healthPct = computed(() => (props.character.meters.health.current / props.
 
             <div v-if="locked" class="rounded-lg bg-muted p-4 text-center text-sm text-muted-foreground">
                 <p class="font-medium">Your choice is made. The world is turning.</p>
-                <p v-if="countdown" class="mt-1">The next chapter arrives in <span class="font-mono">{{ countdown }}</span></p>
+                <p v-if="resolvingNow" class="mt-1">The chapter is being written…</p>
+                <p v-else-if="countdown" class="mt-1">The next chapter arrives in <span class="font-mono">{{ countdown }}</span></p>
                 <p v-else class="mt-1">The next chapter is being written…</p>
+                <button
+                    v-if="turn.status === 'locked'"
+                    :disabled="resolvingNow"
+                    class="mt-3 rounded-md border border-input px-4 py-2 text-sm font-medium text-foreground disabled:opacity-50"
+                    @click="resolveNow"
+                >
+                    {{ resolvingNow ? 'Turning the page…' : "Don't make me wait — turn the page now" }}
+                </button>
             </div>
 
             <form v-else-if="turn.cards" class="space-y-6" @submit.prevent="submit">
