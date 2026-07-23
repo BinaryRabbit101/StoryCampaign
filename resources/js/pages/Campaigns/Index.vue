@@ -41,6 +41,20 @@ function create() {
     );
 }
 
+// Deleting burns the whole book — it asks first, and never rides on the
+// row's own click-through.
+const condemned = ref<CampaignRow | null>(null);
+const deleting = ref(false);
+
+function destroy() {
+    if (!condemned.value || deleting.value) return;
+    deleting.value = true;
+    router.delete(`/campaigns/${condemned.value.id}`, {
+        onSuccess: () => (condemned.value = null),
+        onFinish: () => (deleting.value = false),
+    });
+}
+
 function statusLabel(status: string): string {
     switch (status) {
         case 'interview':
@@ -134,24 +148,58 @@ function statusLabel(status: string): string {
         </div>
 
         <div v-if="campaigns.length" class="flex flex-col gap-3">
-            <button
+            <div
                 v-for="campaign in campaigns"
                 :key="campaign.id"
-                class="rounded-xl border border-sidebar-border/70 p-4 text-left transition hover:bg-accent dark:border-sidebar-border"
+                role="button"
+                tabindex="0"
+                class="cursor-pointer rounded-xl border border-sidebar-border/70 p-4 text-left transition hover:bg-accent dark:border-sidebar-border"
                 @click="router.visit(`/campaigns/${campaign.id}`)"
+                @keydown.enter="router.visit(`/campaigns/${campaign.id}`)"
             >
                 <div class="flex items-baseline justify-between gap-2">
                     <span class="font-semibold">{{ campaign.title ?? campaign.name }}</span>
-                    <span class="shrink-0 text-xs text-muted-foreground">{{ statusLabel(campaign.status) }}</span>
+                    <span class="flex shrink-0 items-center gap-2 text-xs text-muted-foreground">
+                        {{ statusLabel(campaign.status) }}
+                        <button
+                            type="button"
+                            class="rounded px-1 text-muted-foreground/60 transition hover:text-red-500"
+                            :title="`Delete “${campaign.title ?? campaign.name}”`"
+                            @click.stop="condemned = campaign"
+                        >
+                            ✕
+                        </button>
+                    </span>
                 </div>
                 <div class="mt-1 text-sm text-muted-foreground">
                     <span v-if="campaign.character">{{ campaign.character }} · </span>
                     <span v-if="campaign.started_at">{{ campaign.started_at }}</span>
                     <span v-if="campaign.ended_at"> — {{ campaign.ended_at }}</span>
                 </div>
-            </button>
+            </div>
         </div>
 
         <p v-else class="text-center text-sm text-muted-foreground">No campaigns yet. Every book starts with a first page.</p>
+
+        <!-- Delete confirmation -->
+        <div v-if="condemned" class="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" @click.self="condemned = null">
+            <div class="w-full max-w-md rounded-xl border border-sidebar-border bg-background p-6">
+                <h3 class="mb-2 font-semibold">Delete “{{ condemned.title ?? condemned.name }}”?</h3>
+                <p class="mb-4 text-sm text-muted-foreground">
+                    This burns the whole book — every chapter, the character, the story so far. It cannot be undone. If you only
+                    want to stop playing, end the tale instead and keep the book.
+                </p>
+                <div class="flex flex-col gap-2">
+                    <button
+                        class="rounded-md bg-red-600 px-4 py-2 text-sm font-semibold text-white disabled:opacity-50"
+                        :disabled="deleting"
+                        @click="destroy"
+                    >
+                        {{ deleting ? 'Burning…' : 'Delete it forever' }}
+                    </button>
+                    <button class="px-4 py-2 text-sm text-muted-foreground" @click="condemned = null">Keep it</button>
+                </div>
+            </div>
+        </div>
     </div>
 </template>

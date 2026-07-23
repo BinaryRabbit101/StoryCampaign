@@ -21,6 +21,7 @@ Route::middleware(['auth', 'verified'])->group(function () {
     Route::post('campaigns', [CampaignController::class, 'store'])->name('campaigns.store');
     Route::get('campaigns/{campaign}', [CampaignController::class, 'show'])->name('campaigns.show');
     Route::post('campaigns/{campaign}/end', [CampaignController::class, 'end'])->name('campaigns.end');
+    Route::delete('campaigns/{campaign}', [CampaignController::class, 'destroy'])->name('campaigns.destroy');
 
     Route::get('campaigns/{campaign}/interview', [InterviewController::class, 'show'])->name('interview.show');
     Route::post('campaigns/{campaign}/interview', [InterviewController::class, 'message'])->name('interview.message');

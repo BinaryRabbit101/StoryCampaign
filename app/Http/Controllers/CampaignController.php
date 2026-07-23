@@ -9,6 +9,7 @@ use App\Services\BookCompiler;
 use App\Services\Claude\Interviewer;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
 use Inertia\Inertia;
 use Inertia\Response;
 
@@ -102,6 +103,29 @@ class CampaignController extends Controller
         $compiler->close($campaign, early: true, withCoda: $validated['coda']);
 
         return redirect()->route('book.show', $campaign);
+    }
+
+    /**
+     * Delete a campaign and everything that was ever written into it —
+     * chapters, turns, scenes (with their scene-scoped actors/features),
+     * character, interview transcript. The shared world is untouched:
+     * zones, zone-level templates, and items belong to every tale.
+     */
+    public function destroy(Request $request, Campaign $campaign): RedirectResponse
+    {
+        $this->authorizeCampaign($request, $campaign);
+
+        // Order matters: chapters reference turns and turns reference
+        // scenes without cascade. Scenes cascade their own actors/features
+        // at the DB level; the campaign cascades character + transcript.
+        DB::transaction(function () use ($campaign) {
+            $campaign->chapters()->delete();
+            $campaign->turns()->delete();
+            $campaign->scenes()->delete();
+            $campaign->delete();
+        });
+
+        return redirect()->route('campaigns.index');
     }
 
     private function authorizeCampaign(Request $request, Campaign $campaign): void

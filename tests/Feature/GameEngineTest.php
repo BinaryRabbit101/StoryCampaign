@@ -14,6 +14,7 @@ use App\Models\User;
 use App\Models\Zone;
 use App\Services\Claude\ClaudeCli;
 use App\Services\Claude\Narrator;
+use App\Services\Claude\StageBuilder;
 use App\Services\TurnStarter;
 use Database\Seeders\WorldSeeder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -339,16 +340,27 @@ class GameEngineTest extends TestCase
         $this->assertNotNull($recruit);
         $this->assertSame('the lantern watchman', $recruit['target']['name']);
 
-        // Once a companion, coordination requests appear — and they are
-        // requests aimed at the companion, never direct control.
+        // Once a companion, coordination requests appear in the companion's
+        // OWN slot — requests aimed at the companion, never direct control,
+        // and never a claim on the player's pre/main/post chain.
         $watchman = $scene->actors()->where('name', 'the lantern watchman')->first();
         $watchman->update(['kind' => 'companion']);
 
         $cards = app(CardComposer::class)->compose($campaign->character, $scene->fresh());
-        $preVerbs = collect($cards['pre'])->pluck('verb');
-        $this->assertTrue($preVerbs->contains('companion_block'));
-        $this->assertTrue($preVerbs->contains('companion_flank'));
-        $this->assertTrue(collect($cards['main'])->pluck('verb')->contains('companion_scout'));
+        $entry = collect($cards['companions'])->firstWhere('name', 'the lantern watchman');
+        $this->assertNotNull($entry);
+        $verbs = collect($entry['cards'])->pluck('verb');
+        $this->assertTrue($verbs->contains('companion_block'));
+        $this->assertTrue($verbs->contains('companion_flank'));
+        $this->assertTrue($verbs->contains('companion_strike'));
+        $this->assertTrue($verbs->contains('companion_scout'));
+
+        foreach (['pre', 'main', 'post'] as $slot) {
+            $this->assertEmpty(
+                collect($cards[$slot])->filter(fn ($c) => str_starts_with($c['verb'], 'companion_')),
+                "companion requests must not occupy the player's {$slot} slot",
+            );
+        }
 
         // A scouted exit becomes a real, safe way out on the next compose.
         $scene->update(['state' => ['exit_scouted' => true]]);
@@ -356,6 +368,96 @@ class GameEngineTest extends TestCase
             ->first(fn ($c) => $c['label'] === 'Take the scouted way out');
         $this->assertNotNull($exit);
         $this->assertSame('flee', $exit['verb']);
+    }
+
+    public function test_a_companion_acts_from_their_own_slot_beside_the_players_chain()
+    {
+        $campaign = $this->createCatCampaign();
+        app(TurnStarter::class)->openFirstTurn($campaign);
+        $scene = $campaign->activeScene;
+
+        $watchman = $scene->actors()->where('name', 'the lantern watchman')->first();
+        $watchman->update(['kind' => 'companion']);
+
+        $turn = $campaign->currentTurn;
+        $cards = app(CardComposer::class)->compose($campaign->character, $scene->fresh());
+        $turn->update(['cards' => $cards]);
+
+        $flank = collect($cards['companions'][0]['cards'])->firstWhere('verb', 'companion_flank');
+        $main = collect($cards['main'])->first(fn ($c) => $c['verb'] === 'strike');
+
+        $turn->update([
+            'status' => Turn::STATUS_LOCKED,
+            'submission' => [
+                'main' => ['card_id' => $main['id'], 'modifiers' => ['approach' => 'balanced']],
+                'companions' => [(string) $watchman->id => ['card_id' => $flank['id'], 'modifiers' => []]],
+                'intent_text' => null,
+            ],
+            'submitted_at' => now(),
+        ]);
+
+        app(TurnResolver::class)->resolve($turn->fresh());
+        $turn->refresh();
+
+        // The companion's request resolves as its own beat, before the act
+        // it supports — the player's main action still happened in full.
+        $slots = collect($turn->resolution['beats'])->pluck('slot')->values()->all();
+        $this->assertSame(['companion', 'main'], $slots);
+        $this->assertSame('companion_flank', $turn->resolution['beats'][0]['verb']);
+
+        // A forged companion card id is never resolved.
+        $turn2 = $campaign->fresh()->currentTurn;
+        $turn2->update([
+            'status' => Turn::STATUS_LOCKED,
+            'submission' => [
+                'companions' => [(string) $watchman->id => ['card_id' => 'forged', 'modifiers' => []]],
+            ],
+            'submitted_at' => now(),
+        ]);
+        app(TurnResolver::class)->resolve($turn2->fresh());
+        $this->assertSame([], $turn2->fresh()->resolution['beats']);
+    }
+
+    public function test_stage_built_openings_are_clamped_and_scene_scoped()
+    {
+        $campaign = $this->createCatCampaign();
+
+        // Whatever the LLM proposes, the sanitizer holds the stage budget
+        // and the same stat clamps the evolver lives under.
+        $plan = app(StageBuilder::class)->sanitize([
+            'scene_title' => 'The Gull-Bone Pier',
+            'scene_description' => 'Where the search for her sister begins.',
+            'features' => array_map(fn ($i) => ['name' => "prop {$i}", 'feature_type' => 'cover', 'affordances' => ['hideable' => true]], range(1, 6)),
+            'actors' => [
+                ['name' => 'a press-gang captain', 'kind' => 'enemy', 'tier' => 'boss', 'stats' => ['health' => ['current' => 40, 'max' => 40], 'attack' => 9], 'tags' => []],
+                ['name' => 'a tide-worn ferryman', 'kind' => 'npc', 'tier' => 'regular', 'stats' => ['health' => ['current' => 5, 'max' => 5], 'attack' => 1], 'tags' => ['talkable' => true]],
+                ['name' => 'a gull-eyed lookout', 'kind' => 'npc', 'tier' => 'regular', 'stats' => ['health' => ['current' => 4, 'max' => 4], 'attack' => 1], 'tags' => []],
+                ['name' => 'one too many', 'kind' => 'npc', 'tier' => 'regular', 'stats' => [], 'tags' => []],
+            ],
+        ]);
+
+        $this->assertCount(4, $plan['features']);
+        $this->assertCount(3, $plan['actors']);
+        $this->assertSame('regular', $plan['actors'][0]['tier']);
+        $this->assertSame(12, $plan['actors'][0]['stats']['health']['max']);
+        $this->assertSame(4, $plan['actors'][0]['stats']['attack']);
+
+        $turn = app(TurnStarter::class)->openFirstTurn($campaign, $plan);
+        $scene = $campaign->activeScene;
+
+        // The opening is this campaign's own: stage content is bound to the
+        // scene, never to the shared world, and no stock templates spawned.
+        $this->assertSame('The Gull-Bone Pier', $scene->title);
+        $this->assertSame(3, $scene->actors()->where('source', 'stage')->count());
+        $this->assertSame(0, $scene->actors()->where('source', 'seed')->count());
+        $this->assertSame(4, $scene->features()->where('source', 'stage')->count());
+        $this->assertSame(0, Actor::whereNull('scene_id')->where('source', 'stage')->count());
+
+        // The situation names the stage-built cast, and cards intersect with
+        // the stage-built affordances (hideable × conceal is absent — the cat
+        // has no conceal — but the fallbacks still guarantee two options).
+        $this->assertStringContainsString('a press-gang captain', $turn->situation);
+        $this->assertGreaterThanOrEqual(2, count($turn->cards['main']));
     }
 
     public function test_a_new_campaign_can_begin_with_a_returning_character()
@@ -388,6 +490,36 @@ class GameEngineTest extends TestCase
         $this->actingAs($stranger)
             ->post('/campaigns', ['name' => 'Theft', 'character_id' => $original->id])
             ->assertNotFound();
+    }
+
+    public function test_a_campaign_can_be_deleted_with_its_whole_story()
+    {
+        $campaign = $this->createCatCampaign();
+        $turn = app(TurnStarter::class)->openFirstTurn($campaign);
+        $campaign->chapters()->create(['turn_id' => $turn->id, 'number' => 1, 'kind' => 'chapter', 'body' => 'It began.']);
+        $scene = $campaign->activeScene;
+
+        // A stranger cannot burn someone else's book.
+        $this->actingAs(User::factory()->create())
+            ->delete("/campaigns/{$campaign->id}")
+            ->assertStatus(403);
+
+        $this->actingAs($campaign->user)
+            ->delete("/campaigns/{$campaign->id}")
+            ->assertRedirect('/campaigns');
+
+        // The whole story is gone: chapters, turns, scenes and their
+        // scene-scoped actors, the character, the campaign itself.
+        $this->assertDatabaseMissing('campaigns', ['id' => $campaign->id]);
+        $this->assertDatabaseMissing('chapters', ['campaign_id' => $campaign->id]);
+        $this->assertDatabaseMissing('turns', ['campaign_id' => $campaign->id]);
+        $this->assertDatabaseMissing('scenes', ['campaign_id' => $campaign->id]);
+        $this->assertDatabaseMissing('characters', ['campaign_id' => $campaign->id]);
+        $this->assertDatabaseMissing('actors', ['scene_id' => $scene->id]);
+
+        // The shared world survives untouched.
+        $this->assertDatabaseHas('zones', ['slug' => 'old-district']);
+        $this->assertTrue(Actor::whereNull('scene_id')->exists());
     }
 
     public function test_widget_endpoint_requires_a_valid_token()
