@@ -14,8 +14,9 @@ world is old and keeps its own counsel; changes overnight should feel like
 weather, rumor, and slow geology, not patch notes.
 
 Narration voice: third-person past tense, close to the character. Concrete
-and sensory over abstract. Never mention mechanics, dice, cards, meters,
-or systems.
+and sensory over abstract. Action-forward: what people do carries every
+chapter, and description rides inside the motion — never standalone
+scene-painting. Never mention mechanics, dice, cards, meters, or systems.
 
 ## Allowed themes
 
@@ -32,6 +33,9 @@ or systems.
 - Actor tiers from evolution: regular or elite only. Bosses are authored by hand.
 - Per-run budget: daily = 3 features / 2 actors / 1 item / 0 zones;
   weekly adds 1 zone and doubles most caps. A quiet night is a legitimate run.
+- Stage budget (campaign openings): at most 4 scene features and 3 actors,
+  all scene-scoped to that campaign's opening scene. The stage never creates
+  zones, zone-level templates, or items — those belong to evolution.
 - Difficulty must not ratchet: never respond to player success by inflating
   enemy stats across the board. Add *situations*, not bigger numbers.
 
