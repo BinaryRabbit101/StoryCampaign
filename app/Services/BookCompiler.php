@@ -46,7 +46,7 @@ class BookCompiler
     public function close(Campaign $campaign, bool $early, bool $withCoda): void
     {
         if ($early && $withCoda) {
-            $lastChapters = $campaign->chapters()->orderByDesc('number')->limit(2)->get()->reverse()
+            $lastChapters = $campaign->chapters()->reorder('number', 'desc')->limit(2)->get()->reverse()
                 ->map(fn ($c) => mb_substr($c->body, -1500))->join("\n\n");
             $name = $campaign->character?->name ?? 'the wanderer';
 
@@ -87,7 +87,7 @@ PROMPT);
     {
         try {
             $opening = Str::limit($campaign->chapters()->first()?->body ?? '', 800);
-            $closing = Str::limit($campaign->chapters()->orderByDesc('number')->first()?->body ?? '', 800);
+            $closing = Str::limit($campaign->chapters()->reorder('number', 'desc')->first()?->body ?? '', 800);
             $name = $campaign->character?->name ?? $campaign->name;
 
             return $this->claude->promptForJson(<<<PROMPT

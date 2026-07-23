@@ -48,7 +48,7 @@ class Narrator
         $resolution = $turn->resolution;
         $submission = $turn->submission ?? [];
 
-        $previousChapters = $campaign->chapters()->orderByDesc('number')->limit(2)->get()
+        $previousChapters = $campaign->chapters()->reorder('number', 'desc')->limit(2)->get()
             ->reverse()
             ->map(fn (Chapter $c) => "### Chapter {$c->number}\n".mb_substr($c->body, -1200))
             ->join("\n\n");
@@ -67,6 +67,13 @@ class Narrator
                 ."- {$resolution['new_threat']['name']} arrived mid-scene — introduce this newcomer before the chapter ends.";
         }
         $intent = $submission['intent_text'] ?? null;
+
+        // The next turn already exists (the engine opened it during resolution).
+        // Its situation is resolved fact, so the chapter may close inside it —
+        // minus the meter readout, which is mechanics and never reaches prose.
+        $nextTurn = $campaign->turns()->where('status', Turn::STATUS_AWAITING)->orderByDesc('number')->first();
+        $aftermath = $nextTurn === null ? 'Unknown — end where the beats leave off.'
+            : trim(preg_replace('/\s*Health \d+\/\d+\./', '', $nextTurn->situation));
 
         return <<<PROMPT
 You are the narrator of a living-world RPG. Write the next chapter of this campaign as flowing third-person past-tense prose, weaving the ENGINE-RESOLVED beats below into one continuous vignette. You decide how things happened, never whether: every fact listed is fixed. Do not mention dice, rolls, cards, slots, meters, or any mechanics.
@@ -88,6 +95,11 @@ You are the narrator of a living-world RPG. Write the next chapter of this campa
 
 ## Where the vignette stops
 {$turn->branch_trigger}: the chapter must end on this note, at a clean decision point, leaving the situation open for the player's next choice. 300-600 words.
+
+## The state of play as the chapter closes (fixed facts)
+{$aftermath}
+
+The reader makes their next choice from the page itself: close the chapter inside this moment, with the people and surroundings named above present in the prose, so nothing the player can act on appears unannounced. Do not summarize or list them — let the scene hold them naturally.
 
 Respond with ONLY a JSON object:
 {"intent_line": "<optional short italicized bridge line in the style of 'She chose to take the rooftops.' or null>", "chapter": "<the chapter prose>"}

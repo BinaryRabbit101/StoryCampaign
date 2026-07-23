@@ -38,6 +38,12 @@ const growthText = ref('');
 
 const locked = computed(() => props.turn !== null && props.turn.status !== 'awaiting_player');
 
+// The story drives the situation: when the latest page is a real chapter it
+// already ends inside the current moment, so the engine's scene inventory
+// stays backstage. It surfaces only when no chapter carries the lead-in
+// (fresh from the prologue, or narration still catching up).
+const showSituation = computed(() => props.latestChapter?.kind !== 'chapter');
+
 // Staged, visible resource commitment: the running cost of the whole chain.
 const runningCost = computed(() => {
     const totals: Record<string, number> = {};
@@ -218,8 +224,11 @@ const healthPct = computed(() => (props.character.meters.health.current / props.
 
         <!-- Situation + form / lock -->
         <div v-if="turn" class="rounded-xl border border-sidebar-border/70 p-5 dark:border-sidebar-border">
-            <p class="mb-1 text-xs tracking-widest text-muted-foreground uppercase">The situation</p>
-            <p class="mb-4 text-sm">{{ turn.situation }}</p>
+            <template v-if="showSituation">
+                <p class="mb-1 text-xs tracking-widest text-muted-foreground uppercase">The situation</p>
+                <p class="mb-4 text-sm">{{ turn.situation }}</p>
+            </template>
+            <p v-else-if="!locked" class="mb-4 text-xs tracking-widest text-muted-foreground uppercase">The story waits on you</p>
 
             <div v-if="locked" class="rounded-lg bg-muted p-4 text-center text-sm text-muted-foreground">
                 <p class="font-medium">Your choice is made. The world is turning.</p>

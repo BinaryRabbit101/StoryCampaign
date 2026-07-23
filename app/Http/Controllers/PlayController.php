@@ -26,7 +26,7 @@ class PlayController extends Controller
 
         $turn = $campaign->currentTurn;
         $character = $campaign->character->load(['capabilities', 'constraints']);
-        $latestChapter = $campaign->chapters()->orderByDesc('number')->first();
+        $latestChapter = $campaign->chapters()->reorder('number', 'desc')->first();
 
         $resolvesAt = $turn?->status === Turn::STATUS_LOCKED && $turn->submitted_at !== null
             ? $turn->submitted_at->addMinutes((int) config('game.turn_cadence_minutes'))->toIso8601String()

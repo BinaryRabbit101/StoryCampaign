@@ -229,6 +229,23 @@ class GameEngineTest extends TestCase
         $this->assertSame(Turn::STATUS_AWAITING, $campaign->fresh()->currentTurn->status);
     }
 
+    public function test_play_page_shows_the_latest_chapter_not_the_prologue()
+    {
+        $campaign = $this->createCatCampaign();
+        app(TurnStarter::class)->openFirstTurn($campaign);
+
+        // chapters() bakes in an ascending order; the play page must reorder,
+        // or the reader is pinned to the prologue forever.
+        $campaign->chapters()->create(['turn_id' => null, 'number' => 1, 'kind' => 'prologue', 'body' => 'She was born under a black moon.']);
+        $campaign->chapters()->create(['turn_id' => null, 'number' => 2, 'kind' => 'chapter', 'body' => 'The docks answered in kind.']);
+
+        $this->actingAs($campaign->user)
+            ->get("/play/{$campaign->id}")
+            ->assertInertia(fn ($page) => $page
+                ->where('latestChapter.number', 2)
+                ->where('latestChapter.kind', 'chapter'));
+    }
+
     public function test_widget_endpoint_requires_a_valid_token()
     {
         $campaign = $this->createCatCampaign();
