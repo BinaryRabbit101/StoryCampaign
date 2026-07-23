@@ -27,7 +27,15 @@ class ClaudeCli
             $command[] = $systemPrompt;
         }
 
-        $process = new Process($command, base_path(), null, $prompt, (int) config('game.claude.timeout'));
+        // Explicit HOME lets the CLI locate ~/.claude auth even when invoked
+        // by a user without a login environment (php-fpm pool, cron); the
+        // oauth token covers boxes authenticated via `claude setup-token`.
+        $env = array_filter([
+            'HOME' => config('game.claude.home'),
+            'CLAUDE_CODE_OAUTH_TOKEN' => config('game.claude.oauth_token'),
+        ]) ?: null;
+
+        $process = new Process($command, base_path(), $env, $prompt, (int) config('game.claude.timeout'));
         $process->run();
 
         if (! $process->isSuccessful()) {

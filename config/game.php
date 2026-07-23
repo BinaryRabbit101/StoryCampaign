@@ -27,6 +27,14 @@ return [
         'binary' => env('CLAUDE_BINARY', 'claude'),
         'model' => env('CLAUDE_MODEL', 'claude-sonnet-5'),
         'timeout' => env('CLAUDE_TIMEOUT', 600),
+        // HOME to expose to the CLI process so it can find ~/.claude auth.
+        // Needed when the invoker (php-fpm, cron) runs without the login
+        // user's HOME; null inherits the current environment untouched.
+        'home' => env('CLAUDE_HOME'),
+        // Long-lived subscription token from `claude setup-token`, passed to
+        // the CLI as CLAUDE_CODE_OAUTH_TOKEN. Alternative to on-disk
+        // ~/.claude credentials; null omits it.
+        'oauth_token' => env('CLAUDE_OAUTH_TOKEN'),
     ],
 
     /*
