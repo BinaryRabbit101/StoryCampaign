@@ -31,6 +31,7 @@ class WidgetController extends Controller
         $turn = $campaign->currentTurn;
         $character = $campaign->character;
         $health = $character?->meters['health'];
+        $scene = $campaign->activeScene;
 
         $resolvesAt = $turn?->status === Turn::STATUS_LOCKED && $turn->submitted_at !== null
             ? $turn->submitted_at->addMinutes((int) config('game.turn_cadence_minutes'))->toIso8601String()
@@ -41,10 +42,15 @@ class WidgetController extends Controller
             'campaign' => $campaign->name,
             'character' => $character?->name,
             'health' => $health,
-            'situation' => Str::limit($turn?->situation ?? '', 160),
+            'tempo' => $character?->meters['tempo'] ?? [],
+            'situation' => Str::limit($turn?->situation ?? '', 220),
             'awaiting_player' => $turn?->isOpen() ?? false,
             'resolves_at' => $resolvesAt,
+            'turn_number' => $turn?->number,
             'chapter_count' => $campaign->chapters()->count(),
+            'companions' => $scene?->actors()
+                ->where('status', 'active')->where('kind', 'companion')
+                ->pluck('name') ?? [],
             'open_url' => route('play.show', $campaign),
         ]);
     }
