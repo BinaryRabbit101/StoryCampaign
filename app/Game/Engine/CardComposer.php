@@ -23,7 +23,7 @@ class CardComposer
 
     private const GAPS = ['short' => 1, 'medium' => 2, 'far' => 3];
 
-    /** @return array{pre: list<array>, main: list<array>, post: list<array>} */
+    /** @return array{pre: list<array>, main: list<array>, post: list<array>, companions: list<array{id: int, name: string, cards: list<array>}>} */
     public function compose(Character $character, Scene $scene): array
     {
         $capabilities = $character->effectiveCapabilities();
@@ -52,14 +52,6 @@ class CardComposer
             }
         }
 
-        // Companions: coordinated, never controlled. Each request is a card;
-        // the engine rolls the companion's attempt, not the player's.
-        foreach ($actors->filter(fn (Actor $a) => $a->kind === 'companion') as $companion) {
-            foreach ($this->companionCards($companion, $actors, $scene) as $card) {
-                $cards[$card->slot->value][] = $card;
-            }
-        }
-
         if ($scene->state['exit_scouted'] ?? false) {
             $cards['main'][] = new ActionCard(
                 slot: TurnSlot::Main,
@@ -79,10 +71,27 @@ class CardComposer
             $cards[$card->slot->value][] = $card;
         }
 
-        return array_map(
+        $composed = array_map(
             fn (array $slotCards) => array_map(fn (ActionCard $c) => $c->toArray(), $slotCards),
             $cards,
         );
+
+        // Companions: coordinated, never controlled. Each companion carries
+        // their own request slot — asking never spends the player's beats,
+        // and the engine rolls the companion's attempt, not the player's.
+        $composed['companions'] = $actors
+            ->filter(fn (Actor $a) => $a->kind === 'companion')
+            ->map(fn (Actor $companion) => [
+                'id' => $companion->id,
+                'name' => $companion->name,
+                'cards' => array_map(
+                    fn (ActionCard $c) => $c->toArray(),
+                    $this->companionCards($companion, $actors, $scene),
+                ),
+            ])
+            ->values()->all();
+
+        return $composed;
     }
 
     /** @return list<ActionCard> */
@@ -434,9 +443,10 @@ class CardComposer
     }
 
     /**
-     * Requests a companion can be asked to attempt. The engine resolves the
-     * companion's try with its own roll — sometimes they fail, sometimes the
-     * cost lands on them. That risk is what keeps them people.
+     * Requests a companion can be asked to attempt, all in the companion's
+     * own slot. The engine resolves the companion's try with its own roll —
+     * sometimes they fail, sometimes the cost lands on them. That risk is
+     * what keeps them people.
      *
      * @return list<ActionCard>
      */
@@ -449,28 +459,37 @@ class CardComposer
         if ($enemies->isNotEmpty()) {
             $threat = $enemies->first();
             $cards[] = new ActionCard(
-                slot: TurnSlot::Pre,
+                slot: TurnSlot::Companion,
                 verb: 'companion_block',
-                label: "Ask {$companion->name} to block {$threat->name}",
+                label: "Block {$threat->name}",
                 description: "{$companion->name} plants themselves in {$threat->name}'s path — held off from you, if the line holds.",
                 target: $target,
                 composed: true,
             );
             $cards[] = new ActionCard(
-                slot: TurnSlot::Pre,
+                slot: TurnSlot::Companion,
                 verb: 'companion_flank',
-                label: "Ask {$companion->name} to flank",
+                label: 'Flank the threat',
                 description: "{$companion->name} circles wide so the threat must look two ways — your strike lands harder.",
                 target: $target,
+                composed: true,
+            );
+            $cards[] = new ActionCard(
+                slot: TurnSlot::Companion,
+                verb: 'companion_strike',
+                label: "Strike at {$threat->name}",
+                description: "{$companion->name} takes the fight to {$threat->name} themselves — and answers for how it goes.",
+                target: $target,
+                risk: 'risky',
                 composed: true,
             );
         }
 
         if (! ($scene->state['exit_scouted'] ?? false)) {
             $cards[] = new ActionCard(
-                slot: TurnSlot::Main,
+                slot: TurnSlot::Companion,
                 verb: 'companion_scout',
-                label: "Send {$companion->name} to find a way out",
+                label: 'Find a way out',
                 description: "{$companion->name} slips off to search for an exit while you hold the scene.",
                 target: $target,
                 composed: true,

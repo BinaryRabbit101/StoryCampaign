@@ -44,6 +44,7 @@ class ChapterEvents
         'companion_block' => 'ally',
         'companion_flank' => 'ally',
         'companion_scout' => 'ally',
+        'companion_strike' => 'ally',
     ];
 
     /** @return list<Event> */

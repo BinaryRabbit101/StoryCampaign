@@ -16,7 +16,7 @@ export interface CardCost {
 
 export interface ActionCard {
     id: string;
-    slot: 'pre' | 'main' | 'post';
+    slot: 'pre' | 'main' | 'post' | 'companion';
     verb: string;
     label: string;
     description: string;
@@ -31,6 +31,20 @@ export interface ActionCard {
 export interface SlotChoice {
     card_id: string;
     modifiers: Record<string, string>;
+}
+
+/** One companion's own request slot: their cards, chosen independently. */
+export interface CompanionCards {
+    id: number;
+    name: string;
+    cards: ActionCard[];
+}
+
+export interface TurnCards {
+    pre: ActionCard[];
+    main: ActionCard[];
+    post: ActionCard[];
+    companions?: CompanionCards[];
 }
 
 export interface HealthMeter {

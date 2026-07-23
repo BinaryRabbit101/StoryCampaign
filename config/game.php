@@ -70,6 +70,10 @@ return [
         ],
         'max_item_power' => 5,
         'max_actor_tier' => 'elite', // evolution may not mint bosses without a weekly run
+        // Stage budget: how much scene-scoped content a campaign's opening
+        // may build outward from the player's stage. Never zones or items —
+        // the shared world grows only through evolution.
+        'stage_budget' => ['features' => 4, 'actors' => 3],
     ],
 
     /*

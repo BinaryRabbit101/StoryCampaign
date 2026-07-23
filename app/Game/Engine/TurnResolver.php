@@ -34,7 +34,7 @@ class TurnResolver
 
             $dice = new Dice($turn->id * 2654435761 % PHP_INT_MAX);
             $submission = $turn->submission ?? [];
-            $offered = collect($turn->cards)->flatMap(fn ($cards) => $cards)->keyBy('id');
+            $offered = collect($turn->cards)->only(['pre', 'main', 'post'])->flatMap(fn ($cards) => $cards)->keyBy('id');
 
             $conditions = [
                 'elevated' => (bool) ($scene->state['elevated'] ?? false),
@@ -58,7 +58,18 @@ class TurnResolver
             $moved = false;
             $wasInDanger = Meters::healthInDangerBand($character);
 
-            foreach (['pre', 'main', 'post'] as $slot) {
+            foreach (['pre', 'companion', 'main', 'post'] as $slot) {
+                // Companions act from their own slot, between the player's
+                // set-up and act: support requests (block, flank) shape the
+                // act they support, and never consume the player's chain.
+                if ($slot === 'companion') {
+                    foreach ($this->companionBeats($turn, $submission, $character, $scene, $dice, $conditions) as $outcome) {
+                        $outcomes[] = $outcome;
+                    }
+
+                    continue;
+                }
+
                 $choice = $submission[$slot] ?? null;
                 if ($choice === null) {
                     continue;
@@ -139,6 +150,46 @@ class TurnResolver
 
             return $this->openNextTurn($turn, $character, $scene, $trigger);
         });
+    }
+
+    /**
+     * Resolve each companion's own request. Requests are validated against
+     * the cards offered for that specific companion; a companion no longer
+     * able to act skips theirs without touching the player's chain, and a
+     * companion's failure never counts as the player's prior failure.
+     *
+     * @return list<BeatOutcome>
+     */
+    private function companionBeats(Turn $turn, array $submission, Character $character, Scene $scene, Dice $dice, array &$conditions): array
+    {
+        $outcomes = [];
+        $offered = collect($turn->cards['companions'] ?? [])->keyBy('id');
+
+        foreach ($submission['companions'] ?? [] as $companionId => $choice) {
+            $entry = $offered->get((int) $companionId);
+            if ($entry === null || $choice === null) {
+                continue;
+            }
+
+            $card = collect($entry['cards'])->firstWhere('id', $choice['card_id'] ?? '');
+            if ($card === null) {
+                continue; // tampered or stale submission entry — never resolve it
+            }
+
+            $companion = Actor::find($entry['id']);
+            if ($companion === null || $companion->status !== 'active' || $companion->kind !== 'companion') {
+                $outcomes[] = BeatOutcome::skipped('companion', $card['verb'], $card['target'],
+                    "{$entry['name']} was in no state to answer the request.");
+
+                continue;
+            }
+
+            $playerFailure = $conditions['prior_failure'];
+            $outcomes[] = $this->resolveBeat($card, $choice, $character, $scene, $dice, $conditions);
+            $conditions['prior_failure'] = $playerFailure;
+        }
+
+        return $outcomes;
     }
 
     private function illegalReason(array $card, Scene $scene, Character $character, array $conditions): ?string
@@ -467,6 +518,43 @@ class TurnResolver
                     $facts[] = "{$companion->name} circled wide — the threat now looks two ways.";
                 } else {
                     $facts[] = ($companion?->name ?? 'The companion')." couldn't find the angle.";
+                }
+                break;
+
+            case 'companion_strike':
+                $companion = Actor::find($card['target']['id']);
+                $enemy = $scene->actors()->where('status', 'active')->where('kind', 'enemy')->first();
+                if ($companion === null || $enemy === null) {
+                    $facts[] = 'There was no one left to fight.';
+                    break;
+                }
+                $damage = match ($degree) {
+                    BeatOutcome::STRONG => max(1, (int) ($companion->stats['attack'] ?? 1)) + 1,
+                    BeatOutcome::SUCCESS => max(1, (int) ($companion->stats['attack'] ?? 1)),
+                    BeatOutcome::PARTIAL => 1,
+                    default => 0,
+                };
+                if ($damage > 0) {
+                    $stats = $enemy->stats;
+                    $stats['health']['current'] = max(0, $stats['health']['current'] - $damage);
+                    $enemy->update(['stats' => $stats]);
+                    if ($stats['health']['current'] === 0) {
+                        $enemy->update(['status' => 'defeated']);
+                        $facts[] = "{$companion->name}'s blow felled {$enemy->name}.";
+                    } else {
+                        $facts[] = "{$companion->name} wounded {$enemy->name} ({$stats['health']['current']}/{$stats['health']['max']} left).";
+                    }
+                } else {
+                    // The failed attack costs the companion, not the player.
+                    $stats = $companion->stats;
+                    $stats['health']['current'] = max(0, ($stats['health']['current'] ?? 1) - 1);
+                    $companion->update(['stats' => $stats]);
+                    if ($stats['health']['current'] === 0) {
+                        $companion->update(['status' => 'downed']);
+                        $facts[] = "{$enemy->name} turned the attack back on {$companion->name} — the companion is down and out of the fight.";
+                    } else {
+                        $facts[] = "{$companion->name}'s attack went wide, and {$enemy->name}'s answer cut them.";
+                    }
                 }
                 break;
 

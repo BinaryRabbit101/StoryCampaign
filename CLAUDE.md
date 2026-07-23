@@ -66,11 +66,15 @@ adjudicates legality or outcomes — it is only ever handed resolved facts.
 - Evolution runs are clamped by `config/game.php` bounds no matter what the
   LLM proposes, and log to `evolution_runs` (append-only) for coherence.
 - No mechanics language in any narration prompt output (no dice, cards, meters).
-- The player-set stage (premise/tone) is narration-side only; the starting
-  zone is the sole mechanical choice, and always among existing zones. Stage
-  text must never generate world content around the evolver's budgets.
-- Companions are coordinated, never controlled: requests are cards, the
-  engine rolls the companion's attempt, and failure can cost the companion.
+- The player-set stage (premise/tone) colors narration and seeds the opening
+  through `StageBuilder` only: scene-scoped features/actors (source `stage`),
+  clamped by `config/game.php` `stage_budget` + the evolver's stat bounds.
+  It must never create world-level content (zones, zone templates, items) —
+  the shared world grows only through evolution. The starting zone is the
+  sole mechanical stage choice, and always among existing zones.
+- Companions are coordinated, never controlled: requests are cards in each
+  companion's own slot (never the player's pre/main/post), the engine rolls
+  the companion's attempt, and failure can cost the companion.
 
 ## Widget
 

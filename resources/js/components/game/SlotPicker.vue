@@ -58,6 +58,9 @@ const selectedCard = computed<ActionCard | null>(
 const rowSelection = (row: Row) =>
     row.cards.find((c) => c.id === props.modelValue?.card_id) ?? null;
 
+// The card a row is currently "about": the chosen one, else its first.
+const rowCard = (row: Row) => rowSelection(row) ?? row.cards[0];
+
 function choiceFor(card: ActionCard): SlotChoice {
     const modifiers: Record<string, string> = {};
 
@@ -99,33 +102,25 @@ function setModifier(key: string, value: string) {
     });
 }
 
-function rowRisk(row: Row): string {
-    const risk = rowSelection(row)?.risk ?? row.cards[0].risk;
-
-    return row.cards.every((c) => c.risk === risk) || rowSelection(row)
-        ? risk
-        : 'safe';
-}
-
-function riskClass(risk: string): string {
+function riskChipClass(risk: string): string {
     switch (risk) {
         case 'degraded':
-            return 'border-amber-500/60';
+            return 'bg-amber-500/15 text-amber-700 dark:text-amber-400';
         case 'risky':
-            return 'border-orange-400/40';
+            return 'bg-orange-500/15 text-orange-700 dark:text-orange-400';
         default:
-            return 'border-sidebar-border/70 dark:border-sidebar-border';
+            return 'bg-emerald-500/10 text-emerald-700 dark:text-emerald-400';
     }
 }
 
-function riskLabel(risk: string): string | null {
+function riskLabel(risk: string): string {
     switch (risk) {
         case 'degraded':
-            return 'a stretch — risky';
+            return 'a stretch';
         case 'risky':
             return 'risky';
         default:
-            return null;
+            return 'safe';
     }
 }
 
@@ -183,110 +178,104 @@ function costLabel(card: ActionCard): string | null {
                 Nothing offers itself for this beat.
             </p>
 
-            <div class="grid gap-1.5 sm:grid-cols-2">
+            <!-- One steady column: every card shows what it is, what it
+                 risks, and what it costs before anything is tapped, and
+                 selecting never reflows the list. -->
+            <div class="space-y-1.5">
                 <div
                     v-for="row in rows"
                     :key="row.key"
                     class="cursor-pointer rounded-lg border px-3 py-2 transition"
-                    :class="[
-                        riskClass(rowRisk(row)),
+                    :class="
                         rowSelection(row)
-                            ? 'bg-accent ring-2 ring-primary sm:col-span-2'
-                            : 'hover:bg-accent/50',
-                    ]"
+                            ? 'border-primary bg-accent ring-1 ring-primary'
+                            : 'border-sidebar-border/70 hover:bg-accent/50 dark:border-sidebar-border'
+                    "
                     @click="tapRow(row)"
                 >
-                    <div class="flex items-baseline justify-between gap-2">
+                    <div class="flex items-center justify-between gap-2">
                         <span class="text-sm font-medium">{{ row.label }}</span>
-                        <span class="shrink-0 text-xs text-muted-foreground">
+                        <span class="flex shrink-0 items-center gap-1.5">
                             <span
-                                v-if="riskLabel(rowRisk(row))"
-                                class="text-amber-600 dark:text-amber-400"
-                                >{{ riskLabel(rowRisk(row)) }}</span
+                                v-if="costLabel(rowCard(row))"
+                                class="text-xs text-violet-600 dark:text-violet-400"
+                                >{{ costLabel(rowCard(row)) }}</span
                             >
                             <span
-                                v-else-if="
-                                    !rowSelection(row) && row.cards.length > 1
-                                "
-                                >{{ row.cards.length }} targets</span
+                                class="rounded-full px-2 py-0.5 text-[10px] font-medium tracking-wide uppercase"
+                                :class="riskChipClass(rowCard(row).risk)"
+                                >{{ riskLabel(rowCard(row).risk) }}</span
+                            >
+                            <span
+                                v-if="rowSelection(row) && optional"
+                                class="text-xs text-muted-foreground"
+                                title="Tap again to clear"
+                                >✕</span
                             >
                         </span>
                     </div>
 
-                    <!-- Detail reveals only for the chosen row -->
-                    <template v-if="rowSelection(row)">
-                        <p class="mt-1 text-xs text-muted-foreground">
-                            {{ rowSelection(row)!.description }}
-                        </p>
+                    <p class="mt-0.5 text-xs text-muted-foreground">
+                        {{ rowCard(row).description }}
+                    </p>
 
-                        <div
-                            v-if="row.cards.length > 1"
-                            class="mt-2 flex flex-wrap gap-1"
+                    <!-- Targets are visible up front; tapping one selects it. -->
+                    <div
+                        v-if="row.cards.length > 1"
+                        class="mt-2 flex flex-wrap gap-1"
+                    >
+                        <button
+                            v-for="card in row.cards"
+                            :key="card.id"
+                            type="button"
+                            class="rounded-full border px-2.5 py-1 text-xs transition"
+                            :class="
+                                card.id === modelValue?.card_id
+                                    ? 'border-primary bg-primary text-primary-foreground'
+                                    : card.risk !== 'safe'
+                                      ? 'border-amber-500/60 text-amber-700 hover:bg-accent dark:text-amber-400'
+                                      : 'border-input hover:bg-accent'
+                            "
+                            @click.stop="pickTarget(card)"
                         >
-                            <button
-                                v-for="card in row.cards"
-                                :key="card.id"
-                                type="button"
-                                class="rounded-full border px-2.5 py-1 text-xs transition"
-                                :class="
-                                    card.id === modelValue?.card_id
-                                        ? 'border-primary bg-primary text-primary-foreground'
-                                        : card.risk !== 'safe'
-                                          ? 'border-amber-500/60 text-amber-700 hover:bg-accent dark:text-amber-400'
-                                          : 'border-input hover:bg-accent'
-                                "
-                                @click.stop="pickTarget(card)"
-                            >
-                                {{ card.target?.name ?? card.label }}
-                            </button>
-                        </div>
+                            {{ card.target?.name ?? card.label }}
+                        </button>
+                    </div>
 
+                    <div
+                        v-if="rowSelection(row) && rowSelection(row)!.modifiers.length"
+                        class="mt-2 space-y-2 border-t border-sidebar-border/50 pt-2"
+                    >
                         <div
-                            v-if="costLabel(rowSelection(row)!)"
-                            class="mt-1 text-xs text-violet-600 dark:text-violet-400"
-                        >
-                            costs {{ costLabel(rowSelection(row)!) }}
-                        </div>
-
-                        <div
-                            v-if="rowSelection(row)!.modifiers.length"
-                            class="mt-2 space-y-2 border-t border-sidebar-border/50 pt-2"
+                            v-for="modifier in rowSelection(row)!.modifiers"
+                            :key="modifier.key"
                         >
                             <div
-                                v-for="modifier in rowSelection(row)!.modifiers"
-                                :key="modifier.key"
+                                class="mb-1 text-xs font-medium text-muted-foreground"
                             >
-                                <div
-                                    class="mb-1 text-xs font-medium text-muted-foreground"
+                                {{ modifier.label }}
+                            </div>
+                            <div class="flex flex-wrap gap-1">
+                                <button
+                                    v-for="option in modifier.options"
+                                    :key="option.value"
+                                    type="button"
+                                    class="rounded-full border px-2.5 py-1 text-xs transition"
+                                    :class="
+                                        modelValue?.modifiers[modifier.key] ===
+                                        option.value
+                                            ? 'border-primary bg-primary text-primary-foreground'
+                                            : 'border-input hover:bg-accent'
+                                    "
+                                    @click.stop="
+                                        setModifier(modifier.key, option.value)
+                                    "
                                 >
-                                    {{ modifier.label }}
-                                </div>
-                                <div class="flex flex-wrap gap-1">
-                                    <button
-                                        v-for="option in modifier.options"
-                                        :key="option.value"
-                                        type="button"
-                                        class="rounded-full border px-2.5 py-1 text-xs transition"
-                                        :class="
-                                            modelValue?.modifiers[
-                                                modifier.key
-                                            ] === option.value
-                                                ? 'border-primary bg-primary text-primary-foreground'
-                                                : 'border-input hover:bg-accent'
-                                        "
-                                        @click.stop="
-                                            setModifier(
-                                                modifier.key,
-                                                option.value,
-                                            )
-                                        "
-                                    >
-                                        {{ option.label }}
-                                    </button>
-                                </div>
+                                    {{ option.label }}
+                                </button>
                             </div>
                         </div>
-                    </template>
+                    </div>
                 </div>
             </div>
         </template>

@@ -3,7 +3,7 @@ import { Head, router } from '@inertiajs/vue3';
 import { computed, onMounted, onUnmounted, ref } from 'vue';
 import SlotPicker from '@/components/game/SlotPicker.vue';
 import { enablePush } from '@/lib/push';
-import type { ActionCard, ChapterEvent, CharacterItem, CharacterMeters, SlotChoice } from '@/types/game';
+import type { ChapterEvent, CharacterItem, CharacterMeters, SlotChoice, TurnCards } from '@/types/game';
 
 const props = defineProps<{
     campaign: { id: number; name: string; status: string };
@@ -21,7 +21,7 @@ const props = defineProps<{
         number: number;
         status: string;
         situation: string;
-        cards: { pre: ActionCard[]; main: ActionCard[]; post: ActionCard[] } | null;
+        cards: TurnCards | null;
         resolves_at: string | null;
     } | null;
     latestChapter: { number: number; kind: string; intent_line: string | null; body: string; events: ChapterEvent[] } | null;
@@ -30,6 +30,9 @@ const props = defineProps<{
 const pre = ref<SlotChoice | null>(null);
 const main = ref<SlotChoice | null>(null);
 const post = ref<SlotChoice | null>(null);
+// One independent request per companion, keyed by companion id — their own
+// beat, never a claim on the player's three slots.
+const companionChoices = ref<Record<number, SlotChoice | null>>({});
 const intentText = ref('');
 const submitting = ref(false);
 const showSheet = ref(false);
@@ -68,8 +71,23 @@ const EVENT_ICONS: Record<string, string> = {
 
 const activeEvent = ref<ChapterEvent | null>(null);
 
-function toggleEvent(event: ChapterEvent) {
-    activeEvent.value = activeEvent.value?.id === event.id ? null : event;
+// The detail card opens where the tapped icon sits, not at a fixed spot
+// below the prose: the chapter article is the positioning context, and the
+// panel's top tracks the clicked button within it.
+const chapterEl = ref<HTMLElement | null>(null);
+const eventPanelTop = ref(0);
+
+function toggleEvent(event: ChapterEvent, e: MouseEvent) {
+    if (activeEvent.value?.id === event.id) {
+        activeEvent.value = null;
+        return;
+    }
+    activeEvent.value = event;
+    const button = e.currentTarget as HTMLElement | null;
+    if (button && chapterEl.value) {
+        const article = chapterEl.value.getBoundingClientRect();
+        eventPanelTop.value = button.getBoundingClientRect().bottom - article.top + 6;
+    }
 }
 
 const eventsById = computed(() => new Map((props.latestChapter?.events ?? []).map((e) => [e.id, e])));
@@ -171,11 +189,13 @@ function submit() {
             pre: pre.value,
             main: main.value,
             post: post.value,
+            companions: companionChoices.value,
             intent_text: intentText.value || null,
         },
         {
             onSuccess: () => {
                 pre.value = main.value = post.value = null;
+                companionChoices.value = {};
                 intentText.value = '';
             },
             onFinish: () => (submitting.value = false),
@@ -311,7 +331,7 @@ const healthPct = computed(() => (props.character.meters.health.current / props.
         </div>
 
         <!-- Latest chapter -->
-        <article v-if="latestChapter" class="rounded-xl border border-sidebar-border/70 p-5 dark:border-sidebar-border">
+        <article v-if="latestChapter" ref="chapterEl" class="relative rounded-xl border border-sidebar-border/70 p-5 dark:border-sidebar-border">
             <p class="mb-1 text-xs tracking-widest text-muted-foreground uppercase">
                 {{ latestChapter.kind === 'prologue' ? 'Prologue' : latestChapter.kind === 'chronicle' ? 'The world shifted' : `Chapter ${latestChapter.number}` }}
             </p>
@@ -322,7 +342,7 @@ const healthPct = computed(() => (props.character.meters.health.current / props.
                 class="mx-0.5 inline-flex h-5 w-5 -translate-y-px items-center justify-center rounded-full align-middle text-[11px] leading-none not-italic transition-transform hover:scale-125"
                 :class="activeEvent?.id === seg.event.id ? 'bg-violet-500/25 ring-1 ring-violet-500' : 'bg-muted'"
                 :title="seg.event.label"
-                @click="toggleEvent(seg.event)"
+                @click="toggleEvent(seg.event, $event)"
             >{{ EVENT_ICONS[seg.event.icon] ?? EVENT_ICONS.beat }}</button><span v-else>{{ seg.text }}</span></template></div>
 
             <div v-if="unanchoredEvents.length" class="mt-4 flex flex-wrap items-center gap-1.5 border-t border-sidebar-border/50 pt-3">
@@ -334,13 +354,17 @@ const healthPct = computed(() => (props.character.meters.health.current / props.
                     class="inline-flex h-6 w-6 items-center justify-center rounded-full text-xs transition-transform hover:scale-110"
                     :class="activeEvent?.id === event.id ? 'bg-violet-500/25 ring-1 ring-violet-500' : 'bg-muted'"
                     :title="event.label"
-                    @click="toggleEvent(event)"
+                    @click="toggleEvent(event, $event)"
                 >
                     {{ EVENT_ICONS[event.icon] ?? EVENT_ICONS.beat }}
                 </button>
             </div>
 
-            <div v-if="activeEvent" class="mt-3 rounded-lg border border-violet-500/30 bg-violet-500/5 p-3 text-sm">
+            <div
+                v-if="activeEvent"
+                class="absolute right-3 left-3 z-10 rounded-lg border border-violet-500/40 bg-popover p-3 text-sm shadow-lg"
+                :style="{ top: `${eventPanelTop}px` }"
+            >
                 <div class="flex items-start justify-between gap-2">
                     <p class="font-medium">
                         {{ EVENT_ICONS[activeEvent.icon] ?? EVENT_ICONS.beat }}
@@ -391,6 +415,21 @@ const healthPct = computed(() => (props.character.meters.health.current / props.
                     :cards="turn.cards.pre"
                     :optional="true"
                 />
+
+                <!-- Each companion carries their own beat: a request costs
+                     none of the player's three slots, and the companion's
+                     own roll decides how it goes. -->
+                <SlotPicker
+                    v-for="companion in turn.cards.companions ?? []"
+                    :key="companion.id"
+                    :model-value="companionChoices[companion.id] ?? null"
+                    :title="companion.name"
+                    hint="a request, not an order — they answer for it"
+                    :cards="companion.cards"
+                    :optional="true"
+                    @update:model-value="(choice) => (companionChoices[companion.id] = choice)"
+                />
+
                 <SlotPicker
                     v-model="main"
                     title="The act"

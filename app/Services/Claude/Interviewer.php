@@ -24,6 +24,7 @@ class Interviewer
         private readonly ClaudeCli $claude,
         private readonly CapabilityClamp $clamp,
         private readonly TurnStarter $starter,
+        private readonly StageBuilder $stage,
     ) {}
 
     public function open(Campaign $campaign): InterviewMessage
@@ -51,8 +52,9 @@ class Interviewer
         // sit inside a database lock, and a failed one falls back to stock
         // prose rather than failing the campaign.
         $prologue = $this->returningPrologue($campaign, $original);
+        $opening = $this->stage->plan($campaign, $original->description);
 
-        DB::transaction(function () use ($campaign, $original, $prologue) {
+        DB::transaction(function () use ($campaign, $original, $prologue, $opening) {
             $meters = $original->meters;
             $meters['health']['current'] = $meters['health']['max'];
             foreach ($meters['tempo'] ?? [] as $name => $pool) {
@@ -94,7 +96,7 @@ class Interviewer
 
             $campaign->update(['status' => 'active', 'started_at' => now()]);
 
-            $this->starter->openFirstTurn($campaign);
+            $this->starter->openFirstTurn($campaign, $opening);
         });
     }
 
@@ -154,7 +156,11 @@ PROMPT);
 
     private function finalize(Campaign $campaign, array $response): void
     {
-        DB::transaction(function () use ($campaign, $response) {
+        // The stage-built opening runs before the transaction (slow CLI call);
+        // null falls back to the zone's spawn templates.
+        $opening = $this->stage->plan($campaign, $response['character']['description'] ?? '');
+
+        DB::transaction(function () use ($campaign, $response, $opening) {
             $sheet = $response['character'];
             $clamped = $this->clamp->clamp($sheet['capabilities'] ?? []);
 
@@ -201,7 +207,7 @@ PROMPT);
 
             $campaign->update(['status' => 'active', 'started_at' => now()]);
 
-            $this->starter->openFirstTurn($campaign);
+            $this->starter->openFirstTurn($campaign, $opening);
         });
     }
 

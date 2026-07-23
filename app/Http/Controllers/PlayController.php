@@ -89,12 +89,15 @@ class PlayController extends Controller
             'post' => ['nullable', 'array'],
             'post.card_id' => ['required_with:post', 'string'],
             'post.modifiers' => ['array'],
+            'companions' => ['nullable', 'array'],
+            'companions.*' => ['nullable', 'array'],
+            'companions.*.card_id' => ['nullable', 'string'],
             'intent_text' => ['nullable', 'string', 'max:280'],
         ]);
 
         $submission = ['intent_text' => $validated['intent_text'] ?? null];
 
-        foreach (TurnSlot::cases() as $slot) {
+        foreach (TurnSlot::playerSlots() as $slot) {
             $choice = $validated[$slot->value] ?? null;
             if ($choice === null) {
                 continue;
@@ -103,6 +106,11 @@ class PlayController extends Controller
                 'card_id' => $choice['card_id'],
                 'modifiers' => $this->validateChoice($turn, $slot, $choice),
             ];
+        }
+
+        $companions = $this->validateCompanionChoices($turn, $validated['companions'] ?? []);
+        if ($companions !== []) {
+            $submission['companions'] = $companions;
         }
 
         $turn->update([
@@ -164,6 +172,38 @@ class PlayController extends Controller
             $chosen = $choice['modifiers'][$modifier['key']] ?? null;
             $valid = collect($modifier['options'])->pluck('value');
             $clean[$modifier['key']] = $valid->contains($chosen) ? $chosen : $valid->first();
+        }
+
+        return $clean;
+    }
+
+    /**
+     * Companion requests are validated per companion: each key must be a
+     * companion the engine listed on the turn, each card one offered for
+     * that specific companion.
+     *
+     * @return array<string, array{card_id: string, modifiers: array}>
+     */
+    private function validateCompanionChoices(Turn $turn, array $choices): array
+    {
+        $offered = collect($turn->cards['companions'] ?? [])->keyBy('id');
+        $clean = [];
+
+        foreach ($choices as $companionId => $choice) {
+            if ($choice === null || ($choice['card_id'] ?? null) === null) {
+                continue;
+            }
+
+            $entry = $offered->get((int) $companionId);
+            $card = $entry === null ? null : collect($entry['cards'])->firstWhere('id', $choice['card_id']);
+
+            if ($card === null) {
+                throw ValidationException::withMessages([
+                    'companions' => 'That request was not among the ones offered.',
+                ]);
+            }
+
+            $clean[(string) $entry['id']] = ['card_id' => $card['id'], 'modifiers' => []];
         }
 
         return $clean;
