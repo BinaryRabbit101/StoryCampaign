@@ -12,15 +12,20 @@ interface CampaignRow {
     ended_at: string | null;
 }
 
-defineProps<{ campaigns: CampaignRow[] }>();
+defineProps<{ campaigns: CampaignRow[]; characters: { id: number; name: string; from: string }[] }>();
 
 const newName = ref('');
+const characterId = ref<number | ''>('');
 const creating = ref(false);
 
 function create() {
     if (!newName.value.trim()) return;
     creating.value = true;
-    router.post('/campaigns', { name: newName.value }, { onFinish: () => (creating.value = false) });
+    router.post(
+        '/campaigns',
+        { name: newName.value, character_id: characterId.value === '' ? null : characterId.value },
+        { onFinish: () => (creating.value = false) },
+    );
 }
 
 function statusLabel(status: string): string {
@@ -44,23 +49,38 @@ function statusLabel(status: string): string {
         <div class="rounded-xl border border-sidebar-border/70 p-5 dark:border-sidebar-border">
             <h2 class="mb-1 text-lg font-semibold">Begin a new tale</h2>
             <p class="mb-4 text-sm text-muted-foreground">
-                A campaign starts with an interview: describe who you are, and the world will take shape around you.
+                {{
+                    characterId === ''
+                        ? 'A campaign starts with an interview: describe who you are, and the world will take shape around you.'
+                        : 'A returning hero skips the interview — their story simply continues into a new book.'
+                }}
             </p>
-            <form class="flex gap-2" @submit.prevent="create">
+            <form class="flex flex-col gap-2" @submit.prevent="create">
                 <input
                     v-model="newName"
                     type="text"
                     maxlength="80"
                     placeholder="Name this campaign…"
-                    class="flex-1 rounded-md border border-input bg-background px-3 py-2 text-sm"
+                    class="rounded-md border border-input bg-background px-3 py-2 text-sm"
                 />
-                <button
-                    type="submit"
-                    :disabled="creating || !newName.trim()"
-                    class="rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground disabled:opacity-50"
-                >
-                    Begin
-                </button>
+                <div class="flex gap-2">
+                    <select
+                        v-if="characters.length"
+                        v-model="characterId"
+                        class="flex-1 rounded-md border border-input bg-background px-3 py-2 text-sm"
+                    >
+                        <option value="">A new soul — begin with the interview</option>
+                        <option v-for="c in characters" :key="c.id" :value="c.id">Return as {{ c.name }} (from “{{ c.from }}”)</option>
+                    </select>
+                    <button
+                        type="submit"
+                        :disabled="creating || !newName.trim()"
+                        class="rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground disabled:opacity-50"
+                        :class="{ 'flex-1': !characters.length }"
+                    >
+                        {{ creating ? 'Opening…' : 'Begin' }}
+                    </button>
+                </div>
             </form>
         </div>
 

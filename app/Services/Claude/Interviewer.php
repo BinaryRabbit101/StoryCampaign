@@ -38,6 +38,91 @@ class Interviewer
         ]);
     }
 
+    /**
+     * Begin a campaign with a hero from an earlier tale. The sheet carries
+     * over exactly — capabilities (growth included), constraints, items,
+     * meter maxima — with pools refilled; Claude writes a returning
+     * prologue instead of running the creation interview. No new power
+     * enters the world through this door.
+     */
+    public function returnCharacter(Campaign $campaign, Character $original): void
+    {
+        // Claude runs before the transaction: a slow CLI call must never
+        // sit inside a database lock, and a failed one falls back to stock
+        // prose rather than failing the campaign.
+        $prologue = $this->returningPrologue($campaign, $original);
+
+        DB::transaction(function () use ($campaign, $original, $prologue) {
+            $meters = $original->meters;
+            $meters['health']['current'] = $meters['health']['max'];
+            foreach ($meters['tempo'] ?? [] as $name => $pool) {
+                $meters['tempo'][$name]['current'] = $pool['max'];
+            }
+
+            $character = Character::create([
+                'campaign_id' => $campaign->id,
+                'name' => $original->name,
+                'description' => $original->description,
+                'meters' => $meters,
+                'status' => 'alive',
+                'meters_regenerated_at' => now(),
+            ]);
+
+            foreach ($original->capabilities as $capability) {
+                $character->capabilities()->create($capability->only(['capability', 'magnitude', 'grade', 'scope', 'source']));
+            }
+
+            foreach ($original->constraints as $constraint) {
+                $character->constraints()->create($constraint->only(['name', 'params', 'coupled_capability', 'source']));
+            }
+
+            foreach ($original->items as $item) {
+                $character->items()->attach($item->id, [
+                    'equipped' => (bool) $item->pivot->equipped,
+                    'charges' => $item->pivot->charges,
+                ]);
+            }
+
+            Chapter::create([
+                'campaign_id' => $campaign->id,
+                'turn_id' => null,
+                'number' => $campaign->nextChapterNumber(),
+                'kind' => 'prologue',
+                'intent_line' => null,
+                'body' => $prologue,
+            ]);
+
+            $campaign->update(['status' => 'active', 'started_at' => now()]);
+
+            $this->starter->openFirstTurn($campaign);
+        });
+    }
+
+    private function returningPrologue(Campaign $campaign, Character $original): string
+    {
+        $previous = $original->campaign;
+        $lastChapter = $previous?->chapters()->reorder('number', 'desc')->first();
+        $closing = $lastChapter === null ? '(their earlier tale is unrecorded)' : mb_substr($lastChapter->plainBody(), -800);
+
+        try {
+            return $this->claude->prompt(<<<PROMPT
+A hero returns for a new tale in a living-world RPG. Write a 200-400 word prologue in third-person past tense: {$original->name} steps out of an earlier story and into this new one, "{$campaign->name}". Carry the weight of where their last tale left off, but open cleanly — a new book, not a recap. No mechanics language.
+
+## The character
+{$original->name}: {$original->description}
+
+## Where their last tale ("{$previous?->name}") left them
+{$closing}
+
+Respond with ONLY the prologue prose.
+PROMPT);
+        } catch (\Throwable $e) {
+            report($e);
+
+            return "{$original->name} stepped once more into the waiting world. What was learned in the last tale came along; what was lost stayed lost. Somewhere ahead, a new story was already making room.";
+        }
+    }
+
     /** Handle one player message; may complete the interview and start the campaign. */
     public function converse(Campaign $campaign, string $playerMessage): InterviewMessage
     {

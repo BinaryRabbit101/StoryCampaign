@@ -11,6 +11,7 @@ use App\Models\Campaign;
 use App\Models\Character;
 use App\Models\Turn;
 use App\Models\User;
+use App\Services\Claude\ClaudeCli;
 use App\Services\Claude\Narrator;
 use App\Services\TurnStarter;
 use Database\Seeders\WorldSeeder;
@@ -300,6 +301,38 @@ class GameEngineTest extends TestCase
             'body' => 'She climbed. [[e1]] She struck. [[e2]] Blood answered. [[e3]]',
         ]);
         $this->assertSame('She climbed. She struck. Blood answered.', $chapter->plainBody());
+    }
+
+    public function test_a_new_campaign_can_begin_with_a_returning_character()
+    {
+        $campaign = $this->createCatCampaign();
+        $original = $campaign->character;
+        $original->update(['meters' => array_replace_recursive($original->meters, ['health' => ['current' => 3]])]);
+
+        $this->mock(ClaudeCli::class)
+            ->shouldReceive('prompt')->andReturn('The Cat stepped into a new tale.');
+
+        $this->actingAs($campaign->user)
+            ->post('/campaigns', ['name' => 'Second Tale', 'character_id' => $original->id])
+            ->assertRedirect();
+
+        $second = $campaign->user->campaigns()->where('name', 'Second Tale')->first();
+        $returned = $second->character;
+
+        // Active immediately — no interview — with the sheet carried exactly
+        // and the pools refilled; the world is opened and turn 1 is waiting.
+        $this->assertSame('active', $second->status);
+        $this->assertSame($original->name, $returned->name);
+        $this->assertSame($original->capabilities()->count(), $returned->capabilities()->count());
+        $this->assertSame($returned->meters['health']['max'], $returned->meters['health']['current']);
+        $this->assertSame('prologue', $second->chapters()->first()->kind);
+        $this->assertSame(1, $second->currentTurn->number);
+
+        // A stranger's character can never be returned.
+        $stranger = User::factory()->create();
+        $this->actingAs($stranger)
+            ->post('/campaigns', ['name' => 'Theft', 'character_id' => $original->id])
+            ->assertNotFound();
     }
 
     public function test_widget_endpoint_requires_a_valid_token()
