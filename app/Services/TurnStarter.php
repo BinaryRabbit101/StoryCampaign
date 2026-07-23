@@ -51,16 +51,29 @@ class TurnStarter
             ]));
 
         $character = $campaign->character;
-        $cards = $this->composer->compose($character, $scene->fresh());
+        $scene = $scene->fresh();
+        $cards = $this->composer->compose($character, $scene);
         $health = $character->meters['health'];
+
+        // Ground every card the player will see: name who and what is
+        // actually present, so no option arrives narratively unannounced.
+        $parts = ["You stand at the edge of {$zone->name}.", $zone->description];
+        $present = $scene->activeActors()->pluck('name');
+        if ($present->isNotEmpty()) {
+            $parts[] = 'Here with you: '.$present->join(', ').'.';
+        }
+        $features = $scene->allFeatures()->pluck('name')->take(6);
+        if ($features->isNotEmpty()) {
+            $parts[] = 'Around you: '.$features->join(', ').'.';
+        }
+        $parts[] = "Health {$health['current']}/{$health['max']}. The world is waiting for your first move.";
 
         return Turn::create([
             'campaign_id' => $campaign->id,
             'scene_id' => $scene->id,
             'number' => 1,
             'status' => Turn::STATUS_AWAITING,
-            'situation' => "You stand at the edge of {$zone->name}. {$zone->description} "
-                ."Health {$health['current']}/{$health['max']}. The world is waiting for your first move.",
+            'situation' => implode(' ', $parts),
             'cards' => $cards,
         ]);
     }

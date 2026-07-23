@@ -62,6 +62,10 @@ class Narrator
             })->join("\n");
 
         $reaction = collect($resolution['scene_reaction'] ?? [])->map(fn ($f) => "- {$f}")->join("\n");
+        if (isset($resolution['new_threat']['name'])) {
+            $reaction .= ($reaction === '' ? '' : "\n")
+                ."- {$resolution['new_threat']['name']} arrived mid-scene — introduce this newcomer before the chapter ends.";
+        }
         $intent = $submission['intent_text'] ?? null;
 
         return <<<PROMPT

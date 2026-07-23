@@ -549,6 +549,20 @@ class TurnResolver
         $parts[] = $enemies->isEmpty()
             ? 'No open threat stands against you.'
             : 'Facing you: '.$enemies->join(', ').'.';
+
+        // Ground the offered options: name the bystanders and features the
+        // cards will reference, so nothing appears narratively unannounced.
+        $others = $scene->actors()->where('status', 'active')->where('kind', '!=', 'enemy')->pluck('name');
+        if ($others->isNotEmpty()) {
+            $parts[] = 'Also here: '.$others->join(', ').'.';
+        }
+        $features = $scene->allFeatures()
+            ->reject(fn ($f) => $f->state['destroyed'] ?? false)
+            ->pluck('name')->take(6);
+        if ($features->isNotEmpty()) {
+            $parts[] = 'Around you: '.$features->join(', ').'.';
+        }
+
         $parts[] = "Health {$health['current']}/{$health['max']}.";
         if ($scene->state['elevated'] ?? false) {
             $parts[] = 'You hold the high ground.';
