@@ -3,7 +3,7 @@ import { Head, router } from '@inertiajs/vue3';
 import { computed, onMounted, onUnmounted, ref } from 'vue';
 import SlotPicker from '@/components/game/SlotPicker.vue';
 import { enablePush } from '@/lib/push';
-import type { ActionCard, CharacterMeters, SlotChoice } from '@/types/game';
+import type { ActionCard, ChapterEvent, CharacterItem, CharacterMeters, SlotChoice } from '@/types/game';
 
 const props = defineProps<{
     campaign: { id: number; name: string; status: string };
@@ -12,8 +12,9 @@ const props = defineProps<{
         description: string;
         status: string;
         meters: CharacterMeters;
-        capabilities: { capability: string; magnitude: number | null; grade: string | null; scope: Record<string, string> | null }[];
+        capabilities: { capability: string; magnitude: number | null; grade: string | null; scope: Record<string, string> | null; source: string | null }[];
         constraints: { name: string; params: Record<string, unknown> | null; coupled_capability: string | null }[];
+        items: CharacterItem[];
     };
     turn: {
         id: number;
@@ -23,7 +24,7 @@ const props = defineProps<{
         cards: { pre: ActionCard[]; main: ActionCard[]; post: ActionCard[] } | null;
         resolves_at: string | null;
     } | null;
-    latestChapter: { number: number; kind: string; intent_line: string | null; body: string } | null;
+    latestChapter: { number: number; kind: string; intent_line: string | null; body: string; events: ChapterEvent[] } | null;
 }>();
 
 const pre = ref<SlotChoice | null>(null);
@@ -43,6 +44,60 @@ const locked = computed(() => props.turn !== null && props.turn.status !== 'awai
 // stays backstage. It surfaces only when no chapter carries the lead-in
 // (fresh from the prologue, or narration still catching up).
 const showSituation = computed(() => props.latestChapter?.kind !== 'chapter');
+
+// ---- Event anchors: [[eN]] tokens in the prose become tappable icons. ----
+
+const EVENT_ICONS: Record<string, string> = {
+    attack: '⚔️',
+    injury: '🩸',
+    heal: '✚',
+    highground: '⛰️',
+    loot: '🪙',
+    stealth: '🌘',
+    parley: '💬',
+    force: '💥',
+    move: '🏃',
+    tempo: '⏳',
+    gambit: '✨',
+    threat: '⚠️',
+    defense: '🛡️',
+    skipped: '⊘',
+    beat: '✦',
+};
+
+const activeEvent = ref<ChapterEvent | null>(null);
+
+function toggleEvent(event: ChapterEvent) {
+    activeEvent.value = activeEvent.value?.id === event.id ? null : event;
+}
+
+const eventsById = computed(() => new Map((props.latestChapter?.events ?? []).map((e) => [e.id, e])));
+
+// The chapter body split around anchor tokens; unknown tokens vanish silently.
+const bodySegments = computed(() => {
+    const body = props.latestChapter?.body ?? '';
+    return body.split(/(\[\[e\d+\]\])/).map((part) => {
+        const match = part.match(/^\[\[(e\d+)\]\]$/);
+        if (!match) return { text: part, event: null };
+        return { text: '', event: eventsById.value.get(match[1]) ?? null };
+    });
+});
+
+// Events the narrator failed to anchor (or pre-feature chapters): still shown,
+// as a row of moments under the chapter, so no data is ever lost.
+const unanchoredEvents = computed(() => {
+    const body = props.latestChapter?.body ?? '';
+    return (props.latestChapter?.events ?? []).filter((e) => !body.includes(`[[${e.id}]]`));
+});
+
+const degreeClass = (event: ChapterEvent) =>
+    event.skipped
+        ? 'text-muted-foreground'
+        : event.degree === 'failure'
+          ? 'text-red-600 dark:text-red-400'
+          : event.degree === 'partial'
+            ? 'text-amber-600 dark:text-amber-400'
+            : 'text-emerald-600 dark:text-emerald-400';
 
 // Staged, visible resource commitment: the running cost of the whole chain.
 const runningCost = computed(() => {
@@ -177,24 +232,65 @@ const healthPct = computed(() => (props.character.meters.health.current / props.
                 />
             </div>
 
-            <div v-if="showSheet" class="mt-3 space-y-2 border-t border-sidebar-border/50 pt-3 text-sm">
+            <div v-if="showSheet" class="mt-3 space-y-3 border-t border-sidebar-border/50 pt-3 text-sm">
                 <p class="text-muted-foreground italic">{{ character.description }}</p>
-                <div class="flex flex-wrap gap-1">
-                    <span
-                        v-for="c in character.capabilities"
-                        :key="c.capability"
-                        class="rounded-full bg-emerald-500/10 px-2 py-0.5 text-xs text-emerald-700 dark:text-emerald-400"
-                    >
-                        {{ capabilityLabel(c) }}
-                    </span>
-                    <span
-                        v-for="c in character.constraints"
-                        :key="c.name"
-                        class="rounded-full bg-red-500/10 px-2 py-0.5 text-xs text-red-700 dark:text-red-400"
-                    >
-                        {{ c.name.replace('_', ' ') }}
-                    </span>
+
+                <div>
+                    <p class="mb-1 text-[10px] tracking-widest text-muted-foreground uppercase">Abilities</p>
+                    <div class="flex flex-wrap gap-1">
+                        <span
+                            v-for="c in character.capabilities"
+                            :key="c.capability"
+                            class="rounded-full bg-emerald-500/10 px-2 py-0.5 text-xs text-emerald-700 dark:text-emerald-400"
+                            :title="c.source ? `source: ${c.source}` : undefined"
+                        >
+                            {{ capabilityLabel(c) }}
+                        </span>
+                    </div>
                 </div>
+
+                <div v-if="character.constraints.length">
+                    <p class="mb-1 text-[10px] tracking-widest text-muted-foreground uppercase">Burdens</p>
+                    <div class="flex flex-wrap gap-1">
+                        <span
+                            v-for="c in character.constraints"
+                            :key="c.name"
+                            class="rounded-full bg-red-500/10 px-2 py-0.5 text-xs text-red-700 dark:text-red-400"
+                        >
+                            {{ c.name.replace('_', ' ') }}
+                        </span>
+                    </div>
+                </div>
+
+                <div>
+                    <p class="mb-1 text-[10px] tracking-widest text-muted-foreground uppercase">Carried</p>
+                    <p v-if="!character.items.length" class="text-xs text-muted-foreground italic">Nothing of note — yet.</p>
+                    <div v-else class="space-y-1.5">
+                        <div v-for="item in character.items" :key="item.name" class="rounded-md border border-sidebar-border/50 p-2 text-xs">
+                            <div class="flex items-center justify-between gap-2">
+                                <span class="font-medium">{{ item.name }}</span>
+                                <span class="flex items-center gap-1.5">
+                                    <span v-if="item.charges !== null" class="text-muted-foreground">{{ item.charges }} charges</span>
+                                    <span
+                                        v-if="item.equipped"
+                                        class="rounded-full bg-violet-500/10 px-2 py-0.5 text-violet-600 dark:text-violet-400"
+                                    >equipped</span>
+                                </span>
+                            </div>
+                            <p v-if="item.description" class="mt-0.5 text-muted-foreground">{{ item.description }}</p>
+                            <div v-if="item.grants?.length" class="mt-1 flex flex-wrap gap-1">
+                                <span
+                                    v-for="g in item.grants"
+                                    :key="g.capability"
+                                    class="rounded-full bg-emerald-500/10 px-2 py-0.5 text-emerald-700 dark:text-emerald-400"
+                                >
+                                    {{ g.capability.replace('_', ' ') }}<template v-if="g.magnitude !== null">({{ g.magnitude }})</template>
+                                </span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
                 <div class="flex gap-3 pt-1 text-xs">
                     <button class="text-muted-foreground underline" @click="showGrowth = !showGrowth">ask to grow</button>
                     <button class="text-muted-foreground underline" @click="router.visit(`/campaigns/${campaign.id}/book`)">read the book so far</button>
@@ -219,7 +315,48 @@ const healthPct = computed(() => (props.character.meters.health.current / props.
                 {{ latestChapter.kind === 'prologue' ? 'Prologue' : latestChapter.kind === 'chronicle' ? 'The world shifted' : `Chapter ${latestChapter.number}` }}
             </p>
             <p v-if="latestChapter.intent_line" class="mb-2 text-sm text-muted-foreground italic">{{ latestChapter.intent_line }}</p>
-            <div class="space-y-3 font-serif leading-relaxed whitespace-pre-wrap">{{ latestChapter.body }}</div>
+            <div class="space-y-3 font-serif leading-relaxed whitespace-pre-wrap"><template v-for="(seg, i) in bodySegments" :key="i"><button
+                v-if="seg.event"
+                type="button"
+                class="mx-0.5 inline-flex h-5 w-5 -translate-y-px items-center justify-center rounded-full align-middle text-[11px] leading-none not-italic transition-transform hover:scale-125"
+                :class="activeEvent?.id === seg.event.id ? 'bg-violet-500/25 ring-1 ring-violet-500' : 'bg-muted'"
+                :title="seg.event.label"
+                @click="toggleEvent(seg.event)"
+            >{{ EVENT_ICONS[seg.event.icon] ?? EVENT_ICONS.beat }}</button><span v-else>{{ seg.text }}</span></template></div>
+
+            <div v-if="unanchoredEvents.length" class="mt-4 flex flex-wrap items-center gap-1.5 border-t border-sidebar-border/50 pt-3">
+                <span class="text-xs tracking-widest text-muted-foreground uppercase">Moments of record</span>
+                <button
+                    v-for="event in unanchoredEvents"
+                    :key="event.id"
+                    type="button"
+                    class="inline-flex h-6 w-6 items-center justify-center rounded-full text-xs transition-transform hover:scale-110"
+                    :class="activeEvent?.id === event.id ? 'bg-violet-500/25 ring-1 ring-violet-500' : 'bg-muted'"
+                    :title="event.label"
+                    @click="toggleEvent(event)"
+                >
+                    {{ EVENT_ICONS[event.icon] ?? EVENT_ICONS.beat }}
+                </button>
+            </div>
+
+            <div v-if="activeEvent" class="mt-3 rounded-lg border border-violet-500/30 bg-violet-500/5 p-3 text-sm">
+                <div class="flex items-start justify-between gap-2">
+                    <p class="font-medium">
+                        {{ EVENT_ICONS[activeEvent.icon] ?? EVENT_ICONS.beat }}
+                        <span :class="degreeClass(activeEvent)">{{ activeEvent.label }}</span>
+                        <span v-if="activeEvent.slot" class="ml-1 rounded-full bg-muted px-2 py-0.5 text-[10px] tracking-wide text-muted-foreground uppercase">{{ activeEvent.slot }}</span>
+                    </p>
+                    <button class="text-xs text-muted-foreground hover:text-foreground" @click="activeEvent = null">✕</button>
+                </div>
+                <ul class="mt-1.5 space-y-0.5 text-muted-foreground">
+                    <li v-for="fact in activeEvent.facts" :key="fact">{{ fact }}</li>
+                </ul>
+                <p v-if="activeEvent.roll" class="mt-1.5 font-mono text-xs text-muted-foreground">
+                    d20 {{ activeEvent.roll.roll
+                    }}<template v-if="activeEvent.roll.total !== activeEvent.roll.roll"> + {{ activeEvent.roll.total - activeEvent.roll.roll }} = {{ activeEvent.roll.total }}</template>
+                    vs {{ activeEvent.roll.difficulty }}
+                </p>
+            </div>
         </article>
 
         <!-- Situation + form / lock -->

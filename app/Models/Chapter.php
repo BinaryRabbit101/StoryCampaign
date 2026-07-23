@@ -22,4 +22,14 @@ class Chapter extends Model
     {
         return $this->belongsTo(Turn::class);
     }
+
+    /**
+     * Body with the [[eN]] event-anchor tokens removed — for the book, push
+     * notifications, and any prose fed back to Claude. Only the play page
+     * renders the raw body, where the anchors become tappable icons.
+     */
+    public function plainBody(): string
+    {
+        return preg_replace('/\s*\[\[e\d+\]\]/', '', $this->body);
+    }
 }

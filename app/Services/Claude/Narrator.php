@@ -2,6 +2,7 @@
 
 namespace App\Services\Claude;
 
+use App\Game\Engine\ChapterEvents;
 use App\Models\Chapter;
 use App\Models\Turn;
 use App\Notifications\TurnReadyNotification;
@@ -50,21 +51,14 @@ class Narrator
 
         $previousChapters = $campaign->chapters()->reorder('number', 'desc')->limit(2)->get()
             ->reverse()
-            ->map(fn (Chapter $c) => "### Chapter {$c->number}\n".mb_substr($c->body, -1200))
+            ->map(fn (Chapter $c) => "### Chapter {$c->number}\n".mb_substr($c->plainBody(), -1200))
             ->join("\n\n");
 
-        $beats = collect($resolution['beats'] ?? [])
-            ->map(function (array $beat) {
-                $status = $beat['skipped'] ? 'DID NOT HAPPEN' : strtoupper($beat['degree']);
-                $facts = implode(' ', $beat['facts']);
-
-                return "- [{$beat['slot']}] {$beat['verb']} → {$status}. {$facts}";
-            })->join("\n");
-
-        $reaction = collect($resolution['scene_reaction'] ?? [])->map(fn ($f) => "- {$f}")->join("\n");
+        $events = collect(ChapterEvents::for($turn));
+        $beats = $events->filter(fn ($e) => $e['verb'] !== null)->map(ChapterEvents::promptLine(...))->join("\n");
+        $reaction = $events->filter(fn ($e) => $e['verb'] === null)->map(ChapterEvents::promptLine(...))->join("\n");
         if (isset($resolution['new_threat']['name'])) {
-            $reaction .= ($reaction === '' ? '' : "\n")
-                ."- {$resolution['new_threat']['name']} arrived mid-scene — introduce this newcomer before the chapter ends.";
+            $reaction .= "\n(Introduce this newcomer before the chapter ends.)";
         }
         $intent = $submission['intent_text'] ?? null;
 
@@ -77,6 +71,8 @@ class Narrator
 
         return <<<PROMPT
 You are the narrator of a living-world RPG. Write the next chapter of this campaign as flowing third-person past-tense prose, weaving the ENGINE-RESOLVED beats below into one continuous vignette. You decide how things happened, never whether: every fact listed is fixed. Do not mention dice, rolls, cards, slots, meters, or any mechanics.
+
+Each listed event carries a bracketed token like [[e1]]. Copy every token into the chapter VERBATIM, each exactly once, placed immediately after the sentence where that event lands in the prose. The tokens are invisible anchors in the reader's edition — never mention them, never describe them, never invent new ones.
 
 ## Character
 {$character->name}: {$character->description}

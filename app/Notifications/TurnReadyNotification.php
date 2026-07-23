@@ -34,7 +34,7 @@ class TurnReadyNotification extends Notification
     {
         return (new WebPushMessage)
             ->title($this->campaign->character?->name.' — the story moved')
-            ->body(Str::limit($this->chapter->intent_line ?? $this->chapter->body, 140))
+            ->body(Str::limit($this->chapter->intent_line ?? $this->chapter->plainBody(), 140))
             ->icon('/icons/icon-192.png')
             ->badge('/icons/badge-72.png')
             ->tag('campaign-'.$this->campaign->id)

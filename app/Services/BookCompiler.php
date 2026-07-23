@@ -25,7 +25,7 @@ class BookCompiler
                 'number' => $chapter->number,
                 'kind' => $chapter->kind,
                 'intent_line' => $chapter->intent_line,
-                'body' => $chapter->body,
+                'body' => $chapter->plainBody(),
             ])->values()->all();
 
         return [
@@ -47,7 +47,7 @@ class BookCompiler
     {
         if ($early && $withCoda) {
             $lastChapters = $campaign->chapters()->reorder('number', 'desc')->limit(2)->get()->reverse()
-                ->map(fn ($c) => mb_substr($c->body, -1500))->join("\n\n");
+                ->map(fn ($c) => mb_substr($c->plainBody(), -1500))->join("\n\n");
             $name = $campaign->character?->name ?? 'the wanderer';
 
             $coda = $this->claude->prompt(<<<PROMPT
@@ -86,8 +86,8 @@ PROMPT);
     private function titleFlourish(Campaign $campaign): array
     {
         try {
-            $opening = Str::limit($campaign->chapters()->first()?->body ?? '', 800);
-            $closing = Str::limit($campaign->chapters()->reorder('number', 'desc')->first()?->body ?? '', 800);
+            $opening = Str::limit($campaign->chapters()->first()?->plainBody() ?? '', 800);
+            $closing = Str::limit($campaign->chapters()->reorder('number', 'desc')->first()?->plainBody() ?? '', 800);
             $name = $campaign->character?->name ?? $campaign->name;
 
             return $this->claude->promptForJson(<<<PROMPT

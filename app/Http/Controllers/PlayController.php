@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers;
 
+use App\Game\Engine\ChapterEvents;
 use App\Game\Engine\TurnResolver;
 use App\Game\TurnSlot;
 use App\Models\Campaign;
@@ -25,8 +26,9 @@ class PlayController extends Controller
         }
 
         $turn = $campaign->currentTurn;
-        $character = $campaign->character->load(['capabilities', 'constraints']);
+        $character = $campaign->character->load(['capabilities', 'constraints', 'items']);
         $latestChapter = $campaign->chapters()->reorder('number', 'desc')->first();
+        $chapterTurn = $latestChapter?->turn;
 
         $resolvesAt = $turn?->status === Turn::STATUS_LOCKED && $turn->submitted_at !== null
             ? $turn->submitted_at->addMinutes((int) config('game.turn_cadence_minutes'))->toIso8601String()
@@ -39,8 +41,16 @@ class PlayController extends Controller
                 'description' => $character->description,
                 'status' => $character->status,
                 'meters' => $character->meters,
-                'capabilities' => $character->capabilities->map(fn ($c) => $c->only(['capability', 'magnitude', 'grade', 'scope'])),
+                'capabilities' => $character->capabilities->map(fn ($c) => $c->only(['capability', 'magnitude', 'grade', 'scope', 'source'])),
                 'constraints' => $character->constraints->map(fn ($c) => $c->only(['name', 'params', 'coupled_capability'])),
+                'items' => $character->items->map(fn ($i) => [
+                    'name' => $i->name,
+                    'description' => $i->description,
+                    'power' => $i->power,
+                    'grants' => $i->grants,
+                    'equipped' => (bool) $i->pivot->equipped,
+                    'charges' => $i->pivot->charges,
+                ]),
             ],
             'turn' => $turn === null ? null : [
                 'id' => $turn->id,
@@ -50,7 +60,10 @@ class PlayController extends Controller
                 'cards' => $turn->isOpen() ? $turn->cards : null,
                 'resolves_at' => $resolvesAt,
             ],
-            'latestChapter' => $latestChapter?->only(['number', 'kind', 'intent_line', 'body']),
+            'latestChapter' => $latestChapter === null ? null : [
+                ...$latestChapter->only(['number', 'kind', 'intent_line', 'body']),
+                'events' => $chapterTurn === null ? [] : ChapterEvents::for($chapterTurn),
+            ],
         ]);
     }
 

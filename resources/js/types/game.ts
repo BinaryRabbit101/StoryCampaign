@@ -42,3 +42,24 @@ export interface CharacterMeters {
     health: HealthMeter;
     tempo: Record<string, { current: number; max: number }>;
 }
+
+export interface ChapterEvent {
+    id: string;
+    icon: string;
+    label: string;
+    slot: string | null;
+    verb: string | null;
+    degree: string | null;
+    skipped: boolean;
+    facts: string[];
+    roll: { roll: number; total: number; difficulty: number } | null;
+}
+
+export interface CharacterItem {
+    name: string;
+    description: string;
+    power: number;
+    grants: { capability: string; magnitude: number | null; grade?: string | null }[] | null;
+    equipped: boolean;
+    charges: number | null;
+}

@@ -3,6 +3,7 @@
 namespace Tests\Feature;
 
 use App\Game\Engine\CardComposer;
+use App\Game\Engine\ChapterEvents;
 use App\Game\Engine\TurnResolver;
 use App\Game\Meters;
 use App\Models\Actor;
@@ -244,6 +245,35 @@ class GameEngineTest extends TestCase
             ->assertInertia(fn ($page) => $page
                 ->where('latestChapter.number', 2)
                 ->where('latestChapter.kind', 'chapter'));
+    }
+
+    public function test_chapter_events_derive_from_resolution_and_anchors_strip_from_prose()
+    {
+        $campaign = $this->createCatCampaign();
+        $turn = app(TurnStarter::class)->openFirstTurn($campaign);
+        $turn->update(['resolution' => [
+            'beats' => [
+                ['slot' => 'pre', 'verb' => 'ascend', 'target' => null, 'degree' => 'success', 'roll' => 14, 'total' => 16, 'difficulty' => 10, 'facts' => ['They gained the height.'], 'skipped' => false],
+                ['slot' => 'main', 'verb' => 'strike', 'target' => null, 'degree' => 'strong', 'roll' => 18, 'total' => 20, 'difficulty' => 10, 'facts' => ['The blow felled the tough.'], 'skipped' => false],
+            ],
+            'scene_reaction' => ['A cutpurse answered and drew blood (2 damage).'],
+            'new_threat' => null,
+        ]]);
+
+        $events = ChapterEvents::for($turn->fresh());
+
+        $this->assertSame(['e1', 'e2', 'e3'], array_column($events, 'id'));
+        $this->assertSame(['highground', 'attack', 'injury'], array_column($events, 'icon'));
+        $this->assertSame('Wounded — 2 damage taken', $events[2]['label']);
+        $this->assertSame(['roll' => 18, 'total' => 20, 'difficulty' => 10], $events[1]['roll']);
+
+        // The anchors live only in the play page's edition; every other
+        // consumer (book, push, prompts) reads the plain body.
+        $chapter = $campaign->chapters()->create([
+            'turn_id' => $turn->id, 'number' => 1, 'kind' => 'chapter',
+            'body' => 'She climbed. [[e1]] She struck. [[e2]] Blood answered. [[e3]]',
+        ]);
+        $this->assertSame('She climbed. She struck. Blood answered.', $chapter->plainBody());
     }
 
     public function test_widget_endpoint_requires_a_valid_token()
