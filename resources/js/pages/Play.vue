@@ -61,6 +61,7 @@ const EVENT_ICONS: Record<string, string> = {
     gambit: '✨',
     threat: '⚠️',
     defense: '🛡️',
+    ally: '🤝',
     skipped: '⊘',
     beat: '✦',
 };

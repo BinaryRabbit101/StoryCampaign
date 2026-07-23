@@ -68,6 +68,7 @@ class Narrator
         $nextTurn = $campaign->turns()->where('status', Turn::STATUS_AWAITING)->orderByDesc('number')->first();
         $aftermath = $nextTurn === null ? 'Unknown — end where the beats leave off.'
             : trim(preg_replace('/\s*Health \d+\/\d+\./', '', $nextTurn->situation));
+        $stage = $campaign->stageBrief() ?: '(none set — let the tale find its own direction)';
 
         return <<<PROMPT
 You are the narrator of a living-world RPG. Write the next chapter of this campaign as flowing third-person past-tense prose, weaving the ENGINE-RESOLVED beats below into one continuous vignette. You decide how things happened, never whether: every fact listed is fixed. Do not mention dice, rolls, cards, slots, meters, or any mechanics.
@@ -76,6 +77,9 @@ Each listed event carries a bracketed token like [[e1]]. Copy every token into t
 
 ## Character
 {$character->name}: {$character->description}
+
+## The stage the player set (color and direction only — never force the goal closed; the player decides when it is met)
+{$stage}
 
 ## Recent chapters (for continuity)
 {$previousChapters}

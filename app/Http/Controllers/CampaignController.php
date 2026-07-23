@@ -4,6 +4,7 @@ namespace App\Http\Controllers;
 
 use App\Models\Campaign;
 use App\Models\Character;
+use App\Models\Zone;
 use App\Services\BookCompiler;
 use App\Services\Claude\Interviewer;
 use Illuminate\Http\RedirectResponse;
@@ -40,7 +41,11 @@ class CampaignController extends Controller
                 'from' => $c->title ?? $c->name,
             ])->values();
 
-        return Inertia::render('Campaigns/Index', ['campaigns' => $campaigns, 'characters' => $characters]);
+        return Inertia::render('Campaigns/Index', [
+            'campaigns' => $campaigns,
+            'characters' => $characters,
+            'zones' => Zone::orderBy('id')->get()->map(fn (Zone $z) => ['id' => $z->id, 'name' => $z->name]),
+        ]);
     }
 
     public function store(Request $request, Interviewer $interviewer): RedirectResponse
@@ -48,6 +53,9 @@ class CampaignController extends Controller
         $validated = $request->validate([
             'name' => ['required', 'string', 'max:80'],
             'character_id' => ['nullable', 'integer'],
+            'premise' => ['nullable', 'string', 'max:500'],
+            'tone' => ['nullable', 'string', 'max:120'],
+            'starting_zone_id' => ['nullable', 'integer', 'exists:zones,id'],
         ]);
 
         $original = ($validated['character_id'] ?? null) === null ? null
@@ -56,6 +64,9 @@ class CampaignController extends Controller
 
         $campaign = $request->user()->campaigns()->create([
             'name' => $validated['name'],
+            'premise' => $validated['premise'] ?? null,
+            'tone' => $validated['tone'] ?? null,
+            'starting_zone_id' => $validated['starting_zone_id'] ?? null,
             'status' => 'interview',
         ]);
 

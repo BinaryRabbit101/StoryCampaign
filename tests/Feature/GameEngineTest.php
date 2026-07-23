@@ -11,6 +11,7 @@ use App\Models\Campaign;
 use App\Models\Character;
 use App\Models\Turn;
 use App\Models\User;
+use App\Models\Zone;
 use App\Services\Claude\ClaudeCli;
 use App\Services\Claude\Narrator;
 use App\Services\TurnStarter;
@@ -301,6 +302,60 @@ class GameEngineTest extends TestCase
             'body' => 'She climbed. [[e1]] She struck. [[e2]] Blood answered. [[e3]]',
         ]);
         $this->assertSame('She climbed. She struck. Blood answered.', $chapter->plainBody());
+    }
+
+    public function test_the_stage_is_stored_and_the_chosen_zone_opens_the_tale()
+    {
+        $campaign = $this->createCatCampaign();
+        $harbor = Zone::create(['slug' => 'harbor', 'name' => 'The Drowned Harbor', 'description' => 'Piers and hulks.', 'source' => 'seed']);
+
+        $this->mock(ClaudeCli::class)->shouldReceive('prompt')->andReturn('She returned.');
+
+        $this->actingAs($campaign->user)->post('/campaigns', [
+            'name' => 'Harbor Tale',
+            'character_id' => $campaign->character->id,
+            'premise' => 'Find my sister, whatever it costs.',
+            'tone' => 'rain-soaked',
+            'starting_zone_id' => $harbor->id,
+        ])->assertRedirect();
+
+        $second = $campaign->user->campaigns()->where('name', 'Harbor Tale')->first();
+
+        $this->assertSame('Find my sister, whatever it costs.', $second->premise);
+        $this->assertSame($harbor->id, $second->activeScene->zone_id);
+        $this->assertStringContainsString('Premise and goal', $second->stageBrief());
+    }
+
+    public function test_companions_are_recruited_then_coordinated_never_controlled()
+    {
+        $campaign = $this->createCatCampaign();
+        app(TurnStarter::class)->openFirstTurn($campaign);
+        $scene = $campaign->activeScene;
+
+        // The companionable watchman (seeded, spawned as the third actor)
+        // offers a recruit card while enemies are present.
+        $cards = app(CardComposer::class)->compose($campaign->character, $scene->fresh());
+        $recruit = collect($cards['main'])->first(fn ($c) => $c['verb'] === 'recruit');
+        $this->assertNotNull($recruit);
+        $this->assertSame('the lantern watchman', $recruit['target']['name']);
+
+        // Once a companion, coordination requests appear — and they are
+        // requests aimed at the companion, never direct control.
+        $watchman = $scene->actors()->where('name', 'the lantern watchman')->first();
+        $watchman->update(['kind' => 'companion']);
+
+        $cards = app(CardComposer::class)->compose($campaign->character, $scene->fresh());
+        $preVerbs = collect($cards['pre'])->pluck('verb');
+        $this->assertTrue($preVerbs->contains('companion_block'));
+        $this->assertTrue($preVerbs->contains('companion_flank'));
+        $this->assertTrue(collect($cards['main'])->pluck('verb')->contains('companion_scout'));
+
+        // A scouted exit becomes a real, safe way out on the next compose.
+        $scene->update(['state' => ['exit_scouted' => true]]);
+        $exit = collect(app(CardComposer::class)->compose($campaign->character, $scene->fresh())['main'])
+            ->first(fn ($c) => $c['label'] === 'Take the scouted way out');
+        $this->assertNotNull($exit);
+        $this->assertSame('flee', $exit['verb']);
     }
 
     public function test_a_new_campaign_can_begin_with_a_returning_character()

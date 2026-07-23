@@ -44,6 +44,8 @@ class TurnResolver
                 'readied' => false,
                 'shielded' => false,
                 'shield_actor_id' => null,
+                'flanked' => false,
+                'blocked' => null,
                 'prior_failure' => false,
             ];
 
@@ -201,6 +203,7 @@ class TurnResolver
         $bonus += $conditions['readied'] ? 2 : 0;
         $bonus += ($conditions['elevated'] && $verb === 'strike') ? 2 : 0;
         $bonus += ($conditions['concealed'] && in_array($verb, ['strike', 'restrain', 'haul'], true)) ? 3 : 0;
+        $bonus += ($conditions['flanked'] && $verb === 'strike') ? 2 : 0;
 
         $roll = $dice->d20();
         $total = $roll + $bonus;
@@ -414,6 +417,69 @@ class TurnResolver
                     : 'There was no one left worth searching.';
                 break;
 
+            case 'recruit':
+                $actor = Actor::find($card['target']['id']);
+                if ($succeeded && $actor !== null) {
+                    $tags = ($actor->tags ?? []) + ['loyalty' => 1];
+                    $actor->update(['kind' => 'companion', 'tags' => $tags]);
+                    $facts[] = "{$actor->name} fell in beside them — a companion now, walking the same tale.";
+                } elseif ($degree === BeatOutcome::PARTIAL && $actor !== null) {
+                    $tags = $actor->tags ?? [];
+                    $tags['disposition'] = 'swayed';
+                    $actor->update(['tags' => $tags]);
+                    $facts[] = "{$actor->name} wavered — not yet, but the door is open.";
+                } else {
+                    $facts[] = "{$targetName} would not be drawn into it.";
+                }
+                break;
+
+            case 'companion_block':
+                $companion = Actor::find($card['target']['id']);
+                $threat = $scene->actors()->where('status', 'active')->where('kind', 'enemy')->first();
+                if ($companion === null || $threat === null) {
+                    $facts[] = 'There was no one left to hold back.';
+                    break;
+                }
+                if ($succeeded) {
+                    $conditions['blocked'] = ['id' => $threat->id, 'full' => true];
+                    $facts[] = "{$companion->name} planted themselves in {$threat->name}'s path — the way is held.";
+                } elseif ($degree === BeatOutcome::PARTIAL) {
+                    $conditions['blocked'] = ['id' => $threat->id, 'full' => false];
+                    $facts[] = "{$companion->name} slowed {$threat->name}, but couldn't hold the line clean.";
+                } else {
+                    // The failed block costs the companion, not the player.
+                    $stats = $companion->stats;
+                    $stats['health']['current'] = max(0, ($stats['health']['current'] ?? 1) - 1);
+                    $companion->update(['stats' => $stats]);
+                    if ($stats['health']['current'] === 0) {
+                        $companion->update(['status' => 'downed']);
+                        $facts[] = "{$threat->name} went through {$companion->name} — the companion is down and out of the fight.";
+                    } else {
+                        $facts[] = "{$threat->name} shoved through {$companion->name}, who took the worst of it.";
+                    }
+                }
+                break;
+
+            case 'companion_flank':
+                $companion = Actor::find($card['target']['id']);
+                if ($succeeded && $companion !== null) {
+                    $conditions['flanked'] = true;
+                    $facts[] = "{$companion->name} circled wide — the threat now looks two ways.";
+                } else {
+                    $facts[] = ($companion?->name ?? 'The companion')." couldn't find the angle.";
+                }
+                break;
+
+            case 'companion_scout':
+                $companion = Actor::find($card['target']['id']);
+                if ($succeeded && $companion !== null) {
+                    $scene->update(['state' => array_merge($scene->state ?? [], ['exit_scouted' => true])]);
+                    $facts[] = "{$companion->name} found a way out — narrow, but real. It holds until the scene turns.";
+                } else {
+                    $facts[] = ($companion?->name ?? 'The companion').' searched but found no clean way out — yet.';
+                }
+                break;
+
             case 'hurl':
                 // Spending the captive as a weapon: however it lands, the
                 // hold is over — success downs them, failure frees them.
@@ -471,11 +537,19 @@ class TurnResolver
         $enemies = $scene->actors()->where('status', 'active')->where('kind', 'enemy')->get();
 
         foreach ($enemies as $enemy) {
+            $blocked = $conditions['blocked'] ?? null;
+            if ($blocked !== null && $blocked['id'] === $enemy->id && $blocked['full']) {
+                $facts[] = "{$enemy->name} was held at bay and never reached them.";
+
+                continue;
+            }
+
             $dodge = 12
                 + ($conditions['elevated'] ? 3 : 0)
                 + ($conditions['concealed'] ? 3 : 0)
                 + ($conditions['readied'] ? 2 : 0)
-                + ($conditions['shielded'] ? 2 : 0);
+                + ($conditions['shielded'] ? 2 : 0)
+                + ($blocked !== null && $blocked['id'] === $enemy->id ? 3 : 0);
 
             $roll = $dice->d20();
             if ($conditions['time_slowed']) {
@@ -598,7 +672,7 @@ class TurnResolver
     {
         $scene->update(['status' => 'past']);
 
-        return Scene::create([
+        $next = Scene::create([
             'campaign_id' => $scene->campaign_id,
             'zone_id' => $scene->zone_id,
             'title' => 'Beyond '.$scene->title,
@@ -606,6 +680,12 @@ class TurnResolver
             'status' => 'active',
             'state' => [],
         ]);
+
+        // Companions walk the tale, not the scene: they come along.
+        $scene->actors()->where('kind', 'companion')->where('status', 'active')
+            ->update(['scene_id' => $next->id]);
+
+        return $next;
     }
 
     private function openNextTurn(Turn $turn, Character $character, Scene $scene, BranchTrigger $trigger): Turn
@@ -637,9 +717,14 @@ class TurnResolver
             $parts[] = 'In your grip: '.$captives->join(', ').'.';
         }
 
+        $companions = $scene->actors()->where('status', 'active')->where('kind', 'companion')->pluck('name');
+        if ($companions->isNotEmpty()) {
+            $parts[] = 'At your side: '.$companions->join(', ').'.';
+        }
+
         // Ground the offered options: name the bystanders and features the
         // cards will reference, so nothing appears narratively unannounced.
-        $others = $scene->actors()->where('status', 'active')->where('kind', '!=', 'enemy')->pluck('name');
+        $others = $scene->actors()->where('status', 'active')->whereNotIn('kind', ['enemy', 'companion'])->pluck('name');
         if ($others->isNotEmpty()) {
             $parts[] = 'Also here: '.$others->join(', ').'.';
         }

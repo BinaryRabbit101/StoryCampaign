@@ -50,10 +50,14 @@ class BookCompiler
                 ->map(fn ($c) => mb_substr($c->plainBody(), -1500))->join("\n\n");
             $name = $campaign->character?->name ?? 'the wanderer';
 
+            $stage = $campaign->stageBrief();
+
             $coda = $this->claude->prompt(<<<PROMPT
 The player is ending this RPG campaign early. Write a brief closing coda — a short epilogue (100-200 words, third-person past tense, no mechanics) that gracefully lands the story wherever the character was, in the spirit of: "And so her tale, for now, went quiet on the rooftops of the old district…"
 
 Character: {$name}
+The stage the player set for this tale (acknowledge how far the goal got, resolved or not):
+{$stage}
 Final chapters:
 {$lastChapters}
 
@@ -89,11 +93,13 @@ PROMPT);
             $opening = Str::limit($campaign->chapters()->first()?->plainBody() ?? '', 800);
             $closing = Str::limit($campaign->chapters()->reorder('number', 'desc')->first()?->plainBody() ?? '', 800);
             $name = $campaign->character?->name ?? $campaign->name;
+            $stage = $campaign->stageBrief() ?: '(none set)';
 
             return $this->claude->promptForJson(<<<PROMPT
 A campaign of a living-world RPG has ended and its chapters are being bound into a keepsake book. Give it a title and a one-line back-cover summary capturing the arc of THIS specific journey.
 
 Character: {$name}
+The stage the player set: {$stage}
 How it opened: {$opening}
 How it closed: {$closing}
 

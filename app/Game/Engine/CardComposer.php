@@ -52,6 +52,25 @@ class CardComposer
             }
         }
 
+        // Companions: coordinated, never controlled. Each request is a card;
+        // the engine rolls the companion's attempt, not the player's.
+        foreach ($actors->filter(fn (Actor $a) => $a->kind === 'companion') as $companion) {
+            foreach ($this->companionCards($companion, $actors, $scene) as $card) {
+                $cards[$card->slot->value][] = $card;
+            }
+        }
+
+        if ($scene->state['exit_scouted'] ?? false) {
+            $cards['main'][] = new ActionCard(
+                slot: TurnSlot::Main,
+                verb: 'flee',
+                label: 'Take the scouted way out',
+                description: 'Slip out through the route your companion found. It holds until the scene turns.',
+                target: ['type' => 'exit', 'id' => null, 'name' => 'the scouted way out'],
+                modifiers: [$this->approachModifier()],
+            );
+        }
+
         foreach ($this->tempoCards($character, $capabilities) as $card) {
             $cards[$card->slot->value][] = $card;
         }
@@ -296,6 +315,19 @@ class CardComposer
             }
         }
 
+        // Recruitment grows out of the social verbs: a willing soul, or one
+        // already swayed or calmed, can be asked to come along.
+        if (! $hostile && $actor->kind !== 'companion'
+            && (($tags['companionable'] ?? false) || in_array($tags['disposition'] ?? null, ['swayed', 'calmed'], true))) {
+            $cards[] = new ActionCard(
+                slot: TurnSlot::Main,
+                verb: 'recruit',
+                label: "Ask {$actor->name} to come along",
+                description: "Invite {$actor->name} to walk this tale beside you. They decide.",
+                target: $target,
+            );
+        }
+
         if (($tags['restrainable'] ?? $hostile) && isset($capabilities['restrain'])) {
             $cards[] = new ActionCard(
                 slot: TurnSlot::Main,
@@ -396,6 +428,53 @@ class CardComposer
                     break;
                 }
             }
+        }
+
+        return $cards;
+    }
+
+    /**
+     * Requests a companion can be asked to attempt. The engine resolves the
+     * companion's try with its own roll — sometimes they fail, sometimes the
+     * cost lands on them. That risk is what keeps them people.
+     *
+     * @return list<ActionCard>
+     */
+    private function companionCards(Actor $companion, $actors, Scene $scene): array
+    {
+        $cards = [];
+        $target = ['type' => 'actor', 'id' => $companion->id, 'name' => $companion->name];
+        $enemies = $actors->filter(fn (Actor $a) => $a->kind === 'enemy');
+
+        if ($enemies->isNotEmpty()) {
+            $threat = $enemies->first();
+            $cards[] = new ActionCard(
+                slot: TurnSlot::Pre,
+                verb: 'companion_block',
+                label: "Ask {$companion->name} to block {$threat->name}",
+                description: "{$companion->name} plants themselves in {$threat->name}'s path — held off from you, if the line holds.",
+                target: $target,
+                composed: true,
+            );
+            $cards[] = new ActionCard(
+                slot: TurnSlot::Pre,
+                verb: 'companion_flank',
+                label: "Ask {$companion->name} to flank",
+                description: "{$companion->name} circles wide so the threat must look two ways — your strike lands harder.",
+                target: $target,
+                composed: true,
+            );
+        }
+
+        if (! ($scene->state['exit_scouted'] ?? false)) {
+            $cards[] = new ActionCard(
+                slot: TurnSlot::Main,
+                verb: 'companion_scout',
+                label: "Send {$companion->name} to find a way out",
+                description: "{$companion->name} slips off to search for an exit while you hold the scene.",
+                target: $target,
+                composed: true,
+            );
         }
 
         return $cards;

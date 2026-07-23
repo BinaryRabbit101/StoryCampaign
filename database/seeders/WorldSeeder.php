@@ -54,7 +54,7 @@ class WorldSeeder extends Seeder
                 'tags' => ['intimidatable' => true, 'type' => 'regular', 'restrainable' => true]],
             ['name' => 'the lantern watchman', 'kind' => 'npc', 'tier' => 'regular',
                 'stats' => ['health' => ['current' => 5, 'max' => 5], 'attack' => 1],
-                'tags' => ['talkable' => true, 'persuadeable' => true, 'calmable' => true]],
+                'tags' => ['talkable' => true, 'persuadeable' => true, 'calmable' => true, 'companionable' => true]],
         ];
 
         foreach ($actors as $actor) {

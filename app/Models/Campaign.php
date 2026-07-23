@@ -9,7 +9,7 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\Relations\HasOne;
 
-#[Fillable(['user_id', 'name', 'status', 'title', 'back_cover', 'ended_early', 'started_at', 'ended_at'])]
+#[Fillable(['user_id', 'name', 'premise', 'tone', 'starting_zone_id', 'status', 'title', 'back_cover', 'ended_early', 'started_at', 'ended_at'])]
 class Campaign extends Model
 {
     use HasFactory;
@@ -66,6 +66,23 @@ class Campaign extends Model
     public function isActive(): bool
     {
         return $this->status === 'active';
+    }
+
+    /**
+     * The player-set stage as one prompt block — narration color and
+     * direction only, never mechanics. Empty string when nothing was set.
+     */
+    public function stageBrief(): string
+    {
+        $lines = [];
+        if ($this->premise !== null && $this->premise !== '') {
+            $lines[] = "Premise and goal (the player decides when it is fulfilled): {$this->premise}";
+        }
+        if ($this->tone !== null && $this->tone !== '') {
+            $lines[] = "Tone of the telling: {$this->tone}";
+        }
+
+        return implode("\n", $lines);
     }
 
     public function nextChapterNumber(): int

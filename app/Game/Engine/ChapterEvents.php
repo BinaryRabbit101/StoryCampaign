@@ -40,6 +40,10 @@ class ChapterEvents
         'improvise' => 'gambit',
         'hurl' => 'force',
         'shield' => 'defense',
+        'recruit' => 'parley',
+        'companion_block' => 'ally',
+        'companion_flank' => 'ally',
+        'companion_scout' => 'ally',
     ];
 
     /** @return list<Event> */
@@ -76,6 +80,7 @@ class ChapterEvents
                 $wounded => ['injury', "Wounded — {$m[1]} damage taken"],
                 str_contains($fact, 'wrenched free') => ['threat', 'The hold broke'],
                 str_contains($fact, 'held in the way') => ['defense', 'The captive took the blow'],
+                str_contains($fact, 'held at bay') => ['ally', 'Held at bay'],
                 default => ['defense', 'Attack evaded'],
             };
             $events[] = [

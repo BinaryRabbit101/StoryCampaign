@@ -12,10 +12,18 @@ interface CampaignRow {
     ended_at: string | null;
 }
 
-defineProps<{ campaigns: CampaignRow[]; characters: { id: number; name: string; from: string }[] }>();
+defineProps<{
+    campaigns: CampaignRow[];
+    characters: { id: number; name: string; from: string }[];
+    zones: { id: number; name: string }[];
+}>();
 
 const newName = ref('');
 const characterId = ref<number | ''>('');
+const showStage = ref(false);
+const premise = ref('');
+const tone = ref('');
+const zoneId = ref<number | ''>('');
 const creating = ref(false);
 
 function create() {
@@ -23,7 +31,13 @@ function create() {
     creating.value = true;
     router.post(
         '/campaigns',
-        { name: newName.value, character_id: characterId.value === '' ? null : characterId.value },
+        {
+            name: newName.value,
+            character_id: characterId.value === '' ? null : characterId.value,
+            premise: premise.value.trim() || null,
+            tone: tone.value.trim() || null,
+            starting_zone_id: zoneId.value === '' ? null : zoneId.value,
+        },
         { onFinish: () => (creating.value = false) },
     );
 }
@@ -80,6 +94,34 @@ function statusLabel(status: string): string {
                     >
                         {{ creating ? 'Opening…' : 'Begin' }}
                     </button>
+                </div>
+
+                <button type="button" class="self-start text-xs text-muted-foreground underline" @click="showStage = !showStage">
+                    {{ showStage ? 'Hide the stage' : 'Set the stage (optional)' }}
+                </button>
+                <div v-if="showStage" class="flex flex-col gap-2 rounded-lg bg-muted/50 p-3">
+                    <p class="text-xs text-muted-foreground">
+                        The stage colors the telling — the interview, every chapter, and the book's close. It never changes what the
+                        engine allows. You decide when the goal is met; the tale ends when you close the book.
+                    </p>
+                    <input
+                        v-model="premise"
+                        type="text"
+                        maxlength="500"
+                        placeholder="Premise or end goal — “find my sister, whatever it costs”…"
+                        class="rounded-md border border-input bg-background px-3 py-2 text-sm"
+                    />
+                    <input
+                        v-model="tone"
+                        type="text"
+                        maxlength="120"
+                        placeholder="Tone — “rain-soaked, gothic, quietly hopeful”…"
+                        class="rounded-md border border-input bg-background px-3 py-2 text-sm"
+                    />
+                    <select v-if="zones.length > 1" v-model="zoneId" class="rounded-md border border-input bg-background px-3 py-2 text-sm">
+                        <option value="">Where it begins — let the world decide</option>
+                        <option v-for="z in zones" :key="z.id" :value="z.id">Begin in {{ z.name }}</option>
+                    </select>
                 </div>
             </form>
         </div>

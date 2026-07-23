@@ -20,7 +20,9 @@ class TurnStarter
 
     public function openFirstTurn(Campaign $campaign): Turn
     {
-        $zone = Zone::orderBy('id')->firstOrFail();
+        // The player may have chosen where the tale opens; otherwise the
+        // world's first zone stands.
+        $zone = Zone::find($campaign->starting_zone_id) ?? Zone::orderBy('id')->firstOrFail();
 
         $scene = Scene::create([
             'campaign_id' => $campaign->id,
@@ -35,7 +37,7 @@ class TurnStarter
             ->where('zone_id', $zone->id)
             ->where('status', 'active')
             ->orderBy('id')
-            ->limit(2)
+            ->limit(3)
             ->get()
             ->each(fn (Actor $template) => Actor::create([
                 'scene_id' => $scene->id,
