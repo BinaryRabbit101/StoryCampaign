@@ -43,7 +43,8 @@ class WidgetController extends Controller
             'character' => $character?->name,
             'health' => $health,
             'tempo' => $character?->meters['tempo'] ?? [],
-            'situation' => Str::limit($turn?->situation ?? '', 220),
+            // The widget draws a real health bar; the meter sentence is noise.
+            'situation' => Str::limit(trim(preg_replace('/\s*Health \d+\/\d+\./', '', $turn?->situation ?? '')), 220),
             'awaiting_player' => $turn?->isOpen() ?? false,
             'resolves_at' => $resolvesAt,
             'turn_number' => $turn?->number,
