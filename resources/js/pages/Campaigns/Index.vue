@@ -20,7 +20,6 @@ defineProps<{
 
 const newName = ref('');
 const characterId = ref<number | ''>('');
-const showStage = ref(false);
 const premise = ref('');
 const tone = ref('');
 const zoneId = ref<number | ''>('');
@@ -63,66 +62,74 @@ function statusLabel(status: string): string {
         <div class="rounded-xl border border-sidebar-border/70 p-5 dark:border-sidebar-border">
             <h2 class="mb-1 text-lg font-semibold">Begin a new tale</h2>
             <p class="mb-4 text-sm text-muted-foreground">
-                {{
-                    characterId === ''
-                        ? 'A campaign starts with an interview: describe who you are, and the world will take shape around you.'
-                        : 'A returning hero skips the interview — their story simply continues into a new book.'
-                }}
+                Only the name is required. Everything else colors the telling — the interview, every chapter, the book's close —
+                and never changes what the engine allows.
             </p>
-            <form class="flex flex-col gap-2" @submit.prevent="create">
-                <input
-                    v-model="newName"
-                    type="text"
-                    maxlength="80"
-                    placeholder="Name this campaign…"
-                    class="rounded-md border border-input bg-background px-3 py-2 text-sm"
-                />
-                <div class="flex gap-2">
-                    <select
-                        v-if="characters.length"
-                        v-model="characterId"
-                        class="flex-1 rounded-md border border-input bg-background px-3 py-2 text-sm"
-                    >
+            <form class="flex flex-col gap-3" @submit.prevent="create">
+                <div>
+                    <label class="mb-1 block text-xs font-medium text-muted-foreground">The campaign's name</label>
+                    <input
+                        v-model="newName"
+                        type="text"
+                        maxlength="80"
+                        placeholder="The Drowned Harbor Job…"
+                        class="w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+                    />
+                </div>
+
+                <div v-if="characters.length">
+                    <label class="mb-1 block text-xs font-medium text-muted-foreground">
+                        Who steps in <span class="font-normal">(a returning hero skips the interview)</span>
+                    </label>
+                    <select v-model="characterId" class="w-full rounded-md border border-input bg-background px-3 py-2 text-sm">
                         <option value="">A new soul — begin with the interview</option>
                         <option v-for="c in characters" :key="c.id" :value="c.id">Return as {{ c.name }} (from “{{ c.from }}”)</option>
                     </select>
-                    <button
-                        type="submit"
-                        :disabled="creating || !newName.trim()"
-                        class="rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground disabled:opacity-50"
-                        :class="{ 'flex-1': !characters.length }"
-                    >
-                        {{ creating ? 'Opening…' : 'Begin' }}
-                    </button>
                 </div>
 
-                <button type="button" class="self-start text-xs text-muted-foreground underline" @click="showStage = !showStage">
-                    {{ showStage ? 'Hide the stage' : 'Set the stage (optional)' }}
-                </button>
-                <div v-if="showStage" class="flex flex-col gap-2 rounded-lg bg-muted/50 p-3">
-                    <p class="text-xs text-muted-foreground">
-                        The stage colors the telling — the interview, every chapter, and the book's close. It never changes what the
-                        engine allows. You decide when the goal is met; the tale ends when you close the book.
-                    </p>
+                <div>
+                    <label class="mb-1 block text-xs font-medium text-muted-foreground">
+                        Premise or end goal <span class="font-normal">(optional — you decide when it's met)</span>
+                    </label>
                     <input
                         v-model="premise"
                         type="text"
                         maxlength="500"
-                        placeholder="Premise or end goal — “find my sister, whatever it costs”…"
-                        class="rounded-md border border-input bg-background px-3 py-2 text-sm"
+                        placeholder="Find my sister, whatever it costs…"
+                        class="w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
                     />
+                </div>
+
+                <div>
+                    <label class="mb-1 block text-xs font-medium text-muted-foreground">
+                        Tone of the telling <span class="font-normal">(optional)</span>
+                    </label>
                     <input
                         v-model="tone"
                         type="text"
                         maxlength="120"
-                        placeholder="Tone — “rain-soaked, gothic, quietly hopeful”…"
-                        class="rounded-md border border-input bg-background px-3 py-2 text-sm"
+                        placeholder="Rain-soaked, gothic, quietly hopeful…"
+                        class="w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
                     />
-                    <select v-if="zones.length > 1" v-model="zoneId" class="rounded-md border border-input bg-background px-3 py-2 text-sm">
-                        <option value="">Where it begins — let the world decide</option>
+                </div>
+
+                <div v-if="zones.length > 1">
+                    <label class="mb-1 block text-xs font-medium text-muted-foreground">
+                        Where it begins <span class="font-normal">(optional)</span>
+                    </label>
+                    <select v-model="zoneId" class="w-full rounded-md border border-input bg-background px-3 py-2 text-sm">
+                        <option value="">Let the world decide</option>
                         <option v-for="z in zones" :key="z.id" :value="z.id">Begin in {{ z.name }}</option>
                     </select>
                 </div>
+
+                <button
+                    type="submit"
+                    :disabled="creating || !newName.trim()"
+                    class="rounded-md bg-primary px-4 py-2.5 text-sm font-semibold text-primary-foreground disabled:opacity-50"
+                >
+                    {{ creating ? 'Opening…' : 'Begin the tale' }}
+                </button>
             </form>
         </div>
 
