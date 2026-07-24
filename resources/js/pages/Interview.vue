@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { Head, router } from '@inertiajs/vue3';
 import { nextTick, onMounted, ref, watch } from 'vue';
+import AmbientBackdrop from '@/components/game/AmbientBackdrop.vue';
 
 interface Message {
     id: number;
@@ -42,23 +43,58 @@ watch(() => props.messages.length, scrollDown);
 <template>
     <Head :title="`${campaign.name} — Interview`" />
 
-    <div class="mx-auto flex h-full w-full max-w-2xl flex-1 flex-col gap-4 p-4">
-        <p class="text-center text-xs tracking-widest text-muted-foreground uppercase">Before the world takes shape</p>
+    <div
+        class="relative isolate mx-auto flex h-full w-full max-w-2xl flex-1 flex-col gap-4 p-4"
+    >
+        <AmbientBackdrop />
 
-        <div ref="scroller" class="flex-1 space-y-4 overflow-y-auto rounded-xl border border-sidebar-border/70 p-4 dark:border-sidebar-border">
+        <p
+            class="sc-rise text-center text-xs tracking-widest text-muted-foreground uppercase"
+        >
+            Before the world takes shape
+        </p>
+
+        <div
+            ref="scroller"
+            class="sc-rise flex-1 space-y-4 overflow-y-auto rounded-xl border border-sidebar-border/70 bg-background/60 p-4 backdrop-blur-sm dark:border-sidebar-border"
+            style="animation-delay: 80ms"
+        >
             <div
                 v-for="message in messages"
                 :key="message.id"
+                class="sc-rise"
                 :class="message.role === 'player' ? 'ml-8 text-right' : 'mr-8'"
             >
                 <div
                     class="inline-block rounded-xl px-4 py-2 text-sm whitespace-pre-wrap"
-                    :class="message.role === 'player' ? 'bg-primary text-primary-foreground' : 'bg-muted italic'"
+                    :class="
+                        message.role === 'player'
+                            ? 'bg-primary text-primary-foreground'
+                            : 'bg-muted italic'
+                    "
                 >
                     {{ message.body }}
                 </div>
             </div>
-            <p v-if="sending" class="mr-8 text-sm text-muted-foreground italic">The narrator considers…</p>
+            <p
+                v-if="sending"
+                class="sc-rise mr-8 flex items-center gap-2 text-sm text-muted-foreground italic"
+            >
+                <span class="flex items-end gap-1" aria-hidden="true">
+                    <span
+                        class="sc-drop h-1.5 w-1.5 rounded-full bg-violet-500/70"
+                    />
+                    <span
+                        class="sc-drop h-1.5 w-1.5 rounded-full bg-violet-500/70"
+                        style="animation-delay: 0.2s"
+                    />
+                    <span
+                        class="sc-drop h-1.5 w-1.5 rounded-full bg-violet-500/70"
+                        style="animation-delay: 0.4s"
+                    />
+                </span>
+                The narrator considers…
+            </p>
         </div>
 
         <form class="flex gap-2" @submit.prevent="send">
@@ -73,7 +109,7 @@ watch(() => props.messages.length, scrollDown);
             <button
                 type="submit"
                 :disabled="sending || !body.trim()"
-                class="self-end rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground disabled:opacity-50"
+                class="self-end rounded-md bg-gradient-to-br from-violet-600 to-violet-800 px-4 py-2 text-sm font-medium text-white shadow-lg shadow-violet-900/20 transition hover:from-violet-500 hover:to-violet-700 active:scale-[0.98] disabled:opacity-50"
             >
                 Speak
             </button>

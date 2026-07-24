@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue';
+import { computed } from 'vue';
 import type { ActionCard, SlotChoice } from '@/types/game';
 
 const props = defineProps<{
@@ -13,9 +13,6 @@ const props = defineProps<{
 const emit = defineEmits<{
     (e: 'update:modelValue', value: SlotChoice | null): void;
 }>();
-
-// Optional slots start folded; the act is always open.
-const expanded = ref(!props.optional);
 
 /**
  * Presentation-only grouping: same-verb cards that differ only by target
@@ -50,10 +47,6 @@ function humanizeVerb(verb: string): string {
 
     return name.charAt(0).toUpperCase() + name.slice(1);
 }
-
-const selectedCard = computed<ActionCard | null>(
-    () => props.cards.find((c) => c.id === props.modelValue?.card_id) ?? null,
-);
 
 const rowSelection = (row: Row) =>
     row.cards.find((c) => c.id === props.modelValue?.card_id) ?? null;
@@ -139,58 +132,34 @@ function costLabel(card: ActionCard): string | null {
     <section>
         <div
             class="mb-2 flex w-full items-baseline justify-between gap-2 text-left"
-            :class="optional ? 'cursor-pointer select-none' : ''"
-            :role="optional ? 'button' : undefined"
-            @click="optional && (expanded = !expanded)"
         >
             <h3 class="text-sm font-semibold tracking-wide uppercase">
-                <span
-                    v-if="optional"
-                    class="mr-1 inline-block text-xs text-muted-foreground transition-transform"
-                    :class="expanded ? 'rotate-90' : ''"
-                    >▸</span
-                >
                 {{ title }}
             </h3>
-            <span
-                v-if="!expanded && selectedCard"
-                class="truncate text-xs text-foreground"
-                >{{ selectedCard.label }}</span
-            >
-            <span v-else-if="!expanded" class="text-xs text-muted-foreground"
-                >optional ·
-                {{
-                    cards.length
-                        ? `${cards.length} options`
-                        : 'nothing offers itself'
-                }}</span
-            >
-            <span v-else class="text-xs text-muted-foreground"
+            <span class="text-xs text-muted-foreground"
                 >{{ optional ? 'optional' : 'required' }} · {{ hint }}</span
             >
         </div>
 
-        <template v-if="expanded">
-            <p
-                v-if="!cards.length"
-                class="text-sm text-muted-foreground italic"
-            >
-                Nothing offers itself for this beat.
-            </p>
+        <p v-if="!cards.length" class="text-sm text-muted-foreground italic">
+            Nothing offers itself for this beat.
+        </p>
 
+        <template v-else>
             <!-- One steady column: every card shows what it is, what it
                  risks, and what it costs before anything is tapped, and
                  selecting never reflows the list. -->
             <div class="space-y-1.5">
                 <div
-                    v-for="row in rows"
+                    v-for="(row, index) in rows"
                     :key="row.key"
-                    class="cursor-pointer rounded-lg border px-3 py-2 transition"
+                    class="sc-rise cursor-pointer rounded-lg border px-3 py-2 transition-all duration-200 active:scale-[0.99]"
                     :class="
                         rowSelection(row)
-                            ? 'border-primary bg-accent ring-1 ring-primary'
-                            : 'border-sidebar-border/70 hover:bg-accent/50 dark:border-sidebar-border'
+                            ? 'border-violet-500 bg-violet-500/10 shadow-md ring-1 shadow-violet-500/10 ring-violet-500'
+                            : 'border-sidebar-border/70 hover:-translate-y-0.5 hover:bg-accent/50 hover:shadow-md hover:shadow-violet-500/5 dark:border-sidebar-border'
                     "
+                    :style="{ animationDelay: `${Math.min(index, 8) * 45}ms` }"
                     @click="tapRow(row)"
                 >
                     <div class="flex items-center justify-between gap-2">
@@ -228,10 +197,10 @@ function costLabel(card: ActionCard): string | null {
                             v-for="card in row.cards"
                             :key="card.id"
                             type="button"
-                            class="rounded-full border px-2.5 py-1 text-xs transition"
+                            class="rounded-full border px-2.5 py-1 text-xs transition active:scale-95"
                             :class="
                                 card.id === modelValue?.card_id
-                                    ? 'border-primary bg-primary text-primary-foreground'
+                                    ? 'border-violet-600 bg-violet-600 text-white'
                                     : card.risk !== 'safe'
                                       ? 'border-amber-500/60 text-amber-700 hover:bg-accent dark:text-amber-400'
                                       : 'border-input hover:bg-accent'
@@ -243,7 +212,10 @@ function costLabel(card: ActionCard): string | null {
                     </div>
 
                     <div
-                        v-if="rowSelection(row) && rowSelection(row)!.modifiers.length"
+                        v-if="
+                            rowSelection(row) &&
+                            rowSelection(row)!.modifiers.length
+                        "
                         class="mt-2 space-y-2 border-t border-sidebar-border/50 pt-2"
                     >
                         <div
@@ -260,11 +232,11 @@ function costLabel(card: ActionCard): string | null {
                                     v-for="option in modifier.options"
                                     :key="option.value"
                                     type="button"
-                                    class="rounded-full border px-2.5 py-1 text-xs transition"
+                                    class="rounded-full border px-2.5 py-1 text-xs transition active:scale-95"
                                     :class="
                                         modelValue?.modifiers[modifier.key] ===
                                         option.value
-                                            ? 'border-primary bg-primary text-primary-foreground'
+                                            ? 'border-violet-600 bg-violet-600 text-white'
                                             : 'border-input hover:bg-accent'
                                     "
                                     @click.stop="

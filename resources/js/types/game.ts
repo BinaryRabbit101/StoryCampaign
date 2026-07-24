@@ -73,7 +73,13 @@ export interface CharacterItem {
     name: string;
     description: string;
     power: number;
-    grants: { capability: string; magnitude: number | null; grade?: string | null }[] | null;
+    grants:
+        | {
+              capability: string;
+              magnitude: number | null;
+              grade?: string | null;
+          }[]
+        | null;
     equipped: boolean;
     charges: number | null;
 }

@@ -170,3 +170,194 @@
         @apply bg-background text-foreground;
     }
 }
+
+/* ---------------------------------------------------------------------
+   StoryCampaign atmosphere — decorative motion only. Nothing here carries
+   information: every animation is skippable (see the reduced-motion block)
+   and the page reads identically without it.
+   --------------------------------------------------------------------- */
+
+/* Blocks rise gently into place when they first appear. */
+@keyframes sc-rise {
+    from {
+        opacity: 0;
+        transform: translateY(10px);
+    }
+    to {
+        opacity: 1;
+        transform: none;
+    }
+}
+.sc-rise {
+    animation: sc-rise 0.55s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+/* Fresh prose settles like drying ink. */
+@keyframes sc-ink {
+    from {
+        opacity: 0;
+        filter: blur(4px);
+    }
+    to {
+        opacity: 1;
+        filter: blur(0);
+    }
+}
+.sc-ink {
+    animation: sc-ink 1s ease-out both;
+}
+
+/* The writing indicator: ink drops falling one after another. */
+@keyframes sc-drop {
+    0%,
+    60%,
+    100% {
+        transform: none;
+        opacity: 0.3;
+    }
+    30% {
+        transform: translateY(-4px);
+        opacity: 1;
+    }
+}
+.sc-drop {
+    animation: sc-drop 1.6s ease-in-out infinite;
+}
+
+/* A slow breathing glow while the world turns. */
+@keyframes sc-breathe {
+    0%,
+    100% {
+        box-shadow: 0 0 0 0 rgb(139 92 246 / 0);
+        border-color: rgb(139 92 246 / 0.2);
+    }
+    50% {
+        box-shadow: 0 0 28px 2px rgb(139 92 246 / 0.18);
+        border-color: rgb(139 92 246 / 0.45);
+    }
+}
+.sc-breathe {
+    animation: sc-breathe 3.2s ease-in-out infinite;
+}
+
+/* Ornaments twinkle faintly. */
+@keyframes sc-twinkle {
+    0%,
+    100% {
+        opacity: 0.35;
+    }
+    50% {
+        opacity: 0.9;
+    }
+}
+.sc-twinkle {
+    animation: sc-twinkle 2.8s ease-in-out infinite;
+}
+
+/* Ambient backdrop: drifting glows and slow-rising motes. */
+@keyframes sc-drift {
+    0%,
+    100% {
+        transform: translate3d(0, 0, 0) scale(1);
+    }
+    33% {
+        transform: translate3d(3rem, -2rem, 0) scale(1.15);
+    }
+    66% {
+        transform: translate3d(-2rem, 2.5rem, 0) scale(0.95);
+    }
+}
+.sc-drift {
+    animation: sc-drift 22s ease-in-out infinite;
+}
+
+@keyframes sc-mote {
+    0% {
+        transform: translateY(0);
+        opacity: 0;
+    }
+    12% {
+        opacity: var(--mote-opacity, 0.3);
+    }
+    85% {
+        opacity: var(--mote-opacity, 0.3);
+    }
+    100% {
+        transform: translateY(-105vh);
+        opacity: 0;
+    }
+}
+.sc-mote {
+    opacity: 0;
+    animation: sc-mote 18s linear infinite;
+}
+
+/* Storybook drop cap for chapter prose. */
+.sc-dropcap::first-letter {
+    float: left;
+    margin-right: 0.09em;
+    font-size: 3.1em;
+    line-height: 0.85;
+    font-weight: 600;
+    color: var(--color-violet-600);
+}
+.dark .sc-dropcap::first-letter {
+    color: var(--color-violet-400);
+}
+
+/* Vue <Transition> vocabularies shared across pages. */
+.fade-enter-active,
+.fade-leave-active {
+    transition: opacity 0.2s ease;
+}
+.fade-enter-from,
+.fade-leave-to {
+    opacity: 0;
+}
+
+.pop-enter-active {
+    transition:
+        opacity 0.25s ease,
+        transform 0.25s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+.pop-leave-active {
+    transition:
+        opacity 0.15s ease,
+        transform 0.15s ease;
+}
+.pop-enter-from,
+.pop-leave-to {
+    opacity: 0;
+    transform: scale(0.96) translateY(8px);
+}
+
+.unfold-enter-active {
+    transition:
+        opacity 0.25s ease,
+        transform 0.25s ease;
+}
+.unfold-leave-active {
+    transition:
+        opacity 0.15s ease,
+        transform 0.15s ease;
+}
+.unfold-enter-from,
+.unfold-leave-to {
+    opacity: 0;
+    transform: translateY(-6px);
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .sc-rise,
+    .sc-ink,
+    .sc-drop,
+    .sc-breathe,
+    .sc-twinkle,
+    .sc-drift,
+    .sc-mote {
+        animation: none;
+    }
+    .sc-mote {
+        display: none;
+    }
+}
