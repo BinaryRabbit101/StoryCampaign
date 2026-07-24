@@ -1,12 +1,13 @@
 <script setup lang="ts">
 import { Head, router } from '@inertiajs/vue3';
-import { nextTick, onMounted, ref, watch } from 'vue';
+import { computed, nextTick, onMounted, ref, watch } from 'vue';
 import AmbientBackdrop from '@/components/game/AmbientBackdrop.vue';
 
 interface Message {
     id: number;
     role: 'player' | 'narrator';
     body: string;
+    suggestions: string[] | null;
 }
 
 const props = defineProps<{
@@ -17,6 +18,22 @@ const props = defineProps<{
 const body = ref('');
 const sending = ref(false);
 const scroller = ref<HTMLElement | null>(null);
+const speakBox = ref<HTMLTextAreaElement | null>(null);
+
+// A hand for the stuck: the narrator's latest question may carry example
+// answers. Tapping one fills the textarea — the player can still reshape
+// it before speaking.
+const suggestions = computed(() => {
+    const last = props.messages[props.messages.length - 1];
+    return last?.role === 'narrator' && last.suggestions?.length
+        ? last.suggestions
+        : [];
+});
+
+function adopt(suggestion: string) {
+    body.value = suggestion;
+    speakBox.value?.focus();
+}
 
 function send() {
     if (!body.value.trim() || sending.value) return;
@@ -97,8 +114,24 @@ watch(() => props.messages.length, scrollDown);
             </p>
         </div>
 
+        <div
+            v-if="suggestions.length && !sending"
+            class="sc-rise flex flex-wrap gap-2"
+        >
+            <button
+                v-for="suggestion in suggestions"
+                :key="suggestion"
+                type="button"
+                class="max-w-full rounded-lg border border-violet-500/30 bg-violet-500/10 px-3 py-1.5 text-left text-xs text-muted-foreground italic transition hover:border-violet-500/60 hover:text-foreground active:scale-[0.98]"
+                @click="adopt(suggestion)"
+            >
+                {{ suggestion }}
+            </button>
+        </div>
+
         <form class="flex gap-2" @submit.prevent="send">
             <textarea
+                ref="speakBox"
                 v-model="body"
                 rows="3"
                 maxlength="2000"

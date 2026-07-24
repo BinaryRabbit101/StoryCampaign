@@ -938,6 +938,50 @@ class GameEngineTest extends TestCase
         $this->assertGreaterThanOrEqual(1, $next->features()->count());
     }
 
+    public function test_interview_questions_carry_tappable_answer_suggestions()
+    {
+        $this->seed(WorldSeeder::class);
+        $user = User::factory()->create();
+
+        $this->mock(ClaudeCli::class, function ($mock) {
+            $mock->shouldReceive('promptForJson')->andReturn([
+                'reply' => 'Where does the gift come due?',
+                'suggestions' => [
+                    '  The tail tangles in tight spaces.  ',
+                    str_repeat('x', 500),
+                    42,
+                    'Her frame cannot fit where others slip through.',
+                    'The slowed world leaves her spent after.',
+                    'A fifth suggestion that must be dropped.',
+                ],
+                'complete' => false,
+                'character' => null,
+                'prologue' => null,
+            ])->byDefault();
+        });
+
+        $this->actingAs($user)->post('/campaigns', ['name' => 'Suggestion Tale'])->assertRedirect();
+        $campaign = $user->campaigns()->first();
+
+        // The opening question always offers starting points.
+        $this->assertNotEmpty($campaign->interviewMessages()->first()->suggestions);
+
+        $this->actingAs($user)->post("/campaigns/{$campaign->id}/interview", ['body' => 'A great black cat.']);
+
+        // Sanitized: strings only, trimmed, ≤ 200 chars, capped at four.
+        $reply = $campaign->interviewMessages()->orderByDesc('id')->first();
+        $this->assertSame('narrator', $reply->role);
+        $this->assertCount(4, $reply->suggestions);
+        $this->assertSame('The tail tangles in tight spaces.', $reply->suggestions[0]);
+        $this->assertSame(200, mb_strlen($reply->suggestions[1]));
+        $this->assertNotContains('A fifth suggestion that must be dropped.', $reply->suggestions);
+
+        // The page hands the chips to the client alongside the question.
+        $this->actingAs($user)->get("/campaigns/{$campaign->id}/interview")
+            ->assertInertia(fn ($page) => $page
+                ->where('messages.2.suggestions.0', 'The tail tangles in tight spaces.'));
+    }
+
     public function test_widget_endpoint_requires_a_valid_token()
     {
         $campaign = $this->createCatCampaign();

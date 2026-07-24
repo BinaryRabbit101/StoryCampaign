@@ -37,6 +37,14 @@ class Interviewer
             'body' => 'Before the world takes shape around you, tell me who steps into it. '
                 .'Describe yourself — form, temperament, the things you can do that others cannot, '
                 .'and the price those gifts carry. Speak freely; I will listen.',
+            // A hand for players who freeze on the blank page: tappable
+            // starting points, each a full answer they can send or reshape.
+            'suggestions' => [
+                'A huge black cat with a prehensile tail — strong enough to carry a person, too big to go unnoticed.',
+                'A slight, quick shadow of a person who can squeeze through anywhere, but folds fast in a straight fight.',
+                'A patient old giant: slow, hard to move, able to lift what three others could not.',
+                'A silver-tongued wanderer who can talk their way past most trouble — and is helpless when talk fails.',
+            ],
         ]);
     }
 
@@ -149,6 +157,8 @@ PROMPT);
             'kind' => 'creation',
             'role' => 'narrator',
             'body' => $response['reply'] ?? '…',
+            'suggestions' => ($response['complete'] ?? false) ? null
+                : $this->sanitizeSuggestions($response['suggestions'] ?? []),
         ]);
 
         if (($response['complete'] ?? false) === true && isset($response['character'])) {
@@ -219,6 +229,25 @@ PROMPT);
     }
 
     /**
+     * Sanitize Claude-proposed answer suggestions: short strings only,
+     * capped at four; null hides the chip row entirely.
+     *
+     * @return list<string>|null
+     */
+    private function sanitizeSuggestions(mixed $suggestions): ?array
+    {
+        $clean = collect(is_array($suggestions) ? $suggestions : [])
+            ->filter(fn ($s) => is_string($s) && trim($s) !== '')
+            ->map(fn (string $s) => mb_substr(trim($s), 0, 200))
+            ->unique()
+            ->take(4)
+            ->values()
+            ->all();
+
+        return $clean === [] ? null : $clean;
+    }
+
+    /**
      * Sanitize Claude-proposed attack styles: short strings only, capped at
      * six. Null (rather than an empty list) lets the composer fall back to
      * its body-neutral defaults.
@@ -268,6 +297,7 @@ Rules:
 Respond with ONLY a JSON object:
 {
   "reply": "<your next in-world line to the player>",
+  "suggestions": <3-4 example answers to YOUR question, each in the PLAYER's voice and sendable exactly as written — one plain sentence, ≤ 160 characters. Pull them in genuinely different directions (different bodies, prices, temperaments), so a stuck player discovers what kinds of answers are possible. Empty array when complete is true.>,
   "complete": <true only when the character is fully formed>,
   "character": <null until complete, then: {"name": "...", "description": "<2-3 sentence distillation>", "attack_styles": ["a bite", "a rake of claws", ...], "capabilities": [{"capability": "reach", "magnitude": 12, "grade": null, "scope": null}, ...], "constraints": [{"name": "stealth_penalty", "params": {"size": "large"}, "coupled_capability": "intimidate"}, ...]}>,
   "prologue": <null until complete, then a 200-400 word prologue chapter narrating this character's birth into the world, third-person past tense, no mechanics>

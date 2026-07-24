@@ -23,7 +23,7 @@ class InterviewController extends Controller
         return Inertia::render('Interview', [
             'campaign' => $campaign->only(['id', 'name', 'status']),
             'messages' => $campaign->interviewMessages()->where('kind', 'creation')->orderBy('id')->get()
-                ->map(fn (InterviewMessage $m) => $m->only(['id', 'role', 'body'])),
+                ->map(fn (InterviewMessage $m) => $m->only(['id', 'role', 'body', 'suggestions'])),
         ]);
     }
 
