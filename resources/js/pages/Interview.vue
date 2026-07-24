@@ -370,7 +370,8 @@ watch(() => props.messages.length, scrollDown);
                 maxlength="2000"
                 placeholder="Describe yourself — form, temperament, gifts, and their price…"
                 class="flex-1 resize-none rounded-md border border-input bg-background px-3 py-2 text-sm"
-                @keydown.enter.exact.prevent="send"
+                @keydown.ctrl.enter.prevent="send"
+                @keydown.meta.enter.prevent="send"
             />
             <button
                 type="submit"
