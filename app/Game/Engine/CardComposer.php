@@ -290,7 +290,7 @@ class CardComposer
                 description: "Attack {$actor->name} directly.",
                 target: $target,
                 risk: 'risky',
-                modifiers: [$this->approachModifier()],
+                modifiers: [$this->approachModifier(), $this->methodModifier($character)],
             );
         }
 
@@ -612,6 +612,30 @@ class CardComposer
                 ['value' => 'cautious', 'label' => 'Cautious — surer, gentler'],
                 ['value' => 'bold', 'label' => 'Bold — harder, riskier'],
             ],
+        ];
+    }
+
+    /**
+     * How the blow takes shape — bite, claw-rake, tail-whip — is narration
+     * color only: the resolver reads just 'approach' for difficulty and
+     * damage, and the chosen form travels to the narrator as a resolved
+     * fact. Styles come from the interview, fitted to the character's body;
+     * the fallback list is deliberately body-neutral.
+     */
+    private function methodModifier(Character $character): array
+    {
+        $styles = $character->attack_styles
+            ?: ['a driving blow', 'a lunge', 'a grapple', 'a feint, then the real strike'];
+
+        $options = [['value' => 'unspecified', 'label' => 'However the moment allows']];
+        foreach ($styles as $style) {
+            $options[] = ['value' => $style, 'label' => ucfirst($style)];
+        }
+
+        return [
+            'key' => 'method',
+            'label' => 'The shape of the attack',
+            'options' => $options,
         ];
     }
 }

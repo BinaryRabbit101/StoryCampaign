@@ -65,6 +65,7 @@ class Interviewer
                 'campaign_id' => $campaign->id,
                 'name' => $original->name,
                 'description' => $original->description,
+                'attack_styles' => $original->attack_styles,
                 'meters' => $meters,
                 'status' => 'alive',
                 'meters_regenerated_at' => now(),
@@ -176,6 +177,7 @@ PROMPT);
                 'campaign_id' => $campaign->id,
                 'name' => $sheet['name'] ?? 'The Nameless',
                 'description' => $sheet['description'] ?? '',
+                'attack_styles' => $this->attackStyles($sheet),
                 'meters' => $meters,
                 'status' => 'alive',
                 'meters_regenerated_at' => now(),
@@ -211,6 +213,26 @@ PROMPT);
         });
     }
 
+    /**
+     * Sanitize Claude-proposed attack styles: short strings only, capped at
+     * six. Null (rather than an empty list) lets the composer fall back to
+     * its body-neutral defaults.
+     *
+     * @return list<string>|null
+     */
+    private function attackStyles(array $sheet): ?array
+    {
+        $styles = collect($sheet['attack_styles'] ?? [])
+            ->filter(fn ($s) => is_string($s) && trim($s) !== '')
+            ->map(fn (string $s) => mb_substr(trim($s), 0, 40))
+            ->unique()
+            ->take(6)
+            ->values()
+            ->all();
+
+        return $styles === [] ? null : $styles;
+    }
+
     private function creationPrompt(Campaign $campaign): string
     {
         $transcript = $campaign->interviewMessages()->orderBy('id')->get()
@@ -233,6 +255,7 @@ Rules:
 - Every strong capability should drag a constraint with it (power/constraint coupling). Example: large intimidating size → cannot squeeze through narrow gaps, stealth penalty, breaks fragile surfaces.
 - Magnitudes are clamped by the engine regardless of what you write; keep them modest (reach ≤ 15, lift ≤ 250 at creation).
 - Scoped social powers: e.g. intimidate should carry {"vs": "regular"} so it does not flatten elite encounters.
+- attack_styles: 3-6 short phrases for how this body attacks (e.g. "a bite", "a rake of claws", "a tail-whip", "a shoulder-slam"). Narration vocabulary only — they never change outcomes.
 
 ## Transcript so far
 {$transcript}
@@ -241,7 +264,7 @@ Respond with ONLY a JSON object:
 {
   "reply": "<your next in-world line to the player>",
   "complete": <true only when the character is fully formed>,
-  "character": <null until complete, then: {"name": "...", "description": "<2-3 sentence distillation>", "capabilities": [{"capability": "reach", "magnitude": 12, "grade": null, "scope": null}, ...], "constraints": [{"name": "stealth_penalty", "params": {"size": "large"}, "coupled_capability": "intimidate"}, ...]}>,
+  "character": <null until complete, then: {"name": "...", "description": "<2-3 sentence distillation>", "attack_styles": ["a bite", "a rake of claws", ...], "capabilities": [{"capability": "reach", "magnitude": 12, "grade": null, "scope": null}, ...], "constraints": [{"name": "stealth_penalty", "params": {"size": "large"}, "coupled_capability": "intimidate"}, ...]}>,
   "prologue": <null until complete, then a 200-400 word prologue chapter narrating this character's birth into the world, third-person past tense, no mechanics>
 }
 PROMPT;

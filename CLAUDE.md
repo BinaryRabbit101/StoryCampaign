@@ -59,7 +59,9 @@ adjudicates legality or outcomes — it is only ever handed resolved facts.
 - Improvise resolves against base stats with no bonus — never better than a
   real enumerated option.
 - The optional intent text colors narration only; it must never reach the
-  mechanics path.
+  mechanics path. The strike `method` modifier (bite, tail-whip, …) is the
+  same class: engine-offered and validated, carried into the beat's facts
+  for the narrator, but never an input to difficulty or damage.
 - Chapters are append-only, persisted before any push is sent; the book is a
   compilation (the only new generation at campaign end is the optional coda
   and title flourish).

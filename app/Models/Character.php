@@ -10,7 +10,7 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 
-#[Fillable(['campaign_id', 'name', 'description', 'meters', 'status', 'meters_regenerated_at'])]
+#[Fillable(['campaign_id', 'name', 'description', 'attack_styles', 'meters', 'status', 'meters_regenerated_at'])]
 class Character extends Model
 {
     use HasFactory;
@@ -18,6 +18,7 @@ class Character extends Model
     protected function casts(): array
     {
         return [
+            'attack_styles' => 'array',
             'meters' => 'array',
             'meters_regenerated_at' => 'datetime',
         ];

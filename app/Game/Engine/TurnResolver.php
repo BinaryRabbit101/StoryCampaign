@@ -268,6 +268,14 @@ class TurnResolver
 
         $facts = $this->applyBeatEffects($verb, $card, $degree, $approach, $character, $scene, $conditions, $dice);
 
+        // The chosen attack form is narration color only: it never touched
+        // the roll above. It rides along as a resolved fact so the narrator
+        // (and the reader's event panel) know HOW the blow took shape.
+        $method = $choice['modifiers']['method'] ?? null;
+        if ($verb === 'strike' && is_string($method) && $method !== '' && $method !== 'unspecified') {
+            array_unshift($facts, "The attack came as {$method}.");
+        }
+
         return new BeatOutcome($card['slot'], $verb, $card['target'] ?? null, $degree, $roll, $total, $difficulty, $facts);
     }
 

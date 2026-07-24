@@ -62,6 +62,13 @@ class Narrator
         }
         $intent = $submission['intent_text'] ?? null;
 
+        // The word budget scales with what actually happened: a one-beat
+        // vignette gets a tight page, never 600 words of padding stretched
+        // over a single act.
+        $eventCount = max(1, $events->count());
+        $wordLow = min(120, 60 + 20 * $eventCount);
+        $wordHigh = min(520, 130 + 90 * $eventCount);
+
         // The next turn already exists (the engine opened it during resolution).
         // Its situation is resolved fact, so the chapter may close inside it —
         // minus the meter readout, which is mechanics and never reaches prose.
@@ -78,6 +85,7 @@ You are the narrator of a living-world RPG. Write the next chapter of this campa
 - Description rides inside the action: a clause on the way through a beat, never a standalone scene-painting paragraph. If a detail doesn't change what someone does or feels next, cut it.
 - Prefer concrete verbs to stacked adjectives. Short sentences in the thick of it; longer ones only as the dust settles.
 - Open inside motion or intent — never with the weather, the light, or the skyline.
+- Match length to substance: few beats mean a short chapter. Never pad toward a word count — a tight half-page beats a stretched full one.
 
 Each listed event carries a bracketed token like [[e1]]. Copy every token into the chapter VERBATIM, each exactly once, placed immediately after the sentence where that event lands in the prose. The tokens are invisible anchors in the reader's edition — never mention them, never describe them, never invent new ones.
 
@@ -100,7 +108,7 @@ Each listed event carries a bracketed token like [[e1]]. Copy every token into t
 {$reaction}
 
 ## Where the vignette stops
-{$turn->branch_trigger}: the chapter must end on this note, at a clean decision point, leaving the situation open for the player's next choice. 300-600 words.
+{$turn->branch_trigger}: the chapter must end on this note, at a clean decision point, leaving the situation open for the player's next choice. {$wordLow}-{$wordHigh} words.
 
 ## The state of play as the chapter closes (fixed facts)
 {$aftermath}

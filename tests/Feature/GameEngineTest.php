@@ -138,7 +138,7 @@ class GameEngineTest extends TestCase
             'status' => Turn::STATUS_LOCKED,
             'submission' => [
                 'pre' => ['card_id' => $pre['id'], 'modifiers' => []],
-                'main' => ['card_id' => $main['id'], 'modifiers' => ['approach' => 'balanced']],
+                'main' => ['card_id' => $main['id'], 'modifiers' => ['approach' => 'balanced', 'method' => 'a pounce']],
                 'post' => ['card_id' => $post['id'], 'modifiers' => []],
                 'intent_text' => null,
             ],
@@ -151,6 +151,11 @@ class GameEngineTest extends TestCase
         $this->assertSame(Turn::STATUS_COMPLETE, $turn->status);
         $this->assertNotNull($turn->branch_trigger);
         $this->assertNotEmpty($turn->resolution['beats']);
+
+        // The attack form is narration color: it reaches the beat's facts
+        // for the narrator, but never the difficulty or the damage math.
+        $strikeBeat = collect($turn->resolution['beats'])->firstWhere('verb', 'strike');
+        $this->assertContains('The attack came as a pounce.', $strikeBeat['facts']);
         $this->assertSame(2, $next->number);
         $this->assertSame(Turn::STATUS_AWAITING, $next->status);
         $this->assertGreaterThanOrEqual(2, count($next->cards['main']));
