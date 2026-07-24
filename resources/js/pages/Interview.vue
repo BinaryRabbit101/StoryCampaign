@@ -36,8 +36,8 @@ const scroller = ref<HTMLElement | null>(null);
 const speakBox = ref<HTMLTextAreaElement | null>(null);
 
 // A hand for the stuck: the narrator's latest question may carry example
-// answers. Tapping one fills the textarea — the player can still reshape
-// it before speaking.
+// answers. Tapping one adds it to the textarea — the player can take up
+// several, and reshape the whole of it before speaking.
 const suggestions = computed(() => {
     const last = props.messages[props.messages.length - 1];
     return last?.role === 'narrator' && last.suggestions?.length
@@ -45,8 +45,25 @@ const suggestions = computed(() => {
         : [];
 });
 
+function adopted(suggestion: string): boolean {
+    return body.value.includes(suggestion);
+}
+
+// Answers accumulate rather than replace: a character is usually more than
+// one of these. Tapping an adopted one takes it back, so a mistap costs a
+// tap instead of hand-editing.
 function adopt(suggestion: string) {
-    body.value = suggestion;
+    const current = body.value.trim();
+
+    body.value = adopted(suggestion)
+        ? current
+              .replace(suggestion, '')
+              .replace(/\s{2,}/g, ' ')
+              .trim()
+        : current === ''
+          ? suggestion
+          : `${current} ${suggestion}`;
+
     speakBox.value?.focus();
 }
 
@@ -123,14 +140,23 @@ function insist() {
     );
 }
 
+// A narrator who could not answer says so here. Nothing was written to the
+// transcript, so the player's words are still in the box and Speak retries.
+const speakError = ref('');
+
 function send() {
     if (!body.value.trim() || sending.value) return;
     sending.value = true;
+    speakError.value = '';
     router.post(
         `/campaigns/${props.campaign.id}/interview`,
         { body: body.value },
         {
             onSuccess: () => (body.value = ''),
+            onError: (errors) =>
+                (speakError.value =
+                    errors.body ??
+                    'The words did not carry. Speak them again.'),
             onFinish: () => (sending.value = false),
         },
     );
@@ -169,9 +195,7 @@ watch(() => props.messages.length, scrollDown);
                 :key="message.id"
                 class="sc-rise"
                 :class="
-                    message.role === 'player'
-                        ? 'ml-8 flex justify-end'
-                        : 'mr-8'
+                    message.role === 'player' ? 'ml-8 flex justify-end' : 'mr-8'
                 "
             >
                 <div
@@ -218,7 +242,9 @@ watch(() => props.messages.length, scrollDown);
                     </p>
                     <p
                         class="text-sm font-semibold tabular-nums"
-                        :class="balance < 0 ? 'text-red-500' : 'text-violet-400'"
+                        :class="
+                            balance < 0 ? 'text-red-500' : 'text-violet-400'
+                        "
                     >
                         Balance: {{ balance }}
                     </p>
@@ -314,9 +340,9 @@ watch(() => props.messages.length, scrollDown);
                     v-if="balance < 0"
                     class="mt-2 text-xs text-amber-500 italic"
                 >
-                    Overspent — set a gift down, take up another burden, or
-                    step in regardless and carry the shortfall as a debt the
-                    world remembers.
+                    Overspent — set a gift down, take up another burden, or step
+                    in regardless and carry the shortfall as a debt the world
+                    remembers.
                 </p>
             </div>
         </div>
@@ -329,7 +355,12 @@ watch(() => props.messages.length, scrollDown);
                 v-for="suggestion in suggestions"
                 :key="suggestion"
                 type="button"
-                class="max-w-full rounded-lg border border-violet-500/30 bg-violet-500/10 px-3 py-1.5 text-left text-xs text-muted-foreground italic transition hover:border-violet-500/60 hover:text-foreground active:scale-[0.98]"
+                class="max-w-full rounded-lg border px-3 py-1.5 text-left text-xs italic transition active:scale-[0.98]"
+                :class="
+                    adopted(suggestion)
+                        ? 'border-violet-500 bg-violet-600/30 text-foreground'
+                        : 'border-violet-500/30 bg-violet-500/10 text-muted-foreground hover:border-violet-500/60 hover:text-foreground'
+                "
                 @click="adopt(suggestion)"
             >
                 {{ suggestion }}
@@ -361,6 +392,13 @@ watch(() => props.messages.length, scrollDown);
                     : "Can't find the words? Shape yourself from the old patterns →"
             }}
         </button>
+
+        <p
+            v-if="speakError && !showBuilder"
+            class="sc-rise text-xs text-amber-500 italic"
+        >
+            {{ speakError }}
+        </p>
 
         <form v-if="!showBuilder" class="flex gap-2" @submit.prevent="send">
             <textarea

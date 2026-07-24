@@ -144,6 +144,12 @@ PROMPT);
     /** Handle one player message; may complete the interview and start the campaign. */
     public function converse(Campaign $campaign, string $playerMessage): InterviewMessage
     {
+        // The player's words are spoken to the narrator before they are
+        // written down: a failed CLI run must leave the transcript exactly
+        // as it was, so the words stay in the player's hands to send again
+        // rather than sitting in the interview forever unanswered.
+        $response = $this->claude->promptForJson($this->creationPrompt($campaign, $playerMessage));
+
         InterviewMessage::create([
             'campaign_id' => $campaign->id,
             'kind' => 'creation',
@@ -156,8 +162,6 @@ PROMPT);
         if ($campaign->pending_sheet !== null) {
             $campaign->update(['pending_sheet' => null]);
         }
-
-        $response = $this->claude->promptForJson($this->creationPrompt($campaign));
 
         $reply = InterviewMessage::create([
             'campaign_id' => $campaign->id,
@@ -477,11 +481,22 @@ PROMPT);
         return $styles === [] ? null : $styles;
     }
 
-    private function creationPrompt(Campaign $campaign): string
+    /**
+     * @param  string|null  $pending  The player's newest words, not yet written
+     *                                to the transcript (they are committed only
+     *                                once the narrator has answered).
+     */
+    private function creationPrompt(Campaign $campaign, ?string $pending = null): string
     {
-        $transcript = $campaign->interviewMessages()->orderBy('id')->get()
+        $lines = $campaign->interviewMessages()->where('kind', 'creation')->orderBy('id')->get()
             ->map(fn (InterviewMessage $m) => strtoupper($m->role).": {$m->body}")
-            ->join("\n\n");
+            ->all();
+
+        if ($pending !== null) {
+            $lines[] = "PLAYER: {$pending}";
+        }
+
+        $transcript = implode("\n\n", $lines);
 
         $vocabulary = collect(Capability::cases())
             ->map(fn ($c) => $c->value.($c->parameterized() ? '(n)' : ''))
@@ -523,13 +538,6 @@ PROMPT;
     {
         $character = $campaign->character;
 
-        InterviewMessage::create([
-            'campaign_id' => $campaign->id,
-            'kind' => 'growth',
-            'role' => 'player',
-            'body' => $request,
-        ]);
-
         $sheet = $character->capabilities->map(fn ($c) => $c->only(['capability', 'magnitude', 'grade', 'scope']))->toJson();
         $constraints = $character->constraints->map(fn ($c) => $c->only(['name', 'params', 'coupled_capability']))->toJson();
         $bounds = json_encode(config('game.bounds.capability_magnitudes'));
@@ -546,6 +554,15 @@ Player's request: {$request}
 Respond with ONLY a JSON object:
 {"reply": "<in-world answer>", "granted": <bool>, "changes": <null or [{"capability": "...", "magnitude": <int|null>, "grade": <string|null>, "scope": <object|null>}]>}
 PROMPT);
+
+        // Written down only once the world has answered — same bargain as
+        // the creation interview.
+        InterviewMessage::create([
+            'campaign_id' => $campaign->id,
+            'kind' => 'growth',
+            'role' => 'player',
+            'body' => $request,
+        ]);
 
         if (($response['granted'] ?? false) && is_array($response['changes'] ?? null)) {
             $clamped = $this->clamp->clamp($response['changes']);

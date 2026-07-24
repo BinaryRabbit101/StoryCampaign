@@ -90,7 +90,18 @@ class InterviewController extends Controller
 
         $validated = $request->validate(['body' => ['required', 'string', 'max:2000']]);
 
-        $interviewer->converse($campaign, $validated['body']);
+        // A narrator who cannot answer (CLI down, timed out, or malformed
+        // twice over) sends the player back to their own words rather than a
+        // dead end: nothing was written, so speaking again simply retries.
+        try {
+            $interviewer->converse($campaign, $validated['body']);
+        } catch (\RuntimeException $e) {
+            report($e);
+
+            throw ValidationException::withMessages([
+                'body' => 'The words did not carry — the world did not hear you. Speak them again.',
+            ]);
+        }
 
         $campaign->refresh();
 
@@ -107,7 +118,15 @@ class InterviewController extends Controller
 
         $validated = $request->validate(['body' => ['required', 'string', 'max:2000']]);
 
-        $interviewer->grow($campaign, $validated['body']);
+        try {
+            $interviewer->grow($campaign, $validated['body']);
+        } catch (\RuntimeException $e) {
+            report($e);
+
+            throw ValidationException::withMessages([
+                'body' => 'The world did not answer. Ask again.',
+            ]);
+        }
 
         return redirect()->route('play.show', $campaign);
     }

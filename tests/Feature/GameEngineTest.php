@@ -982,6 +982,32 @@ class GameEngineTest extends TestCase
                 ->where('messages.2.suggestions.0', 'The tail tangles in tight spaces.'));
     }
 
+    public function test_a_narrator_that_cannot_answer_leaves_the_players_words_in_their_hands()
+    {
+        $this->seed(WorldSeeder::class);
+        $user = User::factory()->create();
+
+        // The CLI is down (or answers twice-malformed): the interview must
+        // not swallow the turn the way a stranded player message does.
+        $this->mock(ClaudeCli::class, function ($mock) {
+            $mock->shouldReceive('promptForJson')->andThrow(new \RuntimeException('offline'))->byDefault();
+            $mock->shouldReceive('prompt')->andThrow(new \RuntimeException('offline'))->byDefault();
+        });
+
+        $this->actingAs($user)->post('/campaigns', ['name' => 'Broken Telling'])->assertRedirect();
+        $campaign = $user->campaigns()->first();
+        $before = $campaign->interviewMessages()->count();
+
+        $this->actingAs($user)->from("/campaigns/{$campaign->id}/interview")
+            ->post("/campaigns/{$campaign->id}/interview", ['body' => 'A huge black cat with a prehensile tail.'])
+            ->assertRedirect("/campaigns/{$campaign->id}/interview")
+            ->assertSessionHasErrors('body');
+
+        // Nothing was written down — no half-exchange, no stranded message.
+        $this->assertSame($before, $campaign->interviewMessages()->count());
+        $this->assertSame('interview', $campaign->fresh()->status);
+    }
+
     public function test_a_character_can_be_built_from_the_trait_catalog_but_never_overspent()
     {
         $this->seed(WorldSeeder::class);
