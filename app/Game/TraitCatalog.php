@@ -177,6 +177,73 @@ class TraitCatalog
     }
 
     /**
+     * The price of one capability entry — the same scale the catalog's
+     * gifts are built on, applicable to ANY sheet (so interview-translated
+     * characters pay the same coin as point-bought ones). A large squeeze
+     * grade prices negative: a big body is a burden, whoever wrote it.
+     */
+    public static function capabilityCost(array $entry): int
+    {
+        $magnitude = (int) ($entry['magnitude'] ?? 0);
+
+        return match ($entry['capability'] ?? '') {
+            'swim', 'quiet_move', 'grapple', 'pull', 'throw', 'descend', 'delay', 'ready' => 1,
+            'leap' => $magnitude >= 2 ? 3 : 1,
+            'reach' => $magnitude > 8 ? 4 : 2,
+            'lift' => $magnitude > 120 ? 4 : 2,
+            'squeeze' => match ($entry['grade'] ?? 'medium') {
+                'small' => 3,
+                'large' => -2,
+                default => 2,
+            },
+            'intimidate', 'detect' => 3,
+            'haste' => 3,
+            'time_slow' => 5,
+            default => 2,
+        };
+    }
+
+    /** What a real constraint pays back toward the budget. */
+    public static function constraintRefund(array $constraint): int
+    {
+        return match ($constraint['name'] ?? '') {
+            'ponderous', 'stealth_penalty' => 2,
+            default => 1,
+        };
+    }
+
+    /**
+     * Points remaining for an arbitrary sheet (interview-translated or
+     * otherwise): allowance − capability costs + constraint refunds.
+     * Negative means the world refuses the bargain.
+     *
+     * @param  list<array>  $capabilities
+     * @param  list<array>  $constraints
+     */
+    public static function sheetBalance(array $capabilities, array $constraints): int
+    {
+        $points = self::startingPoints();
+
+        foreach ($capabilities as $entry) {
+            $points -= self::capabilityCost($entry);
+        }
+        foreach ($constraints as $constraint) {
+            $points += self::constraintRefund($constraint);
+        }
+
+        return $points;
+    }
+
+    /** A compact price list for the interviewer's prompt. */
+    public static function priceSheetForPrompt(): string
+    {
+        return 'Costs: time_slow 5; reach>8 or lift>120 4; intimidate, detect, haste, leap(2+), squeeze(small) 3; '
+            .'most capabilities 2; swim, grapple, pull, throw, quiet_move, descend, delay, ready, leap(1) 1; '
+            .'squeeze(large) −2 (a big body pays back). '
+            .'Refunds: ponderous, stealth_penalty 2; any other real constraint 1.';
+    }
+
+    /**
      * Compile a valid selection into the engine's own terms: capability
      * rows, constraint rows, a health delta, and the chosen labels for the
      * prose that will be written around them.

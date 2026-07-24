@@ -1050,6 +1050,59 @@ class GameEngineTest extends TestCase
                 ->has('catalog.negatives'));
     }
 
+    public function test_the_interview_sheet_pays_the_same_coin_as_the_point_buy()
+    {
+        $this->seed(WorldSeeder::class);
+        $user = User::factory()->create();
+
+        $sheet = fn (array $constraints) => [
+            'reply' => 'It is done.',
+            'suggestions' => [],
+            'complete' => true,
+            'character' => [
+                'name' => 'The Weighed',
+                'description' => 'A long-limbed presence.',
+                'capabilities' => [
+                    ['capability' => 'reach', 'magnitude' => 12],
+                    ['capability' => 'intimidate', 'scope' => ['vs' => 'regular']],
+                ],
+                'constraints' => $constraints,
+            ],
+            'prologue' => 'They arrived.',
+        ];
+
+        // First completion attempt names no price (cost 7 vs allowance 3);
+        // the second carries constraints worth 4 and breaks even.
+        $this->mock(ClaudeCli::class, function ($mock) use ($sheet) {
+            $mock->shouldReceive('promptForJson')->andReturn(
+                $sheet([]),
+                $sheet([
+                    ['name' => 'ponderous', 'params' => ['pace' => 'slow']],
+                    ['name' => 'stealth_penalty', 'params' => ['reason' => 'unmistakable']],
+                ]),
+            )->byDefault();
+        });
+
+        $this->actingAs($user)->post('/campaigns', ['name' => 'Weighed Tale']);
+        $campaign = $user->campaigns()->first();
+
+        // All gift, no debt: the world refuses in-world and the interview
+        // continues, with burden suggestions on the refusal.
+        $this->actingAs($user)->post("/campaigns/{$campaign->id}/interview", ['body' => 'I am mighty.']);
+        $campaign->refresh();
+        $this->assertSame('interview', $campaign->status);
+        $refusal = $campaign->interviewMessages()->orderByDesc('id')->first();
+        $this->assertStringContainsString('the scales refuse it', $refusal->body);
+        $this->assertNotEmpty($refusal->suggestions);
+
+        // A price named: the same gifts now break even, and the tale opens.
+        $this->actingAs($user)->post("/campaigns/{$campaign->id}/interview", ['body' => 'I am slow, and remembered everywhere.']);
+        $campaign->refresh();
+        $this->assertSame('active', $campaign->status);
+        $this->assertSame(12, $campaign->character->capabilities->firstWhere('capability', 'reach')->magnitude);
+        $this->assertTrue($campaign->character->constraints->pluck('name')->contains('ponderous'));
+    }
+
     public function test_widget_endpoint_requires_a_valid_token()
     {
         $campaign = $this->createCatCampaign();

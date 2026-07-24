@@ -171,15 +171,40 @@ PROMPT);
 
     private function finalize(Campaign $campaign, array $response): void
     {
+        $sheet = $response['character'];
+        $clamped = $this->clamp->clamp($sheet['capabilities'] ?? []);
+        $allConstraints = array_merge($sheet['constraints'] ?? [], $clamped['constraints']);
+
+        // The same coin as the point-buy path: the interview's sheet must
+        // break even against the creation allowance. When the bargain runs
+        // short, the world refuses in-world and the interview continues —
+        // the player names a real price, or sets a gift down.
+        if (TraitCatalog::sheetBalance($clamped['capabilities'], $allConstraints) < 0) {
+            InterviewMessage::create([
+                'campaign_id' => $campaign->id,
+                'kind' => 'creation',
+                'role' => 'narrator',
+                'body' => 'The world weighs what you ask, and the scales refuse it — such gifts want a '
+                    .'heavier price than you have named. Tell me what they truly cost you: what fails, '
+                    .'what marks you, what follows you. Or set one gift down.',
+                'suggestions' => [
+                    'My size betrays me — I cannot pass where smaller lives slip through, and I am remembered everywhere.',
+                    'I am slow. Nothing about me moves quickly, and everyone can tell.',
+                    'When blood shows, some part of me is already leaving.',
+                    'Then set aside the least of my gifts — I will earn it in the world instead.',
+                ],
+            ]);
+
+            return;
+        }
+
         // The world is forged and the stage-built opening planned before the
         // transaction (slow CLI calls); a null plan falls back to the forged
         // zone's own templates.
         $this->forge->ensureStartingZone($campaign);
-        $opening = $this->stage->plan($campaign, $response['character']['description'] ?? '');
+        $opening = $this->stage->plan($campaign, $sheet['description'] ?? '');
 
-        DB::transaction(function () use ($campaign, $response, $opening) {
-            $sheet = $response['character'];
-            $clamped = $this->clamp->clamp($sheet['capabilities'] ?? []);
+        DB::transaction(function () use ($campaign, $response, $opening, $sheet, $clamped) {
 
             $meters = Meters::default();
             foreach ($clamped['capabilities'] as $entry) {
@@ -418,6 +443,8 @@ PROMPT);
 
         $stage = $campaign->stageBrief();
         $stageSection = $stage === '' ? '' : "\n## The player set the stage (speak and shape the prologue in its spirit)\n{$stage}\n";
+        $points = TraitCatalog::startingPoints();
+        $prices = TraitCatalog::priceSheetForPrompt();
 
         return <<<PROMPT
 You are conducting an in-world character creation interview for a living-world RPG. The player describes their character narratively; you translate it under the hood into a clean structured loadout. Ask at most a few short, evocative questions (one per reply). After the player has given enough (usually 2-4 exchanges), complete the interview.
@@ -426,6 +453,7 @@ You are conducting an in-world character creation interview for a living-world R
 Rules:
 - Capabilities must come from this vocabulary: {$vocabulary}
 - Every strong capability should drag a constraint with it (power/constraint coupling). Example: large intimidating size → cannot squeeze through narrow gaps, stealth penalty, breaks fragile surfaces.
+- HARD BUDGET (engine-enforced; an overspent sheet is refused and the interview continues): the sheet starts with {$points} points. {$prices} Balance the finished sheet at zero or better — a gift-heavy character MUST carry real constraints to pay for it. Weave the accounting into your questions in-world ("every gift leaves a debt — where does yours come due?"), never as numbers.
 - Magnitudes are clamped by the engine regardless of what you write; keep them modest (reach ≤ 15, lift ≤ 250 at creation).
 - Scoped social powers: e.g. intimidate should carry {"vs": "regular"} so it does not flatten elite encounters.
 - attack_styles: 3-6 short phrases for how this body attacks (e.g. "a bite", "a rake of claws", "a tail-whip", "a shoulder-slam"). Narration vocabulary only — they never change outcomes.
