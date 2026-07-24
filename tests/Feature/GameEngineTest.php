@@ -982,6 +982,74 @@ class GameEngineTest extends TestCase
                 ->where('messages.2.suggestions.0', 'The tail tangles in tight spaces.'));
     }
 
+    public function test_a_character_can_be_built_from_the_trait_catalog_but_never_overspent()
+    {
+        $this->seed(WorldSeeder::class);
+        $user = User::factory()->create();
+        $this->mock(ClaudeCli::class, function ($mock) {
+            $mock->shouldReceive('promptForJson')->andThrow(new \RuntimeException('offline'))->byDefault();
+        });
+
+        $this->actingAs($user)->post('/campaigns', ['name' => 'Point Tale']);
+        $campaign = $user->campaigns()->first();
+
+        // Overspent: gifts alone cost 9 against an allowance of 3.
+        $this->actingAs($user)->from("/campaigns/{$campaign->id}/interview")
+            ->post("/campaigns/{$campaign->id}/interview/build", ['traits' => ['prehensile-grip', 'time-slow']])
+            ->assertSessionHasErrors('traits');
+
+        // Two frames at once: exclusive-group conflict, even though the
+        // points would balance.
+        $this->actingAs($user)->from("/campaigns/{$campaign->id}/interview")
+            ->post("/campaigns/{$campaign->id}/interview/build", ['traits' => ['slight-frame', 'massive-frame']])
+            ->assertSessionHasErrors('traits');
+
+        // Burdens only: a character needs at least one gift.
+        $this->actingAs($user)->from("/campaigns/{$campaign->id}/interview")
+            ->post("/campaigns/{$campaign->id}/interview/build", ['traits' => ['frail']])
+            ->assertSessionHasErrors('traits');
+
+        $this->assertSame('interview', $campaign->fresh()->status);
+
+        // A balanced bargain is born: cost 6, refund 4, allowance 3 → +1.
+        $this->actingAs($user)->post("/campaigns/{$campaign->id}/interview/build", [
+            'name' => 'Brindle',
+            'traits' => ['prehensile-grip', 'grappler', 'frail', 'ponderous'],
+        ])->assertRedirect("/play/{$campaign->id}");
+
+        $campaign->refresh();
+        $character = $campaign->character;
+        $this->assertSame('active', $campaign->status);
+        $this->assertSame('Brindle', $character->name);
+
+        // The engine compiled the sheet: gifts became clamped capabilities,
+        // burdens became real debits — health down, constraint recorded.
+        $capabilities = $character->capabilities->keyBy('capability');
+        $this->assertSame(12, $capabilities['reach']->magnitude);
+        $this->assertTrue($capabilities->has('restrain'));
+        $this->assertTrue($capabilities->has('grapple'));
+        $this->assertSame(8, $character->meters['health']['max']);
+        $this->assertTrue($character->constraints->pluck('name')->contains('ponderous'));
+
+        // The tale opened for real: prologue written (stock — the forge is
+        // cold here), turn 1 waiting, and the bargain in the transcript.
+        $this->assertSame('prologue', $campaign->chapters()->first()->kind);
+        $this->assertSame(1, $campaign->currentTurn->number);
+        $this->assertTrue(
+            $campaign->interviewMessages()->where('role', 'player')->get()
+                ->contains(fn ($m) => str_contains($m->body, 'old patterns')),
+        );
+
+        // The interview page hands the priced catalog to the client.
+        $this->actingAs($user)->post('/campaigns', ['name' => 'Second Point Tale']);
+        $second = $user->campaigns()->where('name', 'Second Point Tale')->first();
+        $this->actingAs($user)->get("/campaigns/{$second->id}/interview")
+            ->assertInertia(fn ($page) => $page
+                ->where('catalog.points', 3)
+                ->has('catalog.positives')
+                ->has('catalog.negatives'));
+    }
+
     public function test_widget_endpoint_requires_a_valid_token()
     {
         $campaign = $this->createCatCampaign();

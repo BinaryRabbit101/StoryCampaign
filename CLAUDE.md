@@ -38,6 +38,9 @@ same as sibling projects). Fortify auth, Wayfinder, PHPUnit 12, SQLite, PWA
 adjudicates legality or outcomes — it is only ever handed resolved facts.
 
 - `app/Game/` — mechanics. `Capability` (the shared verb vocabulary),
+  `TraitCatalog` (the point-buy creation path: engine-priced gifts cost
+  points, burdens refund them, builds must break even against
+  `creation_points`; Claude only writes prose around the finished sheet),
   `CapabilityGroup` (slot scoping), `TurnSlot` (pre/main/post), `BranchTrigger`
   (the 8 vignette stop conditions), `Meters` (tempo regens in real time across
   the idle wait; health only via recovery beats).

@@ -4,6 +4,7 @@ namespace App\Services\Claude;
 
 use App\Game\Capability;
 use App\Game\Meters;
+use App\Game\TraitCatalog;
 use App\Models\Campaign;
 use App\Models\Chapter;
 use App\Models\Character;
@@ -226,6 +227,144 @@ PROMPT);
 
             $this->starter->openFirstTurn($campaign, $opening);
         });
+    }
+
+    /**
+     * The point-buy path: the player picked priced traits from the catalog
+     * instead of describing themselves. The ENGINE has already validated
+     * the balance and compiles the sheet; Claude is only asked to write
+     * prose around the finished numbers — a description, attack styles,
+     * and a prologue — and a failed call falls back to stock text rather
+     * than blocking the birth.
+     *
+     * @param  list<string>  $traitKeys
+     */
+    public function buildFromTraits(Campaign $campaign, array $traitKeys, ?string $name): void
+    {
+        $build = TraitCatalog::compile($traitKeys);
+        $name = trim((string) $name) ?: 'The Nameless';
+
+        // Slow CLI calls run before the transaction, as everywhere else.
+        $this->forge->ensureStartingZone($campaign);
+        $prose = $this->traitProse($campaign, $name, $build);
+        $opening = $this->stage->plan($campaign, $prose['description']);
+
+        DB::transaction(function () use ($campaign, $build, $name, $prose, $opening) {
+            $meters = Meters::default();
+            $meters['health']['max'] = max(4, $meters['health']['max'] + $build['health']);
+            $meters['health']['current'] = $meters['health']['max'];
+
+            foreach ($build['capabilities'] as $entry) {
+                $capability = Capability::tryFrom($entry['capability']);
+                if ($capability?->metered()) {
+                    $meters['tempo'][$capability->value] = ['current' => 2, 'max' => 3];
+                }
+            }
+
+            $character = Character::create([
+                'campaign_id' => $campaign->id,
+                'name' => $name,
+                'description' => $prose['description'],
+                'attack_styles' => $prose['attack_styles'],
+                'meters' => $meters,
+                'status' => 'alive',
+                'meters_regenerated_at' => now(),
+            ]);
+
+            $clamped = $this->clamp->clamp($build['capabilities']);
+            foreach ($clamped['capabilities'] as $entry) {
+                $character->capabilities()->create($entry + ['source' => 'creation']);
+            }
+            foreach (array_merge($build['constraints'], $clamped['constraints']) as $constraint) {
+                $character->constraints()->create($constraint + ['source' => 'creation']);
+            }
+
+            // The choice enters the transcript, so the interview reads as a
+            // finished conversation rather than stopping mid-question.
+            InterviewMessage::create([
+                'campaign_id' => $campaign->id, 'kind' => 'creation', 'role' => 'player',
+                'body' => 'I shaped myself from the old patterns. Gifts: '.implode(', ', $build['gifts']).'.'
+                    .($build['burdens'] === [] ? '' : ' Burdens: '.implode(', ', $build['burdens']).'.'),
+            ]);
+            InterviewMessage::create([
+                'campaign_id' => $campaign->id, 'kind' => 'creation', 'role' => 'narrator',
+                'body' => 'So shaped, so weighed — the world accepts the bargain. Your tale begins.',
+            ]);
+
+            Chapter::create([
+                'campaign_id' => $campaign->id,
+                'turn_id' => null,
+                'number' => $campaign->nextChapterNumber(),
+                'kind' => 'prologue',
+                'intent_line' => null,
+                'body' => $prose['prologue'],
+            ]);
+
+            $campaign->update(['status' => 'active', 'started_at' => now()]);
+
+            $this->starter->openFirstTurn($campaign, $opening);
+        });
+    }
+
+    /**
+     * Prose around a fixed sheet. Claude may not alter the numbers — it is
+     * handed the finished traits and asked only for words.
+     *
+     * @return array{description: string, attack_styles: ?list<string>, prologue: string}
+     */
+    private function traitProse(Campaign $campaign, string $name, array $build): array
+    {
+        $gifts = implode(', ', $build['gifts']) ?: '(none)';
+        $burdens = implode(', ', $build['burdens']) ?: '(none)';
+        $stage = $campaign->stageBrief();
+        $stageSection = $stage === '' ? '' : "\n## The player set the stage\n{$stage}\n";
+
+        try {
+            $response = $this->claude->promptForJson(<<<PROMPT
+A player built their character for a living-world RPG by choosing traits from a catalog. The sheet is FIXED — do not add, remove, or reinterpret any ability. Write only the words around it.
+{$stageSection}
+
+## The finished sheet
+Name: {$name}
+Gifts: {$gifts}
+Burdens: {$burdens}
+
+Respond with ONLY a JSON object:
+{
+  "description": "<2-3 sentence portrait of who this is, embodying every gift and burden, no mechanics language>",
+  "attack_styles": <3-6 short phrases for how this body attacks, fitted to the gifts, e.g. "a driving shoulder", "a lash of the long limb">,
+  "prologue": "<200-400 word prologue chapter narrating this character's arrival into the world, third-person past tense, no mechanics>"
+}
+PROMPT);
+
+            return [
+                'description' => trim((string) ($response['description'] ?? '')) ?: $this->stockDescription($name, $build),
+                'attack_styles' => $this->attackStyles(['attack_styles' => $response['attack_styles'] ?? []]),
+                'prologue' => trim((string) ($response['prologue'] ?? '')) ?: $this->stockPrologue($name),
+            ];
+        } catch (\Throwable $e) {
+            report($e);
+
+            return [
+                'description' => $this->stockDescription($name, $build),
+                'attack_styles' => null,
+                'prologue' => $this->stockPrologue($name),
+            ];
+        }
+    }
+
+    private function stockDescription(string $name, array $build): string
+    {
+        $gifts = implode(', ', array_map('strtolower', $build['gifts'])) ?: 'no gift but stubbornness';
+        $burdens = $build['burdens'] === [] ? '' : ', carrying '.implode(', ', array_map('strtolower', $build['burdens']));
+
+        return "{$name}: marked by {$gifts}{$burdens}.";
+    }
+
+    private function stockPrologue(string $name): string
+    {
+        return "{$name} stepped into the waiting world exactly as they had made themselves — "
+            .'gifts in one hand, their price in the other. Somewhere ahead, a story was already making room.';
     }
 
     /**

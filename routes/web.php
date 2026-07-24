@@ -25,6 +25,7 @@ Route::middleware(['auth', 'verified'])->group(function () {
 
     Route::get('campaigns/{campaign}/interview', [InterviewController::class, 'show'])->name('interview.show');
     Route::post('campaigns/{campaign}/interview', [InterviewController::class, 'message'])->name('interview.message');
+    Route::post('campaigns/{campaign}/interview/build', [InterviewController::class, 'build'])->name('interview.build');
     Route::post('campaigns/{campaign}/grow', [InterviewController::class, 'grow'])->name('interview.grow');
 
     Route::get('play/{campaign}', [PlayController::class, 'show'])->name('play.show');

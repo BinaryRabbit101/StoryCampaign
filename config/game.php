@@ -104,6 +104,17 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Creation point-buy
+    |--------------------------------------------------------------------------
+    | Starting allowance for the trait-catalog path through character
+    | creation: gifts cost points, burdens refund them, and the build must
+    | at least break even. Prices live in App\Game\TraitCatalog.
+    */
+
+    'creation_points' => 3,
+
+    /*
+    |--------------------------------------------------------------------------
     | Meters (open thread #1: decided defaults)
     |--------------------------------------------------------------------------
     | Tempo meters regenerate in real time across the wait between turns —

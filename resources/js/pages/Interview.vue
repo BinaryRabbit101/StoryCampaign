@@ -10,9 +10,23 @@ interface Message {
     suggestions: string[] | null;
 }
 
+interface TraitOption {
+    key: string;
+    label: string;
+    description: string;
+    cost?: number;
+    refund?: number;
+    group: string | null;
+}
+
 const props = defineProps<{
     campaign: { id: number; name: string; status: string };
     messages: Message[];
+    catalog: {
+        points: number;
+        positives: TraitOption[];
+        negatives: TraitOption[];
+    };
 }>();
 
 const body = ref('');
@@ -33,6 +47,61 @@ const suggestions = computed(() => {
 function adopt(suggestion: string) {
     body.value = suggestion;
     speakBox.value?.focus();
+}
+
+// ---- The point-buy path: gifts cost, burdens refund, break even to be born. ----
+
+const showBuilder = ref(false);
+const selected = ref<string[]>([]);
+const buildName = ref('');
+const building = ref(false);
+
+const allTraits = computed(() => [
+    ...props.catalog.positives,
+    ...props.catalog.negatives,
+]);
+
+const balance = computed(() =>
+    allTraits.value.reduce(
+        (points, trait) =>
+            selected.value.includes(trait.key)
+                ? points + (trait.refund ?? 0) - (trait.cost ?? 0)
+                : points,
+        props.catalog.points,
+    ),
+);
+
+const hasGift = computed(() =>
+    props.catalog.positives.some((t) => selected.value.includes(t.key)),
+);
+
+// A trait is blocked when another selected trait occupies its exclusive
+// group (e.g. two frame sizes at once).
+function blocked(trait: TraitOption): boolean {
+    if (!trait.group || selected.value.includes(trait.key)) return false;
+    return allTraits.value.some(
+        (other) =>
+            other.key !== trait.key &&
+            other.group === trait.group &&
+            selected.value.includes(other.key),
+    );
+}
+
+function toggle(trait: TraitOption) {
+    if (blocked(trait)) return;
+    selected.value = selected.value.includes(trait.key)
+        ? selected.value.filter((k) => k !== trait.key)
+        : [...selected.value, trait.key];
+}
+
+function confirmBuild() {
+    if (building.value || !hasGift.value || balance.value < 0) return;
+    building.value = true;
+    router.post(
+        `/campaigns/${props.campaign.id}/interview/build`,
+        { name: buildName.value.trim() || null, traits: selected.value },
+        { onFinish: () => (building.value = false) },
+    );
 }
 
 function send() {
@@ -114,8 +183,110 @@ watch(() => props.messages.length, scrollDown);
             </p>
         </div>
 
+        <div v-if="showBuilder && !sending" class="sc-rise space-y-3">
+            <div
+                class="rounded-xl border border-sidebar-border/70 bg-background/60 p-4 backdrop-blur-sm dark:border-sidebar-border"
+            >
+                <div class="mb-3 flex items-baseline justify-between">
+                    <p
+                        class="text-xs tracking-widest text-muted-foreground uppercase"
+                    >
+                        Shape yourself from the old patterns
+                    </p>
+                    <p
+                        class="text-sm font-semibold tabular-nums"
+                        :class="balance < 0 ? 'text-red-500' : 'text-violet-400'"
+                    >
+                        Balance: {{ balance }}
+                    </p>
+                </div>
+
+                <p class="mb-1 text-xs font-medium text-muted-foreground">
+                    Gifts <span class="font-normal">(cost points)</span>
+                </p>
+                <div class="mb-3 flex flex-wrap gap-1.5">
+                    <button
+                        v-for="trait in catalog.positives"
+                        :key="trait.key"
+                        type="button"
+                        :disabled="blocked(trait)"
+                        :title="trait.description"
+                        class="rounded-lg border px-2.5 py-1 text-xs transition active:scale-[0.98] disabled:opacity-30"
+                        :class="
+                            selected.includes(trait.key)
+                                ? 'border-violet-500 bg-violet-600/30 text-foreground'
+                                : 'border-input bg-background/60 text-muted-foreground hover:border-violet-500/50'
+                        "
+                        @click="toggle(trait)"
+                    >
+                        {{ trait.label }}
+                        <span class="opacity-70">−{{ trait.cost }}</span>
+                    </button>
+                </div>
+
+                <p class="mb-1 text-xs font-medium text-muted-foreground">
+                    Burdens <span class="font-normal">(refund points)</span>
+                </p>
+                <div class="mb-3 flex flex-wrap gap-1.5">
+                    <button
+                        v-for="trait in catalog.negatives"
+                        :key="trait.key"
+                        type="button"
+                        :disabled="blocked(trait)"
+                        :title="trait.description"
+                        class="rounded-lg border px-2.5 py-1 text-xs transition active:scale-[0.98] disabled:opacity-30"
+                        :class="
+                            selected.includes(trait.key)
+                                ? 'border-amber-500 bg-amber-600/25 text-foreground'
+                                : 'border-input bg-background/60 text-muted-foreground hover:border-amber-500/50'
+                        "
+                        @click="toggle(trait)"
+                    >
+                        {{ trait.label }}
+                        <span class="opacity-70">+{{ trait.refund }}</span>
+                    </button>
+                </div>
+
+                <p
+                    v-if="selected.length"
+                    class="mb-3 text-xs text-muted-foreground italic"
+                >
+                    {{
+                        allTraits
+                            .filter((t) => selected.includes(t.key))
+                            .map((t) => t.description)
+                            .join(' ')
+                    }}
+                </p>
+
+                <div class="flex gap-2">
+                    <input
+                        v-model="buildName"
+                        type="text"
+                        maxlength="40"
+                        placeholder="A name (optional)"
+                        class="flex-1 rounded-md border border-input bg-background px-3 py-2 text-sm"
+                    />
+                    <button
+                        type="button"
+                        :disabled="building || !hasGift || balance < 0"
+                        class="rounded-md bg-gradient-to-br from-violet-600 to-violet-800 px-4 py-2 text-sm font-medium text-white shadow-lg shadow-violet-900/20 transition hover:from-violet-500 hover:to-violet-700 active:scale-[0.98] disabled:opacity-50"
+                        @click="confirmBuild"
+                    >
+                        {{ building ? 'Being born…' : 'Step into the world' }}
+                    </button>
+                </div>
+                <p
+                    v-if="balance < 0"
+                    class="mt-2 text-xs text-red-500 italic"
+                >
+                    Overspent — set a gift down, or take up another burden.
+                </p>
+            </div>
+        </div>
+
         <div
-            v-if="suggestions.length && !sending"
+            v-if="suggestions.length && !sending && !showBuilder"
             class="sc-rise flex flex-wrap gap-2"
         >
             <button
@@ -129,7 +300,19 @@ watch(() => props.messages.length, scrollDown);
             </button>
         </div>
 
-        <form class="flex gap-2" @submit.prevent="send">
+        <button
+            type="button"
+            class="sc-rise self-start text-xs text-violet-400/90 italic transition hover:text-violet-300"
+            @click="showBuilder = !showBuilder"
+        >
+            {{
+                showBuilder
+                    ? '← Back to speaking freely'
+                    : "Can't find the words? Shape yourself from the old patterns →"
+            }}
+        </button>
+
+        <form v-if="!showBuilder" class="flex gap-2" @submit.prevent="send">
             <textarea
                 ref="speakBox"
                 v-model="body"

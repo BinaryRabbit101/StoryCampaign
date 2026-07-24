@@ -2,11 +2,13 @@
 
 namespace App\Http\Controllers;
 
+use App\Game\TraitCatalog;
 use App\Models\Campaign;
 use App\Models\InterviewMessage;
 use App\Services\Claude\Interviewer;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
+use Illuminate\Validation\ValidationException;
 use Inertia\Inertia;
 use Inertia\Response;
 
@@ -24,7 +26,42 @@ class InterviewController extends Controller
             'campaign' => $campaign->only(['id', 'name', 'status']),
             'messages' => $campaign->interviewMessages()->where('kind', 'creation')->orderBy('id')->get()
                 ->map(fn (InterviewMessage $m) => $m->only(['id', 'role', 'body', 'suggestions'])),
+            'catalog' => [
+                'points' => TraitCatalog::startingPoints(),
+                'positives' => collect(TraitCatalog::positives())
+                    ->map(fn ($t, $key) => ['key' => $key, 'label' => $t['label'], 'description' => $t['description'], 'cost' => $t['cost'], 'group' => $t['group'] ?? null])
+                    ->values(),
+                'negatives' => collect(TraitCatalog::negatives())
+                    ->map(fn ($t, $key) => ['key' => $key, 'label' => $t['label'], 'description' => $t['description'], 'refund' => $t['refund'], 'group' => $t['group'] ?? null])
+                    ->values(),
+            ],
         ]);
+    }
+
+    /**
+     * The point-buy path: the engine prices and validates the build (the
+     * balance must at least break even); Claude only writes prose around
+     * the finished sheet.
+     */
+    public function build(Request $request, Campaign $campaign, Interviewer $interviewer): RedirectResponse
+    {
+        abort_unless($campaign->user_id === $request->user()->id, 403);
+        abort_unless($campaign->status === 'interview', 400);
+
+        $validated = $request->validate([
+            'name' => ['nullable', 'string', 'max:40'],
+            'traits' => ['required', 'array', 'max:20'],
+            'traits.*' => ['string'],
+        ]);
+
+        $reason = TraitCatalog::rejectionReason($validated['traits']);
+        if ($reason !== null) {
+            throw ValidationException::withMessages(['traits' => $reason]);
+        }
+
+        $interviewer->buildFromTraits($campaign, $validated['traits'], $validated['name'] ?? null);
+
+        return redirect()->route('play.show', $campaign);
     }
 
     public function message(Request $request, Campaign $campaign, Interviewer $interviewer): RedirectResponse
