@@ -16,14 +16,12 @@ interface CampaignRow {
 defineProps<{
     campaigns: CampaignRow[];
     characters: { id: number; name: string; from: string }[];
-    zones: { id: number; name: string }[];
 }>();
 
 const newName = ref('');
 const characterId = ref<number | ''>('');
 const premise = ref('');
 const tone = ref('');
-const zoneId = ref<number | ''>('');
 const creating = ref(false);
 
 function create() {
@@ -36,7 +34,6 @@ function create() {
             character_id: characterId.value === '' ? null : characterId.value,
             premise: premise.value.trim() || null,
             tone: tone.value.trim() || null,
-            starting_zone_id: zoneId.value === '' ? null : zoneId.value,
         },
         { onFinish: () => (creating.value = false) },
     );
@@ -162,23 +159,10 @@ function statusLabel(status: string): string {
                     />
                 </div>
 
-                <div v-if="zones.length > 1">
-                    <label
-                        class="mb-1 block text-xs font-medium text-muted-foreground"
-                    >
-                        Where it begins
-                        <span class="font-normal">(optional)</span>
-                    </label>
-                    <select
-                        v-model="zoneId"
-                        class="w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
-                    >
-                        <option value="">Let the world decide</option>
-                        <option v-for="z in zones" :key="z.id" :value="z.id">
-                            Begin in {{ z.name }}
-                        </option>
-                    </select>
-                </div>
+                <p class="text-xs text-muted-foreground italic">
+                    A world will be forged for this tale — shaped by your
+                    premise and tone, and grown outward as you walk it.
+                </p>
 
                 <button
                     type="submit"

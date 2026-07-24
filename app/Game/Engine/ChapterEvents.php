@@ -44,6 +44,7 @@ class ChapterEvents
         'scout' => 'stealth',
         'detect' => 'stealth',
         'track' => 'move',
+        'venture' => 'move',
         'interrupt' => 'attack',
         'brace' => 'defense',
         'command' => 'ally',

@@ -11,6 +11,7 @@ use App\Models\Scene;
 use App\Models\SceneFeature;
 use App\Models\Turn;
 use App\Models\Zone;
+use App\Services\Claude\ZoneForge;
 
 /**
  * Opens a campaign's first scene and turn once the creation interview
@@ -24,13 +25,14 @@ class TurnStarter
     public function __construct(
         private readonly CardComposer $composer,
         private readonly SceneDresser $dresser,
+        private readonly ZoneForge $forge,
     ) {}
 
     public function openFirstTurn(Campaign $campaign, ?array $opening = null): Turn
     {
-        // The player may have chosen where the tale opens; otherwise the
-        // world's first zone stands.
-        $zone = Zone::find($campaign->starting_zone_id) ?? Zone::orderBy('id')->firstOrFail();
+        // Every tale opens in its own forged world. The interviewer forges
+        // it ahead of the transaction; this is the defensive fallback.
+        $zone = Zone::find($campaign->starting_zone_id) ?? $this->forge->ensureStartingZone($campaign);
         $dice = new Dice($campaign->id * 2654435761 % PHP_INT_MAX);
 
         $scene = Scene::create([
@@ -51,7 +53,7 @@ class TurnStarter
             $this->dresser->spawnActors($scene, $dice, 2, 3);
         }
 
-        $character = $campaign->character;
+        $character = $campaign->character()->firstOrFail();
         $scene = $scene->fresh();
         $cards = $this->composer->compose($character, $scene);
         $health = $character->meters['health'];

@@ -4,10 +4,14 @@ Turn-based idle RPG: scheduled Claude CLI runs narrate turn resolutions into
 chapters. Players act through one structured form per turn (contextual action
 cards, never free text); the engine owns all mechanics and outcomes; Claude
 owns narration. Every chapter is persisted and compiles into a keepsake book
-at campaign end. World evolution (`game:evolve`, `WorldEvolver`, Chronicle)
-runs on an activity-gated schedule (`GAME_EVOLVE_SCHEDULE` = daily|weekly|off,
-default daily): the Claude call only fires if a turn resolved inside the
-window, so an idle world burns nothing.
+at campaign end. Each campaign plays in its OWN forged world: `ZoneForge`
+builds the starting zone at creation (colored by premise/tone) and pre-forges
+each frontier zone during the narration run once the tale has ranged
+`frontier_scenes` scenes in the current zone — a "Press on toward X" venture
+card then crosses into it. World evolution (`game:evolve`, `WorldEvolver`,
+Chronicle) tends each recently-played campaign's world on an activity-gated
+schedule (`GAME_EVOLVE_SCHEDULE` = daily|weekly|off, default daily): one run
+per campaign that resolved a turn inside the window, none for idle worlds.
 
 Full design rationale: `design/DESIGN_BIBLE.md` (guardrails) and the original
 spec decisions embedded as comments in the code.
@@ -55,8 +59,11 @@ adjudicates legality or outcomes — it is only ever handed resolved facts.
   after 3 stationary combat turns; `track` turns a fled enemy into a pursuit
   that carries them, cornered, into the next scene.
 - `app/Services/Claude/` — `ClaudeCli` (stateless CLI runs), `Narrator`
-  (resolution → chapter + push), `WorldEvolver` (budgeted evolution + Chronicle),
-  `Interviewer` (creation/growth interviews).
+  (resolution → chapter + push, then frontier pre-forge), `ZoneForge`
+  (campaign-scoped zones: Claude proposes a whole region, engine clamps to
+  the `zone_forge` budget + affordance grammar; cold-forge fallback clones a
+  shared seed zone so play never stalls), `WorldEvolver` (per-campaign
+  budgeted evolution + Chronicle), `Interviewer` (creation/growth interviews).
 - `app/Services/` — `CapabilityClamp` (bible bounds + constraint re-coupling),
   `TurnStarter`, `BookCompiler` (compilation, not generation; coda on early end).
 - Affordances are JSON tags on `scene_features` (e.g.
@@ -87,12 +94,16 @@ adjudicates legality or outcomes — it is only ever handed resolved facts.
 - Hidden is hidden from the narrator too: `hidden` features and `lurking`
   actors must never reach cards, situation text, or narration prompts until
   the engine reveals them (use `visibleFeatures()`/`visibleActors()`).
-- The player-set stage (premise/tone) colors narration and seeds the opening
-  through `StageBuilder` only: scene-scoped features/actors (source `stage`),
-  clamped by `config/game.php` `stage_budget` + the evolver's stat bounds.
-  It must never create world-level content (zones, zone templates, items) —
-  the shared world grows only through evolution. The starting zone is the
-  sole mechanical stage choice, and always among existing zones.
+- Worlds are campaign-scoped: `zones.campaign_id` marks a tale's private
+  world; campaign_id null is the shared world (seed archetypes + cold-forge
+  donors). Zones enter a campaign's world ONLY through `ZoneForge` (creation
+  + frontier, both engine-clamped); the player never picks or names a zone
+  directly, and a venture card is legal only toward the campaign's own
+  pre-forged `next_zone_id`. Items still enter only through evolution.
+- The player-set stage (premise/tone) colors narration, the forge, and seeds
+  the opening through `StageBuilder`: scene-scoped features/actors (source
+  `stage`), clamped by `config/game.php` `stage_budget` + the evolver's stat
+  bounds. It must never create world-level content directly.
 - Companions are coordinated, never controlled: requests are cards in each
   companion's own slot (never the player's pre/main/post), the engine rolls
   the companion's attempt, and failure can cost the companion.

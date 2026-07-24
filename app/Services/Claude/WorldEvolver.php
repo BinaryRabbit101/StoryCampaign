@@ -11,6 +11,7 @@ use App\Models\SceneFeature;
 use App\Models\Zone;
 use App\Notifications\ChronicleNotification;
 use App\Services\CapabilityClamp;
+use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\File;
 use Illuminate\Support\Str;
 use Throwable;
@@ -18,9 +19,12 @@ use Throwable;
 /**
  * The scheduled world-evolution job: middle tier — data within fixed
  * systems, with flexibility to introduce new things per the core rules.
- * Claude proposes; the engine validates against the design bible's hard
- * bounds and a per-run budget, applies what survives, and narrates the
- * update in-world as the Chronicle. Live, no human gate.
+ * Since worlds became campaign-scoped, evolution tends each ACTIVE
+ * campaign's own world: Claude proposes new inhabitants and features for
+ * the zones that tale actually walks; the engine validates against the
+ * design bible's hard bounds and a per-run budget, applies what survives,
+ * and narrates the update to that campaign as its Chronicle. Live, no
+ * human gate.
  */
 class WorldEvolver
 {
@@ -29,7 +33,24 @@ class WorldEvolver
         private readonly CapabilityClamp $clamp,
     ) {}
 
-    public function evolve(string $kind = 'daily'): EvolutionRun
+    /**
+     * Evolve every recently-played campaign's world. Returns the runs
+     * (possibly empty when no world has been walked in the window).
+     *
+     * @return list<EvolutionRun>
+     */
+    public function evolve(string $kind = 'daily'): array
+    {
+        $window = $kind === 'weekly' ? now()->subWeek() : now()->subDay();
+
+        return Campaign::where('status', 'active')
+            ->whereHas('turns', fn ($q) => $q->where('resolved_at', '>=', $window))
+            ->get()
+            ->map(fn (Campaign $campaign) => $this->evolveCampaign($campaign, $kind))
+            ->all();
+    }
+
+    public function evolveCampaign(Campaign $campaign, string $kind = 'daily'): EvolutionRun
     {
         $budget = config("game.bounds.evolution_budget.{$kind}", config('game.bounds.evolution_budget.daily'));
 
@@ -41,8 +62,10 @@ class WorldEvolver
         ]);
 
         try {
-            $plan = $this->claude->promptForJson($this->buildPrompt($kind, $budget));
-            $applied = $this->apply($run, $plan, $budget);
+            $zones = $this->campaignZones($campaign);
+            $plan = $this->claude->promptForJson($this->buildPrompt($campaign, $zones, $kind, $budget));
+            $applied = $this->apply($run, $plan, $budget, $zones);
+            $applied['campaign'] = ['id' => $campaign->id, 'name' => $campaign->name];
 
             $chronicle = trim($plan['chronicle'] ?? '') ?: 'The world shifted in ways not yet visible.';
 
@@ -53,39 +76,60 @@ class WorldEvolver
                 'finished_at' => now(),
             ]);
 
-            $this->publishChronicle($run, $chronicle);
+            $this->publishChronicle($campaign, $chronicle);
         } catch (Throwable $e) {
+            // One world's failed night must not block the others: the run
+            // records the failure and the loop moves on.
+            report($e);
             $run->update(['status' => 'failed', 'error' => $e->getMessage(), 'finished_at' => now()]);
-            throw $e;
         }
 
         return $run;
     }
 
-    private function buildPrompt(string $kind, array $budget): string
+    /**
+     * The zones this tale actually inhabits: its forged world, plus any
+     * shared zone its scenes have walked (legacy campaigns).
+     *
+     * @return Collection<int, Zone>
+     */
+    private function campaignZones(Campaign $campaign)
+    {
+        $walked = $campaign->scenes()->distinct()->pluck('zone_id');
+
+        return Zone::where('campaign_id', $campaign->id)
+            ->orWhereIn('id', $walked)
+            ->get();
+    }
+
+    private function buildPrompt(Campaign $campaign, $zones, string $kind, array $budget): string
     {
         $biblePath = config('game.design_bible_path');
         $bible = File::exists($biblePath) ? File::get($biblePath) : 'No bible found — be conservative.';
 
-        $zones = Zone::all()->map(fn (Zone $z) => "- {$z->slug}: {$z->name} — ".Str::limit($z->description, 120))->join("\n");
+        $zoneList = $zones->map(fn (Zone $z) => "- {$z->slug}: {$z->name} — ".Str::limit($z->description, 120))->join("\n") ?: '(none)';
         $recentRuns = EvolutionRun::where('status', 'complete')->orderByDesc('id')->limit(5)->get()
             ->map(fn (EvolutionRun $r) => "- [{$r->kind} @ {$r->finished_at?->toDateString()}] ".Str::limit(json_encode($r->changes), 300))
             ->join("\n");
-        $actorCount = Actor::whereNull('scene_id')->count();
+        $actorCount = Actor::whereNull('scene_id')->whereIn('zone_id', $zones->pluck('id'))->count();
         $itemCount = Item::count();
         $budgetJson = json_encode($budget);
         $maxPower = config('game.bounds.max_item_power');
+        $stage = $campaign->stageBrief() ?: '(none set)';
 
         return <<<PROMPT
-You are the world-evolution process of a living-world RPG, on a {$kind} run. Evolve the game world: new enemies, items, affordance-bearing features, and (budget permitting) zones. You may introduce NEW AFFORDANCE TYPES (e.g. wind currents rideable via glide, flooded passages requiring swim) — the capability grammar stays constant, its vocabulary of scene features grows. Do NOT rewrite core mechanics.
+You are the world-evolution process of a living-world RPG, on a {$kind} run, tending ONE campaign's private world. Evolve it: new enemies, items, and affordance-bearing features in the zones this tale walks. You may introduce NEW AFFORDANCE TYPES (e.g. wind currents rideable via glide, flooded passages requiring swim) — the capability grammar stays constant, its vocabulary of scene features grows. Do NOT rewrite core mechanics, and do not invent new zones — the frontier does that.
 
 ## Design bible (read-only; honor it absolutely)
 {$bible}
 
-## Current world
+## The stage this campaign's player set (color evolution toward it)
+{$stage}
+
+## This campaign's world
 Zones:
-{$zones}
-Zone-level actor templates: {$actorCount}. Items: {$itemCount}.
+{$zoneList}
+Zone-level actor templates in them: {$actorCount}. Items (world-wide): {$itemCount}.
 
 ## Recent evolution log (do not contradict or duplicate; do not spiral difficulty)
 {$recentRuns}
@@ -94,13 +138,12 @@ Zone-level actor templates: {$actorCount}. Items: {$itemCount}.
 {$budgetJson}
 Item power ≤ {$maxPower}. Actor tiers: regular or elite only.
 
-Affordance JSON uses keys like: reachable_via (climb|swing|leap|glide + height), crossable_via (+ gap short|medium|far), flee_destination (+ squeeze_required small|medium|large), hideable (+ max_size), breakable, lift_weight, rideable_via.
+Affordance JSON uses keys like: reachable_via (climb|swing|leap|glide + height), crossable_via (+ gap short|medium|far), flee_destination (+ squeeze_required small|medium|large), hideable (+ max_size), breakable, lift_weight, rideable_via, hidden.
 
 Respond with ONLY a JSON object:
 {
   "chronicle": "<in-world narration of tonight's changes, 100-250 words, a story beat not a patch note>",
   "rationale": "<one paragraph, out-of-world, for the evolution log>",
-  "zones": [{"slug": "...", "name": "...", "description": "..."}],
   "features": [{"zone_slug": "...", "name": "...", "feature_type": "...", "affordances": {...}}],
   "actors": [{"zone_slug": "...", "name": "...", "kind": "enemy|npc|creature", "tier": "regular|elite", "stats": {"health": {"current": 6, "max": 6}, "attack": 2}, "tags": {"intimidatable": true, "type": "regular"}}],
   "items": [{"slug": "...", "name": "...", "description": "...", "power": 1, "grants": [{"capability": "...", "magnitude": null}]}]
@@ -110,22 +153,13 @@ PROMPT;
     }
 
     /** Validate against the budget and bounds, then apply. Returns the applied change set. */
-    private function apply(EvolutionRun $run, array $plan, array $budget): array
+    private function apply(EvolutionRun $run, array $plan, array $budget, $zones): array
     {
         $applied = ['rationale' => $plan['rationale'] ?? null];
 
-        $zones = collect($plan['zones'] ?? [])->take($budget['zones'] ?? 0);
-        foreach ($zones as $zone) {
-            Zone::firstOrCreate(['slug' => Str::slug($zone['slug'] ?? $zone['name'])], [
-                'name' => $zone['name'],
-                'description' => $zone['description'] ?? '',
-                'source' => 'evolution',
-                'evolution_run_id' => $run->id,
-            ]);
-        }
-        $applied['zones'] = $zones->values()->all();
-
-        $zoneIds = Zone::pluck('id', 'slug');
+        // Zone creation moved to the frontier forge: evolution only ever
+        // tends ground the campaign already holds.
+        $zoneIds = $zones->pluck('id', 'slug');
 
         $features = collect($plan['features'] ?? [])->take($budget['features'] ?? 0)
             ->filter(fn ($f) => isset($zoneIds[$f['zone_slug'] ?? '']));
@@ -183,23 +217,21 @@ PROMPT;
     }
 
     /**
-     * The Chronicle: narrate the update in-world for every active campaign
-     * (a durable chronicle chapter — book material) and push it as a story
-     * beat, never a patch note.
+     * The Chronicle: narrate the update in-world for the campaign whose
+     * world just grew (a durable chronicle chapter — book material) and
+     * push it as a story beat, never a patch note.
      */
-    private function publishChronicle(EvolutionRun $run, string $chronicle): void
+    private function publishChronicle(Campaign $campaign, string $chronicle): void
     {
-        Campaign::where('status', 'active')->with('user')->get()->each(function (Campaign $campaign) use ($chronicle) {
-            Chapter::create([
-                'campaign_id' => $campaign->id,
-                'turn_id' => null,
-                'number' => $campaign->nextChapterNumber(),
-                'kind' => 'chronicle',
-                'intent_line' => null,
-                'body' => $chronicle,
-            ]);
+        Chapter::create([
+            'campaign_id' => $campaign->id,
+            'turn_id' => null,
+            'number' => $campaign->nextChapterNumber(),
+            'kind' => 'chronicle',
+            'intent_line' => null,
+            'body' => $chronicle,
+        ]);
 
-            $campaign->user->notify(new ChronicleNotification($campaign, $chronicle));
-        });
+        $campaign->user->notify(new ChronicleNotification($campaign, $chronicle));
     }
 }

@@ -9,17 +9,28 @@ class EvolveWorld extends Command
 {
     protected $signature = 'game:evolve {kind=daily : daily, weekly, or manual}';
 
-    protected $description = 'Run a scheduled world-evolution pass (Claude proposes, engine clamps, Chronicle narrates)';
+    protected $description = 'Evolve each recently-played campaign\'s world (Claude proposes, engine clamps, Chronicle narrates)';
 
     public function handle(WorldEvolver $evolver): int
     {
-        $run = $evolver->evolve($this->argument('kind'));
+        $runs = $evolver->evolve($this->argument('kind'));
 
-        $this->info("Evolution run {$run->id} [{$run->kind}] {$run->status}.");
-        if ($run->chronicle) {
-            $this->line($run->chronicle);
+        if ($runs === []) {
+            $this->info('No world was walked in the window — nothing to evolve.');
+
+            return self::SUCCESS;
         }
 
-        return $run->status === 'complete' ? self::SUCCESS : self::FAILURE;
+        $failed = false;
+        foreach ($runs as $run) {
+            $campaign = $run->changes['campaign']['name'] ?? '?';
+            $this->info("Evolution run {$run->id} [{$run->kind}] for \"{$campaign}\": {$run->status}.");
+            if ($run->chronicle) {
+                $this->line($run->chronicle);
+            }
+            $failed = $failed || $run->status !== 'complete';
+        }
+
+        return $failed ? self::FAILURE : self::SUCCESS;
     }
 }

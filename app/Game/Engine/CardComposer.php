@@ -77,6 +77,20 @@ class CardComposer
             $cards[$card->slot->value][] = $card;
         }
 
+        // The frontier: once the world has forged the next zone, the way
+        // out of this one stands open as a real, named choice.
+        $frontier = $scene->campaign?->nextZone;
+        if ($frontier !== null) {
+            $cards['main'][] = new ActionCard(
+                slot: TurnSlot::Main,
+                verb: 'venture',
+                label: "Press on toward {$frontier->name}",
+                description: "Leave {$scene->zone->name} behind for good. {$frontier->description}",
+                target: ['type' => 'zone', 'id' => $frontier->id, 'name' => $frontier->name],
+                modifiers: [$this->approachModifier()],
+            );
+        }
+
         $composed = array_map(
             fn (array $slotCards) => array_map(fn (ActionCard $c) => $c->toArray(), $slotCards),
             $cards,

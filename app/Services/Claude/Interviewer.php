@@ -25,6 +25,7 @@ class Interviewer
         private readonly CapabilityClamp $clamp,
         private readonly TurnStarter $starter,
         private readonly StageBuilder $stage,
+        private readonly ZoneForge $forge,
     ) {}
 
     public function open(Campaign $campaign): InterviewMessage
@@ -50,7 +51,9 @@ class Interviewer
     {
         // Claude runs before the transaction: a slow CLI call must never
         // sit inside a database lock, and a failed one falls back to stock
-        // prose rather than failing the campaign.
+        // prose rather than failing the campaign. The world is forged first
+        // so the prologue's stage plan can reference the forged ground.
+        $this->forge->ensureStartingZone($campaign);
         $prologue = $this->returningPrologue($campaign, $original);
         $opening = $this->stage->plan($campaign, $original->description);
 
@@ -157,8 +160,10 @@ PROMPT);
 
     private function finalize(Campaign $campaign, array $response): void
     {
-        // The stage-built opening runs before the transaction (slow CLI call);
-        // null falls back to the zone's spawn templates.
+        // The world is forged and the stage-built opening planned before the
+        // transaction (slow CLI calls); a null plan falls back to the forged
+        // zone's own templates.
+        $this->forge->ensureStartingZone($campaign);
         $opening = $this->stage->plan($campaign, $response['character']['description'] ?? '');
 
         DB::transaction(function () use ($campaign, $response, $opening) {

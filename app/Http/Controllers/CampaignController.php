@@ -2,9 +2,10 @@
 
 namespace App\Http\Controllers;
 
+use App\Models\Actor;
 use App\Models\Campaign;
 use App\Models\Character;
-use App\Models\Zone;
+use App\Models\SceneFeature;
 use App\Services\BookCompiler;
 use App\Services\Claude\Interviewer;
 use Illuminate\Http\RedirectResponse;
@@ -45,7 +46,6 @@ class CampaignController extends Controller
         return Inertia::render('Campaigns/Index', [
             'campaigns' => $campaigns,
             'characters' => $characters,
-            'zones' => Zone::orderBy('id')->get()->map(fn (Zone $z) => ['id' => $z->id, 'name' => $z->name]),
         ]);
     }
 
@@ -56,18 +56,18 @@ class CampaignController extends Controller
             'character_id' => ['nullable', 'integer'],
             'premise' => ['nullable', 'string', 'max:500'],
             'tone' => ['nullable', 'string', 'max:120'],
-            'starting_zone_id' => ['nullable', 'integer', 'exists:zones,id'],
         ]);
 
         $original = ($validated['character_id'] ?? null) === null ? null
             : Character::whereHas('campaign', fn ($q) => $q->where('user_id', $request->user()->id))
                 ->findOrFail($validated['character_id']);
 
+        // Every tale opens in a world forged for it — there is no zone to
+        // choose; the premise and tone shape what the forge builds.
         $campaign = $request->user()->campaigns()->create([
             'name' => $validated['name'],
             'premise' => $validated['premise'] ?? null,
             'tone' => $validated['tone'] ?? null,
-            'starting_zone_id' => $validated['starting_zone_id'] ?? null,
             'status' => 'interview',
         ]);
 
@@ -108,8 +108,9 @@ class CampaignController extends Controller
     /**
      * Delete a campaign and everything that was ever written into it —
      * chapters, turns, scenes (with their scene-scoped actors/features),
+     * its forged world (campaign-scoped zones and their templates),
      * character, interview transcript. The shared world is untouched:
-     * zones, zone-level templates, and items belong to every tale.
+     * seed zones, their templates, and items belong to every tale.
      */
     public function destroy(Request $request, Campaign $campaign): RedirectResponse
     {
@@ -117,11 +118,20 @@ class CampaignController extends Controller
 
         // Order matters: chapters reference turns and turns reference
         // scenes without cascade. Scenes cascade their own actors/features
-        // at the DB level; the campaign cascades character + transcript.
+        // at the DB level; the forged world's zone-level templates are
+        // removed before their zones; the campaign cascades character +
+        // transcript.
         DB::transaction(function () use ($campaign) {
             $campaign->chapters()->delete();
             $campaign->turns()->delete();
             $campaign->scenes()->delete();
+
+            $zoneIds = $campaign->zones()->pluck('id');
+            SceneFeature::whereIn('zone_id', $zoneIds)->delete();
+            Actor::whereIn('zone_id', $zoneIds)->delete();
+            $campaign->update(['starting_zone_id' => null, 'next_zone_id' => null]);
+            $campaign->zones()->delete();
+
             $campaign->delete();
         });
 

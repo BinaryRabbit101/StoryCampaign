@@ -17,6 +17,7 @@ use App\Models\Zone;
 use App\Services\Claude\ClaudeCli;
 use App\Services\Claude\Narrator;
 use App\Services\Claude\StageBuilder;
+use App\Services\Claude\ZoneForge;
 use App\Services\TurnStarter;
 use Database\Seeders\WorldSeeder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -29,6 +30,13 @@ class GameEngineTest extends TestCase
     private function createCatCampaign(): Campaign
     {
         $this->seed(WorldSeeder::class);
+
+        // No live CLI in tests: the forge's Claude call fails fast, so
+        // every campaign world falls back to a shared-zone clone.
+        $this->mock(ClaudeCli::class, function ($mock) {
+            $mock->shouldReceive('promptForJson')->andThrow(new \RuntimeException('offline'))->byDefault();
+            $mock->shouldReceive('prompt')->andReturn('A tale begins.')->byDefault();
+        });
 
         $campaign = Campaign::create([
             'user_id' => User::factory()->create()->id,
@@ -366,10 +374,9 @@ class GameEngineTest extends TestCase
         $this->assertSame('She climbed. She struck. Blood answered.', $chapter->plainBody());
     }
 
-    public function test_the_stage_is_stored_and_the_chosen_zone_opens_the_tale()
+    public function test_the_stage_is_stored_and_a_world_is_forged_for_the_tale()
     {
         $campaign = $this->createCatCampaign();
-        $harbor = Zone::create(['slug' => 'harbor', 'name' => 'The Drowned Harbor', 'description' => 'Piers and hulks.', 'source' => 'seed']);
 
         $this->mock(ClaudeCli::class)->shouldReceive('prompt')->andReturn('She returned.');
 
@@ -378,14 +385,19 @@ class GameEngineTest extends TestCase
             'character_id' => $campaign->character->id,
             'premise' => 'Find my sister, whatever it costs.',
             'tone' => 'rain-soaked',
-            'starting_zone_id' => $harbor->id,
         ])->assertRedirect();
 
         $second = $campaign->user->campaigns()->where('name', 'Harbor Tale')->first();
 
         $this->assertSame('Find my sister, whatever it costs.', $second->premise);
-        $this->assertSame($harbor->id, $second->activeScene->zone_id);
         $this->assertStringContainsString('Premise and goal', $second->stageBrief());
+
+        // The tale opens in its own world: a campaign-scoped zone (the
+        // cold-forge clone here, since no live CLI), never shared ground.
+        $zone = $second->activeScene->zone;
+        $this->assertSame($second->id, $zone->campaign_id);
+        $this->assertSame($zone->id, $second->starting_zone_id);
+        $this->assertTrue($zone->features()->whereNull('scene_id')->exists());
     }
 
     public function test_companions_are_recruited_then_coordinated_never_controlled()
@@ -577,17 +589,20 @@ class GameEngineTest extends TestCase
             ->assertRedirect('/campaigns');
 
         // The whole story is gone: chapters, turns, scenes and their
-        // scene-scoped actors, the character, the campaign itself.
+        // scene-scoped actors, the forged world, the character, the
+        // campaign itself.
         $this->assertDatabaseMissing('campaigns', ['id' => $campaign->id]);
         $this->assertDatabaseMissing('chapters', ['campaign_id' => $campaign->id]);
         $this->assertDatabaseMissing('turns', ['campaign_id' => $campaign->id]);
         $this->assertDatabaseMissing('scenes', ['campaign_id' => $campaign->id]);
         $this->assertDatabaseMissing('characters', ['campaign_id' => $campaign->id]);
         $this->assertDatabaseMissing('actors', ['scene_id' => $scene->id]);
+        $this->assertDatabaseMissing('zones', ['campaign_id' => $campaign->id]);
+        $this->assertDatabaseMissing('scene_features', ['zone_id' => $scene->zone_id]);
 
         // The shared world survives untouched.
         $this->assertDatabaseHas('zones', ['slug' => 'old-district']);
-        $this->assertTrue(Actor::whereNull('scene_id')->exists());
+        $this->assertTrue(Actor::whereNull('scene_id')->whereHas('zone', fn ($q) => $q->whereNull('campaign_id'))->exists());
     }
 
     public function test_movement_opens_new_dressed_ground_not_a_copy_of_the_old()
@@ -802,6 +817,125 @@ class GameEngineTest extends TestCase
             $this->assertGreaterThanOrEqual(6, $zone->features()->whereNull('scene_id')->count());
             $this->assertGreaterThanOrEqual(4, $zone->actors()->whereNull('scene_id')->count());
         });
+    }
+
+    public function test_the_zone_forge_clamps_whatever_the_llm_proposes()
+    {
+        $campaign = $this->createCatCampaign();
+
+        $this->mock(ClaudeCli::class)->shouldReceive('promptForJson')->andReturn([
+            'name' => 'The Gullet',
+            'description' => 'A throat of wet stone swallowing the road.',
+            'locales' => array_map(fn ($i) => ['title' => "Gullet {$i}", 'description' => 'A wet step.'], range(1, 9)),
+            'features' => array_merge(
+                [[
+                    'name' => 'the bone ladder',
+                    'feature_type' => 'building',
+                    'affordances' => [
+                        'reachable_via' => ['climb', 'fly', 'teleport'],
+                        'height' => 900,
+                        'lift_weight' => 9999,
+                        'explode_via' => ['boom'],
+                        'hidden' => true,
+                    ],
+                ]],
+                array_map(fn ($i) => ['name' => "prop {$i}", 'feature_type' => 'cover', 'affordances' => ['hideable' => true]], range(1, 10)),
+            ),
+            'actors' => array_map(fn ($i) => [
+                'name' => "brute {$i}",
+                'kind' => 'enemy',
+                'tier' => 'boss',
+                'stats' => ['health' => ['current' => 40, 'max' => 40], 'attack' => 9],
+                'tags' => [],
+            ], range(1, 8)),
+        ]);
+
+        $zone = app(ZoneForge::class)->forge($campaign, null);
+
+        // Budget: 6 locales, 8 features, 5 actors — no matter what came back.
+        $this->assertSame($campaign->id, $zone->campaign_id);
+        $this->assertCount(6, $zone->tags['locales']);
+        $this->assertSame(8, $zone->features()->count());
+        $this->assertSame(5, $zone->actors()->count());
+
+        // The affordance grammar holds: unknown keys and unknown capability
+        // names are dropped, magnitudes clamped, hidden survives.
+        $ladder = $zone->features()->where('name', 'the bone ladder')->first();
+        $this->assertSame(['climb'], $ladder->affordances['reachable_via']);
+        $this->assertSame(30, $ladder->affordances['height']);
+        $this->assertSame(400, $ladder->affordances['lift_weight']);
+        $this->assertArrayNotHasKey('explode_via', $ladder->affordances);
+        $this->assertTrue($ladder->affordances['hidden']);
+
+        // Actor clamps: tier boss denied, stats bounded.
+        $brute = $zone->actors()->first();
+        $this->assertSame('regular', $brute->tier);
+        $this->assertSame(12, $brute->stats['health']['max']);
+        $this->assertSame(4, $brute->stats['attack']);
+    }
+
+    public function test_the_frontier_forges_the_next_zone_after_enough_ranging()
+    {
+        $campaign = $this->createCatCampaign();
+        app(TurnStarter::class)->openFirstTurn($campaign);
+        $scene = $campaign->activeScene;
+
+        // One scene in: the world holds its hand.
+        app(ZoneForge::class)->ensureFrontierZone($campaign->fresh());
+        $this->assertNull($campaign->fresh()->next_zone_id);
+
+        // Four scenes ranged: the next zone is pre-forged, campaign-scoped,
+        // and distinct from the ground being left.
+        foreach (range(1, 3) as $i) {
+            Scene::create([
+                'campaign_id' => $campaign->id, 'zone_id' => $scene->zone_id,
+                'title' => "Past ground {$i}", 'description' => '…', 'status' => 'past', 'state' => ['dressed' => true],
+            ]);
+        }
+        app(ZoneForge::class)->ensureFrontierZone($campaign->fresh());
+
+        $campaign->refresh();
+        $this->assertNotNull($campaign->next_zone_id);
+        $this->assertSame($campaign->id, $campaign->nextZone->campaign_id);
+        $this->assertNotSame($scene->zone->name, $campaign->nextZone->name);
+
+        // Idempotent: a second pass forges nothing new.
+        $zoneCount = Zone::count();
+        app(ZoneForge::class)->ensureFrontierZone($campaign->fresh());
+        $this->assertSame($zoneCount, Zone::count());
+    }
+
+    public function test_venturing_crosses_into_the_pre_forged_zone()
+    {
+        $campaign = $this->createCatCampaign();
+        app(TurnStarter::class)->openFirstTurn($campaign);
+        $scene = $campaign->activeScene;
+        $scene->actors()->delete();
+
+        $frontier = app(ZoneForge::class)->forge($campaign, $scene->zone);
+        $campaign->update(['next_zone_id' => $frontier->id]);
+        $before = $scene->id;
+
+        for ($i = 0; $i < 8 && $campaign->fresh()->activeScene->id === $before; $i++) {
+            $turn = $this->refreshCards($campaign->fresh()->currentTurn);
+            $venture = collect($turn->cards['main'])->first(fn ($c) => $c['verb'] === 'venture');
+            $this->assertNotNull($venture);
+            $this->assertStringContainsString($frontier->name, $venture['label']);
+            $turn->update([
+                'status' => Turn::STATUS_LOCKED,
+                'submission' => ['main' => ['card_id' => $venture['id'], 'modifiers' => []]],
+                'submitted_at' => now(),
+            ]);
+            app(TurnResolver::class)->resolve($turn->fresh());
+        }
+
+        // The whole zone changed underfoot, the frontier slot is clear, and
+        // the new ground was dressed from the new zone's own templates.
+        $next = $campaign->fresh()->activeScene;
+        $this->assertSame($frontier->id, $next->zone_id);
+        $this->assertNull($campaign->fresh()->next_zone_id);
+        $this->assertTrue((bool) ($next->state['dressed'] ?? false));
+        $this->assertGreaterThanOrEqual(1, $next->features()->count());
     }
 
     public function test_widget_endpoint_requires_a_valid_token()

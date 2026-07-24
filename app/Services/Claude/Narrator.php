@@ -16,7 +16,10 @@ use Illuminate\Support\Facades\File;
  */
 class Narrator
 {
-    public function __construct(private readonly ClaudeCli $claude) {}
+    public function __construct(
+        private readonly ClaudeCli $claude,
+        private readonly ZoneForge $forge,
+    ) {}
 
     public function narrate(Turn $turn): Chapter
     {
@@ -35,6 +38,15 @@ class Narrator
         ]);
 
         $turn->update(['narrated_at' => now()]);
+
+        // Frontier growth rides the narration job — the world forges its
+        // next zone off the player's clock, and a failure here costs only
+        // the wait until the next chapter tries again.
+        try {
+            $this->forge->ensureFrontierZone($campaign->fresh());
+        } catch (\Throwable $e) {
+            report($e);
+        }
 
         $next = $campaign->turns()->where('status', Turn::STATUS_AWAITING)->orderByDesc('number')->first();
         $campaign->user->notify(new TurnReadyNotification($campaign, $chapter, $next));

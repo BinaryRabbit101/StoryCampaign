@@ -83,10 +83,24 @@ return [
         'max_item_power' => 5,
         'max_actor_tier' => 'elite', // evolution may not mint bosses without a weekly run
         // Stage budget: how much scene-scoped content a campaign's opening
-        // may build outward from the player's stage. Never zones or items —
-        // the shared world grows only through evolution.
+        // may build outward from the player's stage. Never items — those
+        // enter only through evolution.
         'stage_budget' => ['features' => 4, 'actors' => 3],
+        // Zone forge budget: hard caps on a single forged zone (a campaign's
+        // starting world or a frontier zone), whatever the LLM proposes.
+        'zone_forge' => ['features' => 8, 'actors' => 5, 'locales' => 6],
     ],
+
+    /*
+    |--------------------------------------------------------------------------
+    | Frontier
+    |--------------------------------------------------------------------------
+    | After this many scenes played in a zone, the world pre-forges the next
+    | zone (during the narration run — never on the player's clock) and a
+    | "press on" card opens the way out.
+    */
+
+    'frontier_scenes' => 4,
 
     /*
     |--------------------------------------------------------------------------

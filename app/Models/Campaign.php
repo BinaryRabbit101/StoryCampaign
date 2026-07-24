@@ -9,7 +9,7 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\Relations\HasOne;
 
-#[Fillable(['user_id', 'name', 'premise', 'tone', 'starting_zone_id', 'status', 'title', 'back_cover', 'ended_early', 'started_at', 'ended_at'])]
+#[Fillable(['user_id', 'name', 'premise', 'tone', 'starting_zone_id', 'next_zone_id', 'status', 'title', 'back_cover', 'ended_early', 'started_at', 'ended_at'])]
 class Campaign extends Model
 {
     use HasFactory;
@@ -61,6 +61,18 @@ class Campaign extends Model
     public function interviewMessages(): HasMany
     {
         return $this->hasMany(InterviewMessage::class);
+    }
+
+    /** This tale's private world: zones forged for it at creation and at the frontier. */
+    public function zones(): HasMany
+    {
+        return $this->hasMany(Zone::class);
+    }
+
+    /** The pre-forged zone waiting past the current one's frontier, if any. */
+    public function nextZone(): BelongsTo
+    {
+        return $this->belongsTo(Zone::class, 'next_zone_id');
     }
 
     public function isActive(): bool

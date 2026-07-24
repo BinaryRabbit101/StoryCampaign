@@ -8,6 +8,7 @@ use App\Models\Actor;
 use App\Models\Character;
 use App\Models\Scene;
 use App\Models\Turn;
+use App\Models\Zone;
 use Illuminate\Support\Facades\DB;
 
 /**
@@ -117,7 +118,7 @@ class TurnResolver
 
                 // Partial counts: the facts say they got through (battered),
                 // so the scene must actually change under them.
-                if (in_array($card['verb'], ['flee', 'cross', 'track'], true)
+                if (in_array($card['verb'], ['flee', 'cross', 'track', 'venture'], true)
                     && $outcome->degree !== BeatOutcome::FAILURE) {
                     $moved = true;
                 }
@@ -240,6 +241,13 @@ class TurnResolver
             if ($feature === null || ($feature->state['destroyed'] ?? false)) {
                 return "{$target['name']} is gone.";
             }
+        }
+
+        // A venture card is only legal toward the campaign's own pre-forged
+        // frontier zone — never an arbitrary zone id.
+        if (($target['type'] ?? null) === 'zone'
+            && $scene->campaign?->next_zone_id !== ($target['id'] ?? null)) {
+            return 'The way to '.($target['name'] ?? 'new ground').' has closed.';
         }
 
         foreach ($card['cost'] ?? [] as $cost) {
@@ -594,6 +602,21 @@ class TurnResolver
                     }
                 } else {
                     $facts[] = "{$actor->name}'s windup could not be broken — it is coming.";
+                }
+                break;
+
+            case 'venture':
+                // Crossing the frontier: the whole zone changes underfoot.
+                if ($degree !== BeatOutcome::FAILURE) {
+                    $scene->update(['state' => array_merge($scene->state ?? [], ['venture_zone_id' => $card['target']['id']])]);
+                    $facts[] = $degree === BeatOutcome::PARTIAL
+                        ? "They pushed past the edge of the known ground into {$targetName} — a harder crossing than hoped, and it cost them."
+                        : "They left the old ground behind and crossed into {$targetName}.";
+                    if ($degree === BeatOutcome::PARTIAL) {
+                        Meters::damage($character, 1);
+                    }
+                } else {
+                    $facts[] = "The way into {$targetName} defeated them this time — they remain where they were.";
                 }
                 break;
 
@@ -1052,11 +1075,20 @@ class TurnResolver
     {
         $scene->update(['status' => 'past']);
 
-        $locale = $this->dresser->locale($scene->zone, $dice, exclude: $scene->title);
+        // A venture crosses into the pre-forged frontier zone; ordinary
+        // movement stays inside the current one.
+        $zone = $scene->zone;
+        $ventureZone = Zone::find($scene->state['venture_zone_id'] ?? 0);
+        if ($ventureZone !== null && $scene->campaign?->next_zone_id === $ventureZone->id) {
+            $zone = $ventureZone;
+            $scene->campaign->update(['next_zone_id' => null]);
+        }
+
+        $locale = $this->dresser->locale($zone, $dice, exclude: $scene->title);
 
         $next = Scene::create([
             'campaign_id' => $scene->campaign_id,
-            'zone_id' => $scene->zone_id,
+            'zone_id' => $zone->id,
             'title' => $locale['title'],
             'description' => $locale['description'],
             'status' => 'active',
