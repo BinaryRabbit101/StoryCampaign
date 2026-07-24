@@ -168,10 +168,14 @@ watch(() => props.messages.length, scrollDown);
                 v-for="message in messages"
                 :key="message.id"
                 class="sc-rise"
-                :class="message.role === 'player' ? 'ml-8 text-right' : 'mr-8'"
+                :class="
+                    message.role === 'player'
+                        ? 'ml-8 flex justify-end'
+                        : 'mr-8'
+                "
             >
                 <div
-                    class="inline-block rounded-xl px-4 py-2 text-sm whitespace-pre-wrap"
+                    class="inline-block rounded-xl px-4 py-2 text-left text-sm whitespace-pre-wrap"
                     :class="
                         message.role === 'player'
                             ? 'bg-primary text-primary-foreground'
