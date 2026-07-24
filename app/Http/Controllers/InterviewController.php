@@ -24,6 +24,7 @@ class InterviewController extends Controller
 
         return Inertia::render('Interview', [
             'campaign' => $campaign->only(['id', 'name', 'status']),
+            'canInsist' => $campaign->pending_sheet !== null,
             'messages' => $campaign->interviewMessages()->where('kind', 'creation')->orderBy('id')->get()
                 ->map(fn (InterviewMessage $m) => $m->only(['id', 'role', 'body', 'suggestions'])),
             'catalog' => [
@@ -52,14 +53,32 @@ class InterviewController extends Controller
             'name' => ['nullable', 'string', 'max:40'],
             'traits' => ['required', 'array', 'max:20'],
             'traits.*' => ['string'],
+            'override' => ['nullable', 'boolean'],
         ]);
 
-        $reason = TraitCatalog::rejectionReason($validated['traits']);
+        // The override softens ONLY the balance; unknown traits, group
+        // conflicts, and giftless builds stay refused.
+        $reason = TraitCatalog::rejectionReason($validated['traits'], allowOverspend: (bool) ($validated['override'] ?? false));
         if ($reason !== null) {
             throw ValidationException::withMessages(['traits' => $reason]);
         }
 
         $interviewer->buildFromTraits($campaign, $validated['traits'], $validated['name'] ?? null);
+
+        return redirect()->route('play.show', $campaign);
+    }
+
+    /**
+     * The interview-side override: finalize the sheet the world refused,
+     * unbalanced and owing.
+     */
+    public function insist(Request $request, Campaign $campaign, Interviewer $interviewer): RedirectResponse
+    {
+        abort_unless($campaign->user_id === $request->user()->id, 403);
+        abort_unless($campaign->status === 'interview', 400);
+        abort_unless($campaign->pending_sheet !== null, 409, 'There is no refused sheet to insist on.');
+
+        $interviewer->insist($campaign);
 
         return redirect()->route('play.show', $campaign);
     }

@@ -151,6 +151,12 @@ PROMPT);
             'body' => $playerMessage,
         ]);
 
+        // Speaking again withdraws any refused sheet: the insist door only
+        // ever opens onto the sheet the world just weighed, never a stale one.
+        if ($campaign->pending_sheet !== null) {
+            $campaign->update(['pending_sheet' => null]);
+        }
+
         $response = $this->claude->promptForJson($this->creationPrompt($campaign));
 
         $reply = InterviewMessage::create([
@@ -169,24 +175,29 @@ PROMPT);
         return $reply;
     }
 
-    private function finalize(Campaign $campaign, array $response): void
+    private function finalize(Campaign $campaign, array $response, bool $force = false): void
     {
         $sheet = $response['character'];
         $clamped = $this->clamp->clamp($sheet['capabilities'] ?? []);
         $allConstraints = array_merge($sheet['constraints'] ?? [], $clamped['constraints']);
+        $balance = TraitCatalog::sheetBalance($clamped['capabilities'], $allConstraints);
 
         // The same coin as the point-buy path: the interview's sheet must
         // break even against the creation allowance. When the bargain runs
         // short, the world refuses in-world and the interview continues —
-        // the player names a real price, or sets a gift down.
-        if (TraitCatalog::sheetBalance($clamped['capabilities'], $allConstraints) < 0) {
+        // the player names a real price, sets a gift down, or insists and
+        // steps in owing (the refused sheet parks on the campaign for that).
+        if ($balance < 0 && ! $force) {
+            $campaign->update(['pending_sheet' => $response]);
+
             InterviewMessage::create([
                 'campaign_id' => $campaign->id,
                 'kind' => 'creation',
                 'role' => 'narrator',
                 'body' => 'The world weighs what you ask, and the scales refuse it — such gifts want a '
                     .'heavier price than you have named. Tell me what they truly cost you: what fails, '
-                    .'what marks you, what follows you. Or set one gift down.',
+                    .'what marks you, what follows you. Set one gift down — or step through regardless, '
+                    .'and owe the world the difference.',
                 'suggestions' => [
                     'My size betrays me — I cannot pass where smaller lives slip through, and I am remembered everywhere.',
                     'I am slow. Nothing about me moves quickly, and everyone can tell.',
@@ -196,6 +207,11 @@ PROMPT);
             ]);
 
             return;
+        }
+
+        // Insisting has a name: the shortfall is recorded on the sheet.
+        if ($balance < 0) {
+            $sheet['constraints'] = array_merge($sheet['constraints'] ?? [], [TraitCatalog::debtConstraint(-$balance)]);
         }
 
         // The world is forged and the stage-built opening planned before the
@@ -248,10 +264,32 @@ PROMPT);
                 'body' => $response['prologue'] ?? $response['reply'] ?? '',
             ]);
 
-            $campaign->update(['status' => 'active', 'started_at' => now()]);
+            $campaign->update(['status' => 'active', 'started_at' => now(), 'pending_sheet' => null]);
 
             $this->starter->openFirstTurn($campaign, $opening);
         });
+    }
+
+    /**
+     * The override: the player steps into the world with the sheet the
+     * scales refused, unbalanced and owing. The shortfall is recorded as a
+     * debt_to_the_world constraint by the forced finalize.
+     */
+    public function insist(Campaign $campaign): void
+    {
+        $pending = $campaign->pending_sheet;
+        if ($pending === null || ! isset($pending['character'])) {
+            return;
+        }
+
+        InterviewMessage::create([
+            'campaign_id' => $campaign->id,
+            'kind' => 'creation',
+            'role' => 'player',
+            'body' => 'I step through regardless. Whatever is owed, the world may come and collect.',
+        ]);
+
+        $this->finalize($campaign, $pending, force: true);
     }
 
     /**
@@ -268,6 +306,14 @@ PROMPT);
     {
         $build = TraitCatalog::compile($traitKeys);
         $name = trim((string) $name) ?: 'The Nameless';
+
+        // An overspent build only reaches here via the explicit override —
+        // and the shortfall walks in with them, on the record.
+        $balance = TraitCatalog::balance($traitKeys);
+        if ($balance < 0) {
+            $build['constraints'][] = TraitCatalog::debtConstraint(-$balance);
+            $build['burdens'][] = 'a debt to the world';
+        }
 
         // Slow CLI calls run before the transaction, as everywhere else.
         $this->forge->ensureStartingZone($campaign);

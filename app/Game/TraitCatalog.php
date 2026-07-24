@@ -139,11 +139,12 @@ class TraitCatalog
     /**
      * Why a selection is invalid, or null when it is buildable: every key
      * known, no duplicates, no two traits from the same exclusive group,
-     * at least one gift, and the balance at or above zero.
+     * at least one gift, and the balance at or above zero — unless the
+     * player overrides the scales and steps in owing.
      *
      * @param  list<string>  $keys
      */
-    public static function rejectionReason(array $keys): ?string
+    public static function rejectionReason(array $keys, bool $allowOverspend = false): ?string
     {
         $all = self::all();
         $positives = self::positives();
@@ -169,11 +170,25 @@ class TraitCatalog
             return 'A character needs at least one gift.';
         }
 
-        if (self::balance($keys) < 0) {
+        if (! $allowOverspend && self::balance($keys) < 0) {
             return 'The build is overspent — take fewer gifts or carry more burdens.';
         }
 
         return null;
+    }
+
+    /**
+     * The mark left on anyone who steps into the world owing: a recorded
+     * constraint carrying the shortfall. Narrative weight today; a hook
+     * the world (and its evolution) is free to collect on.
+     */
+    public static function debtConstraint(int $shortfall): array
+    {
+        return [
+            'name' => 'debt_to_the_world',
+            'params' => ['shortfall' => $shortfall],
+            'coupled_capability' => null,
+        ];
     }
 
     /**

@@ -9,7 +9,7 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\Relations\HasOne;
 
-#[Fillable(['user_id', 'name', 'premise', 'tone', 'starting_zone_id', 'next_zone_id', 'status', 'title', 'back_cover', 'ended_early', 'started_at', 'ended_at'])]
+#[Fillable(['user_id', 'name', 'premise', 'tone', 'starting_zone_id', 'next_zone_id', 'pending_sheet', 'status', 'title', 'back_cover', 'ended_early', 'started_at', 'ended_at'])]
 class Campaign extends Model
 {
     use HasFactory;
@@ -17,6 +17,7 @@ class Campaign extends Model
     protected function casts(): array
     {
         return [
+            'pending_sheet' => 'array',
             'ended_early' => 'boolean',
             'started_at' => 'datetime',
             'ended_at' => 'datetime',

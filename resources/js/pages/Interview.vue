@@ -21,6 +21,7 @@ interface TraitOption {
 
 const props = defineProps<{
     campaign: { id: number; name: string; status: string };
+    canInsist: boolean;
     messages: Message[];
     catalog: {
         points: number;
@@ -95,12 +96,30 @@ function toggle(trait: TraitOption) {
 }
 
 function confirmBuild() {
-    if (building.value || !hasGift.value || balance.value < 0) return;
+    if (building.value || !hasGift.value) return;
     building.value = true;
     router.post(
         `/campaigns/${props.campaign.id}/interview/build`,
-        { name: buildName.value.trim() || null, traits: selected.value },
+        {
+            name: buildName.value.trim() || null,
+            traits: selected.value,
+            // Stepping in overspent is allowed — but it is a named choice,
+            // and the shortfall is recorded as a debt to the world.
+            override: balance.value < 0,
+        },
         { onFinish: () => (building.value = false) },
+    );
+}
+
+const insisting = ref(false);
+
+function insist() {
+    if (insisting.value) return;
+    insisting.value = true;
+    router.post(
+        `/campaigns/${props.campaign.id}/interview/insist`,
+        {},
+        { onFinish: () => (insisting.value = false) },
     );
 }
 
@@ -268,18 +287,31 @@ watch(() => props.messages.length, scrollDown);
                     />
                     <button
                         type="button"
-                        :disabled="building || !hasGift || balance < 0"
-                        class="rounded-md bg-gradient-to-br from-violet-600 to-violet-800 px-4 py-2 text-sm font-medium text-white shadow-lg shadow-violet-900/20 transition hover:from-violet-500 hover:to-violet-700 active:scale-[0.98] disabled:opacity-50"
+                        :disabled="building || !hasGift"
+                        class="rounded-md bg-gradient-to-br px-4 py-2 text-sm font-medium text-white shadow-lg transition active:scale-[0.98] disabled:opacity-50"
+                        :class="
+                            balance < 0
+                                ? 'from-amber-600 to-amber-800 shadow-amber-900/20 hover:from-amber-500 hover:to-amber-700'
+                                : 'from-violet-600 to-violet-800 shadow-violet-900/20 hover:from-violet-500 hover:to-violet-700'
+                        "
                         @click="confirmBuild"
                     >
-                        {{ building ? 'Being born…' : 'Step into the world' }}
+                        {{
+                            building
+                                ? 'Being born…'
+                                : balance < 0
+                                  ? 'Step in anyway — owing'
+                                  : 'Step into the world'
+                        }}
                     </button>
                 </div>
                 <p
                     v-if="balance < 0"
-                    class="mt-2 text-xs text-red-500 italic"
+                    class="mt-2 text-xs text-amber-500 italic"
                 >
-                    Overspent — set a gift down, or take up another burden.
+                    Overspent — set a gift down, take up another burden, or
+                    step in regardless and carry the shortfall as a debt the
+                    world remembers.
                 </p>
             </div>
         </div>
@@ -298,6 +330,20 @@ watch(() => props.messages.length, scrollDown);
                 {{ suggestion }}
             </button>
         </div>
+
+        <button
+            v-if="canInsist && !sending && !showBuilder"
+            type="button"
+            :disabled="insisting"
+            class="sc-rise self-start rounded-lg border border-amber-500/40 bg-amber-500/10 px-3 py-1.5 text-left text-xs text-amber-500 italic transition hover:border-amber-500/70 active:scale-[0.98] disabled:opacity-50"
+            @click="insist"
+        >
+            {{
+                insisting
+                    ? 'Stepping through…'
+                    : 'Step through regardless — unbalanced, and owing the world the difference →'
+            }}
+        </button>
 
         <button
             type="button"

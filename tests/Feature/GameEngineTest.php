@@ -1048,6 +1048,77 @@ class GameEngineTest extends TestCase
                 ->where('catalog.points', 3)
                 ->has('catalog.positives')
                 ->has('catalog.negatives'));
+
+        // The override: the same overspent build walks in when the choice
+        // is named — carrying the shortfall as a recorded debt (9 spent
+        // against 3, owing 6). Group conflicts stay refused even overridden.
+        $this->actingAs($user)->from("/campaigns/{$second->id}/interview")
+            ->post("/campaigns/{$second->id}/interview/build", ['traits' => ['slight-frame', 'massive-frame'], 'override' => true])
+            ->assertSessionHasErrors('traits');
+
+        $this->actingAs($user)->post("/campaigns/{$second->id}/interview/build", [
+            'traits' => ['prehensile-grip', 'time-slow'],
+            'override' => true,
+        ])->assertRedirect("/play/{$second->id}");
+
+        $second->refresh();
+        $debt = $second->character->constraints->firstWhere('name', 'debt_to_the_world');
+        $this->assertSame('active', $second->status);
+        $this->assertNotNull($debt);
+        $this->assertSame(6, $debt->params['shortfall']);
+    }
+
+    public function test_the_player_may_step_through_the_refused_interview_sheet_owing()
+    {
+        $this->seed(WorldSeeder::class);
+        $user = User::factory()->create();
+
+        // Every completion attempt is all gift, no debt: cost 7 against 3.
+        $this->mock(ClaudeCli::class, function ($mock) {
+            $mock->shouldReceive('promptForJson')->andReturn([
+                'reply' => 'It is done.',
+                'suggestions' => [],
+                'complete' => true,
+                'character' => [
+                    'name' => 'The Unpaid',
+                    'description' => 'All gift, no debt.',
+                    'capabilities' => [
+                        ['capability' => 'reach', 'magnitude' => 12],
+                        ['capability' => 'intimidate', 'scope' => ['vs' => 'regular']],
+                    ],
+                    'constraints' => [],
+                ],
+                'prologue' => 'They arrived unpaid.',
+            ])->byDefault();
+        });
+
+        $this->actingAs($user)->post('/campaigns', ['name' => 'Owing Tale']);
+        $campaign = $user->campaigns()->first();
+
+        // No refused sheet parked yet: nothing to insist on.
+        $this->actingAs($user)->post("/campaigns/{$campaign->id}/interview/insist")->assertStatus(409);
+
+        $this->actingAs($user)->post("/campaigns/{$campaign->id}/interview", ['body' => 'I am mighty.']);
+        $campaign->refresh();
+        $this->assertSame('interview', $campaign->status);
+        $this->assertNotNull($campaign->pending_sheet);
+        $this->actingAs($user)->get("/campaigns/{$campaign->id}/interview")
+            ->assertInertia(fn ($page) => $page->where('canInsist', true));
+
+        // Insisting births the refused sheet, shortfall on the record.
+        $this->actingAs($user)->post("/campaigns/{$campaign->id}/interview/insist")
+            ->assertRedirect("/play/{$campaign->id}");
+
+        $campaign->refresh();
+        $this->assertSame('active', $campaign->status);
+        $this->assertNull($campaign->pending_sheet);
+        $this->assertSame(12, $campaign->character->capabilities->firstWhere('capability', 'reach')->magnitude);
+        $debt = $campaign->character->constraints->firstWhere('name', 'debt_to_the_world');
+        $this->assertSame(4, $debt->params['shortfall']);
+        $this->assertTrue(
+            $campaign->interviewMessages()->where('role', 'player')->get()
+                ->contains(fn ($m) => str_contains($m->body, 'step through regardless')),
+        );
     }
 
     public function test_the_interview_sheet_pays_the_same_coin_as_the_point_buy()
