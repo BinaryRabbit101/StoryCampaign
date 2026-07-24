@@ -3,6 +3,8 @@
 namespace App\Services;
 
 use App\Game\Engine\CardComposer;
+use App\Game\Engine\Dice;
+use App\Game\Engine\SceneDresser;
 use App\Models\Actor;
 use App\Models\Campaign;
 use App\Models\Scene;
@@ -13,18 +15,23 @@ use App\Models\Zone;
 /**
  * Opens a campaign's first scene and turn once the creation interview
  * completes. Given a stage-built opening plan (already sanitized by the
- * StageBuilder), the scene is dressed with that campaign's own content;
- * without one it falls back to a random draw from the zone's templates.
+ * StageBuilder), the scene is dressed with that campaign's own content plus
+ * a light draw of the zone's geography; without one, the dresser rolls the
+ * whole opening from the zone's templates.
  */
 class TurnStarter
 {
-    public function __construct(private readonly CardComposer $composer) {}
+    public function __construct(
+        private readonly CardComposer $composer,
+        private readonly SceneDresser $dresser,
+    ) {}
 
     public function openFirstTurn(Campaign $campaign, ?array $opening = null): Turn
     {
         // The player may have chosen where the tale opens; otherwise the
         // world's first zone stands.
         $zone = Zone::find($campaign->starting_zone_id) ?? Zone::orderBy('id')->firstOrFail();
+        $dice = new Dice($campaign->id * 2654435761 % PHP_INT_MAX);
 
         $scene = Scene::create([
             'campaign_id' => $campaign->id,
@@ -32,13 +39,16 @@ class TurnStarter
             'title' => $opening['scene_title'] ?? $zone->name,
             'description' => $opening['scene_description'] ?? $zone->description,
             'status' => 'active',
-            'state' => [],
+            'state' => ['dressed' => true],
         ]);
 
         if ($opening !== null) {
+            // The stage sets the cast; the zone still lends some ground.
             $this->dressScene($scene, $opening);
+            $this->dresser->instantiateFeatures($scene, $dice, 2, 3);
         } else {
-            $this->spawnFromTemplates($scene, $zone);
+            $this->dresser->instantiateFeatures($scene, $dice, 4, 5);
+            $this->dresser->spawnActors($scene, $dice, 2, 3);
         }
 
         $character = $campaign->character;
@@ -49,11 +59,11 @@ class TurnStarter
         // Ground every card the player will see: name who and what is
         // actually present, so no option arrives narratively unannounced.
         $parts = ["You stand at the edge of {$zone->name}.", $scene->description];
-        $present = $scene->activeActors()->pluck('name');
+        $present = $scene->visibleActors()->pluck('name');
         if ($present->isNotEmpty()) {
             $parts[] = 'Here with you: '.$present->join(', ').'.';
         }
-        $features = $scene->allFeatures()->pluck('name')->take(6);
+        $features = $scene->visibleFeatures()->pluck('name')->take(6);
         if ($features->isNotEmpty()) {
             $parts[] = 'Around you: '.$features->join(', ').'.';
         }
@@ -96,28 +106,5 @@ class TurnStarter
                 'source' => 'stage',
             ]);
         }
-    }
-
-    /** No stage plan: a shuffled draw from the zone's spawn templates. */
-    private function spawnFromTemplates(Scene $scene, Zone $zone): void
-    {
-        Actor::whereNull('scene_id')
-            ->where('zone_id', $zone->id)
-            ->where('status', 'active')
-            ->inRandomOrder()
-            ->limit(3)
-            ->get()
-            ->each(fn (Actor $template) => Actor::create([
-                'scene_id' => $scene->id,
-                'zone_id' => $zone->id,
-                'name' => $template->name,
-                'kind' => $template->kind,
-                'tier' => $template->tier,
-                'stats' => $template->stats,
-                'tags' => $template->tags,
-                'status' => 'active',
-                'source' => $template->source,
-                'evolution_run_id' => $template->evolution_run_id,
-            ]));
     }
 }

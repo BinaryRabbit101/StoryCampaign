@@ -48,6 +48,18 @@ return [
 
     'design_bible_path' => base_path('design/DESIGN_BIBLE.md'),
 
+    /*
+    |--------------------------------------------------------------------------
+    | World evolution cadence
+    |--------------------------------------------------------------------------
+    | 'daily', 'weekly', or 'off'. Scheduled runs are activity-gated: the
+    | Claude call only fires if some player resolved a turn since the last
+    | window, so an idle world never burns a run. Manual runs
+    | (`php artisan game:evolve manual`) work regardless.
+    */
+
+    'evolution_schedule' => env('GAME_EVOLVE_SCHEDULE', 'daily'),
+
     'bounds' => [
         // Absolute magnitude clamps per parameterized capability.
         'capability_magnitudes' => [

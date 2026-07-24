@@ -9,6 +9,8 @@ use App\Game\Meters;
 use App\Models\Actor;
 use App\Models\Campaign;
 use App\Models\Character;
+use App\Models\Scene;
+use App\Models\SceneFeature;
 use App\Models\Turn;
 use App\Models\User;
 use App\Models\Zone;
@@ -64,10 +66,57 @@ class GameEngineTest extends TestCase
         return $campaign;
     }
 
+    /** Copy a zone template feature into the scene, so tests control exactly what ground offers. */
+    private function placeFeature(Scene $scene, string $name, array $state = []): SceneFeature
+    {
+        $template = SceneFeature::whereNull('scene_id')->where('name', $name)->firstOrFail();
+
+        return SceneFeature::create([
+            'scene_id' => $scene->id,
+            'zone_id' => $scene->zone_id,
+            'name' => $template->name,
+            'feature_type' => $template->feature_type,
+            'affordances' => $template->affordances,
+            'state' => $state,
+            'source' => 'seed',
+        ]);
+    }
+
+    /** Spawn a zone actor template into the scene by name. */
+    private function placeActor(Scene $scene, string $name): Actor
+    {
+        $template = Actor::whereNull('scene_id')->where('name', $name)->firstOrFail();
+
+        return Actor::create([
+            'scene_id' => $scene->id,
+            'zone_id' => $scene->zone_id,
+            'name' => $template->name,
+            'kind' => $template->kind,
+            'tier' => $template->tier,
+            'stats' => $template->stats,
+            'tags' => $template->tags,
+            'status' => 'active',
+            'source' => 'seed',
+        ]);
+    }
+
+    /** Recompose the turn's cards after the test changed the scene. */
+    private function refreshCards(Turn $turn): Turn
+    {
+        $turn->update(['cards' => app(CardComposer::class)->compose(
+            $turn->campaign->character->fresh(), $turn->scene->fresh(),
+        )]);
+
+        return $turn->fresh();
+    }
+
     public function test_options_emerge_from_capability_affordance_intersection()
     {
         $campaign = $this->createCatCampaign();
         $turn = app(TurnStarter::class)->openFirstTurn($campaign);
+        $this->placeFeature($campaign->activeScene, 'the warehouse roof');
+        $this->placeActor($campaign->activeScene, 'a dockside tough');
+        $turn = $this->refreshCards($turn);
 
         $preVerbs = collect($turn->cards['pre'])->pluck('verb');
         $mainLabels = collect($turn->cards['main'])->pluck('label');
@@ -85,6 +134,9 @@ class GameEngineTest extends TestCase
     {
         $campaign = $this->createCatCampaign();
         $turn = app(TurnStarter::class)->openFirstTurn($campaign);
+        $this->placeFeature($campaign->activeScene, 'the narrow alley');
+        $this->placeFeature($campaign->activeScene, 'the collapsed archway');
+        $turn = $this->refreshCards($turn);
 
         // a large character squeezing into a medium alley: degraded, not absent
         $alley = collect($turn->cards['main'])->first(fn ($c) => str_contains($c['label'], 'narrow alley'));
@@ -99,9 +151,9 @@ class GameEngineTest extends TestCase
     public function test_intimidate_scope_does_not_flatten_tougher_encounters()
     {
         $campaign = $this->createCatCampaign();
-        $scene = $campaign->scenes()->first() ?? null;
         $turn = app(TurnStarter::class)->openFirstTurn($campaign);
         $scene = $turn->scene;
+        $this->placeActor($scene, 'a dockside tough');
 
         Actor::create([
             'scene_id' => $scene->id,
@@ -129,6 +181,9 @@ class GameEngineTest extends TestCase
     {
         $campaign = $this->createCatCampaign();
         $turn = app(TurnStarter::class)->openFirstTurn($campaign);
+        $this->placeFeature($campaign->activeScene, 'the warehouse roof');
+        $this->placeActor($campaign->activeScene, 'a dockside tough');
+        $turn = $this->refreshCards($turn);
 
         $pre = collect($turn->cards['pre'])->first(fn ($c) => $c['verb'] === 'ascend');
         $main = collect($turn->cards['main'])->first(fn ($c) => $c['verb'] === 'strike');
@@ -260,8 +315,9 @@ class GameEngineTest extends TestCase
         $campaign = $this->createCatCampaign();
         app(TurnStarter::class)->openFirstTurn($campaign);
         $scene = $campaign->activeScene;
+        $this->placeFeature($scene, 'the warehouse roof');
 
-        $captive = $scene->actors()->where('kind', 'enemy')->first();
+        $captive = $this->placeActor($scene, 'a dockside tough');
         $captive->update(['status' => 'restrained']);
 
         $cards = app(CardComposer::class)->compose($campaign->character, $scene->fresh());
@@ -337,9 +393,12 @@ class GameEngineTest extends TestCase
         $campaign = $this->createCatCampaign();
         app(TurnStarter::class)->openFirstTurn($campaign);
         $scene = $campaign->activeScene;
+        $scene->actors()->delete();
+        $this->placeActor($scene, 'a dockside tough');
+        $this->placeActor($scene, 'the lantern watchman');
 
-        // The companionable watchman (seeded, spawned as the third actor)
-        // offers a recruit card while enemies are present.
+        // The companionable watchman offers a recruit card while enemies
+        // are present.
         $cards = app(CardComposer::class)->compose($campaign->character, $scene->fresh());
         $recruit = collect($cards['main'])->first(fn ($c) => $c['verb'] === 'recruit');
         $this->assertNotNull($recruit);
@@ -380,8 +439,9 @@ class GameEngineTest extends TestCase
         $campaign = $this->createCatCampaign();
         app(TurnStarter::class)->openFirstTurn($campaign);
         $scene = $campaign->activeScene;
-
-        $watchman = $scene->actors()->where('name', 'the lantern watchman')->first();
+        $scene->actors()->delete();
+        $this->placeActor($scene, 'a dockside tough');
+        $watchman = $this->placeActor($scene, 'the lantern watchman');
         $watchman->update(['kind' => 'companion']);
 
         $turn = $campaign->currentTurn;
@@ -456,6 +516,9 @@ class GameEngineTest extends TestCase
         $this->assertSame(3, $scene->actors()->where('source', 'stage')->count());
         $this->assertSame(0, $scene->actors()->where('source', 'seed')->count());
         $this->assertSame(4, $scene->features()->where('source', 'stage')->count());
+        // The zone still lends the stage some shared ground (features only,
+        // never actors — the cast is the campaign's own).
+        $this->assertGreaterThanOrEqual(2, $scene->features()->where('source', 'seed')->count());
         $this->assertSame(0, Actor::whereNull('scene_id')->where('source', 'stage')->count());
 
         // The situation names the stage-built cast, and cards intersect with
@@ -525,6 +588,220 @@ class GameEngineTest extends TestCase
         // The shared world survives untouched.
         $this->assertDatabaseHas('zones', ['slug' => 'old-district']);
         $this->assertTrue(Actor::whereNull('scene_id')->exists());
+    }
+
+    public function test_movement_opens_new_dressed_ground_not_a_copy_of_the_old()
+    {
+        $campaign = $this->createCatCampaign();
+        app(TurnStarter::class)->openFirstTurn($campaign);
+        $scene = $campaign->activeScene;
+        $scene->features()->delete();
+        $scene->actors()->delete();
+        $this->placeFeature($scene, 'the collapsed archway');
+        $before = $scene->id;
+
+        // Flee until a non-failure lands (partial counts: the facts say they
+        // got through, so the ground must actually change).
+        for ($i = 0; $i < 8 && $campaign->fresh()->activeScene->id === $before; $i++) {
+            $turn = $this->refreshCards($campaign->fresh()->currentTurn);
+            $flee = collect($turn->cards['main'])->first(fn ($c) => $c['verb'] === 'flee');
+            $this->assertNotNull($flee);
+            $turn->update([
+                'status' => Turn::STATUS_LOCKED,
+                'submission' => ['main' => ['card_id' => $flee['id'], 'modifiers' => []]],
+                'submitted_at' => now(),
+            ]);
+            app(TurnResolver::class)->resolve($turn->fresh());
+        }
+
+        $next = $campaign->fresh()->activeScene;
+        $this->assertNotSame($before, $next->id);
+
+        // The new ground is a named locale with its own dressed draw of the
+        // zone's features — never 'Beyond X' with the same template overlay.
+        $this->assertTrue((bool) ($next->state['dressed'] ?? false));
+        $locales = collect($next->zone->tags['locales'])->pluck('title');
+        $this->assertTrue($locales->contains($next->title));
+        $this->assertGreaterThanOrEqual(3, $next->features()->count());
+    }
+
+    public function test_hidden_features_wait_for_discovery()
+    {
+        $campaign = $this->createCatCampaign();
+        $turn = app(TurnStarter::class)->openFirstTurn($campaign);
+        $scene = $campaign->activeScene;
+        $scene->features()->delete();
+        $scene->actors()->delete();
+        $door = $this->placeFeature($scene, "the smuggler's door", ['hidden' => true]);
+        $turn = $this->refreshCards($turn);
+
+        // Hidden means hidden: no card, no situation mention.
+        $this->assertFalse(collect($turn->cards['main'])->contains(fn ($c) => ($c['target']['id'] ?? null) === $door->id));
+
+        // Examine has teeth: it finds what the scene hides.
+        $examine = collect($turn->cards['main'])->first(fn ($c) => $c['verb'] === 'examine');
+        $turn->update([
+            'status' => Turn::STATUS_LOCKED,
+            'submission' => ['main' => ['card_id' => $examine['id'], 'modifiers' => []]],
+            'submitted_at' => now(),
+        ]);
+        $next = app(TurnResolver::class)->resolve($turn->fresh());
+
+        $this->assertFalse((bool) ($door->fresh()->state['hidden'] ?? false));
+        $facts = collect($turn->fresh()->resolution['beats'])->firstWhere('verb', 'examine')['facts'];
+        $this->assertStringContainsString("the smuggler's door", implode(' ', $facts));
+        $this->assertTrue(collect($next->cards['main'])->contains(fn ($c) => $c['verb'] === 'flee' && ($c['target']['name'] ?? '') === "the smuggler's door"));
+    }
+
+    public function test_enemy_telegraphs_offer_interrupt_and_brace()
+    {
+        $campaign = $this->createCatCampaign();
+        app(TurnStarter::class)->openFirstTurn($campaign);
+        $scene = $campaign->activeScene;
+        $scene->actors()->delete();
+        $tough = $this->placeActor($scene, 'a dockside tough');
+        $tough->update(['tags' => $tough->tags + ['intent' => 'windup']]);
+
+        $cards = app(CardComposer::class)->compose($campaign->character, $scene->fresh());
+
+        $strike = collect($cards['main'])->first(fn ($c) => $c['verb'] === 'strike');
+        $this->assertStringContainsString('mid-windup', $strike['description']);
+        $this->assertTrue(collect($cards['main'])->pluck('verb')->contains('interrupt'));
+        $this->assertTrue(collect($cards['pre'])->pluck('verb')->contains('brace'));
+
+        // A guarded enemy telegraphs too, but offers no interrupt.
+        $tough->update(['tags' => array_merge($tough->fresh()->tags, ['intent' => 'guard'])]);
+        $cards = app(CardComposer::class)->compose($campaign->character, $scene->fresh());
+        $strike = collect($cards['main'])->first(fn ($c) => $c['verb'] === 'strike');
+        $this->assertStringContainsString('guarded', $strike['description']);
+        $this->assertFalse(collect($cards['main'])->pluck('verb')->contains('interrupt'));
+    }
+
+    public function test_a_lurking_ambusher_is_invisible_then_springs()
+    {
+        $campaign = $this->createCatCampaign();
+        $turn = app(TurnStarter::class)->openFirstTurn($campaign);
+        $scene = $campaign->activeScene;
+        $scene->actors()->delete();
+        $lurker = $this->placeActor($scene, 'a wiry cutpurse');
+        $lurker->update(['tags' => $lurker->tags + ['lurking' => true, 'lurking_since' => 0]]);
+        $turn = $this->refreshCards($turn);
+
+        // Invisible to cards and to the situation until it moves.
+        $this->assertFalse(collect($turn->cards['main'])->contains(fn ($c) => ($c['target']['id'] ?? null) === $lurker->id));
+
+        // A character with detect gets the one card that can beat the spring.
+        $campaign->character->capabilities()->create(['capability' => 'detect', 'source' => 'creation']);
+        $cards = app(CardComposer::class)->compose($campaign->character->fresh(), $scene->fresh());
+        $this->assertTrue(collect($cards['pre'])->pluck('verb')->contains('detect'));
+
+        // Left alone, the ambush springs during the next resolution and
+        // announces itself as the mid-scene arrival.
+        $wait = collect($turn->cards['main'])->first(fn ($c) => $c['verb'] === 'wait');
+        $turn->update([
+            'status' => Turn::STATUS_LOCKED,
+            'submission' => ['main' => ['card_id' => $wait['id'], 'modifiers' => []]],
+            'submitted_at' => now(),
+        ]);
+        app(TurnResolver::class)->resolve($turn->fresh());
+        $turn->refresh();
+
+        $this->assertFalse((bool) ($lurker->fresh()->tags['lurking'] ?? false));
+        $this->assertSame('new_threat', $turn->branch_trigger);
+        $this->assertSame('a wiry cutpurse', $turn->resolution['new_threat']['name']);
+        $this->assertStringContainsString('burst from hiding', implode(' ', $turn->resolution['scene_reaction']));
+    }
+
+    public function test_camping_a_fight_raises_the_alarm_and_brings_reinforcements()
+    {
+        $campaign = $this->createCatCampaign();
+        app(TurnStarter::class)->openFirstTurn($campaign);
+        $scene = $campaign->activeScene;
+        $scene->actors()->delete();
+        $enemy = $this->placeActor($scene, 'a harbor enforcer');
+        $before = $scene->actors()->count();
+
+        for ($i = 0; $i < 3; $i++) {
+            $turn = $campaign->fresh()->currentTurn;
+            $wait = collect($turn->cards['main'])->first(fn ($c) => $c['verb'] === 'wait');
+            $turn->update([
+                'status' => Turn::STATUS_LOCKED,
+                'submission' => ['main' => ['card_id' => $wait['id'], 'modifiers' => []]],
+                'submitted_at' => now(),
+            ]);
+            app(TurnResolver::class)->resolve($turn->fresh());
+        }
+
+        // Three turns toe-to-toe: the district answered.
+        $this->assertGreaterThan($before, $scene->fresh()->actors()->count());
+    }
+
+    public function test_track_turns_a_fled_enemy_into_a_pursuit()
+    {
+        $campaign = $this->createCatCampaign();
+        $campaign->character->capabilities()->create(['capability' => 'track', 'source' => 'creation']);
+        app(TurnStarter::class)->openFirstTurn($campaign);
+        $scene = $campaign->activeScene;
+        $scene->actors()->delete();
+        $quarry = $this->placeActor($scene, "a smuggler's lookout");
+        $quarry->update(['status' => 'fled']);
+        $before = $scene->id;
+
+        for ($i = 0; $i < 8 && $campaign->fresh()->activeScene->id === $before; $i++) {
+            $turn = $this->refreshCards($campaign->fresh()->currentTurn);
+            $track = collect($turn->cards['main'])->first(fn ($c) => $c['verb'] === 'track');
+            $this->assertNotNull($track);
+            $this->assertSame($quarry->id, $track['target']['id']);
+            $turn->update([
+                'status' => Turn::STATUS_LOCKED,
+                'submission' => ['main' => ['card_id' => $track['id'], 'modifiers' => []]],
+                'submitted_at' => now(),
+            ]);
+            app(TurnResolver::class)->resolve($turn->fresh());
+        }
+
+        // The trail led somewhere real, and the quarry stands there, cornered.
+        $next = $campaign->fresh()->activeScene;
+        $this->assertNotSame($before, $next->id);
+        $quarry->refresh();
+        $this->assertSame($next->id, $quarry->scene_id);
+        $this->assertSame('active', $quarry->status);
+        $this->assertTrue((bool) ($quarry->tags['cornered'] ?? false));
+    }
+
+    public function test_scout_and_command_cards_come_from_their_capabilities()
+    {
+        $campaign = $this->createCatCampaign();
+        $campaign->character->capabilities()->create(['capability' => 'scout', 'source' => 'creation']);
+        $campaign->character->capabilities()->create(['capability' => 'command', 'source' => 'creation']);
+        app(TurnStarter::class)->openFirstTurn($campaign);
+        $scene = $campaign->activeScene;
+        $scene->actors()->delete();
+        $ally = $this->placeActor($scene, 'the lantern watchman');
+        $ally->update(['kind' => 'companion']);
+
+        $cards = app(CardComposer::class)->compose($campaign->character->fresh(), $scene->fresh());
+        $preVerbs = collect($cards['pre'])->pluck('verb');
+
+        $this->assertTrue($preVerbs->contains('scout'));
+        $this->assertTrue($preVerbs->contains('command'));
+    }
+
+    public function test_the_seed_world_offers_three_zones_with_locales_and_secrets()
+    {
+        $this->seed(WorldSeeder::class);
+
+        $this->assertSame(3, Zone::count());
+        Zone::all()->each(function (Zone $zone) {
+            $this->assertNotEmpty($zone->tags['locales'] ?? [], "{$zone->name} has no locales");
+            $this->assertTrue(
+                $zone->features()->whereNull('scene_id')->get()
+                    ->contains(fn ($f) => $f->affordances['hidden'] ?? false),
+                "{$zone->name} has no hidden discovery content",
+            );
+            $this->assertGreaterThanOrEqual(6, $zone->features()->whereNull('scene_id')->count());
+            $this->assertGreaterThanOrEqual(4, $zone->actors()->whereNull('scene_id')->count());
+        });
     }
 
     public function test_widget_endpoint_requires_a_valid_token()

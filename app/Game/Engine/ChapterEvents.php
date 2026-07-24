@@ -41,6 +41,12 @@ class ChapterEvents
         'hurl' => 'force',
         'shield' => 'defense',
         'recruit' => 'parley',
+        'scout' => 'stealth',
+        'detect' => 'stealth',
+        'track' => 'move',
+        'interrupt' => 'attack',
+        'brace' => 'defense',
+        'command' => 'ally',
         'companion_block' => 'ally',
         'companion_flank' => 'ally',
         'companion_scout' => 'ally',
@@ -82,6 +88,10 @@ class ChapterEvents
                 str_contains($fact, 'wrenched free') => ['threat', 'The hold broke'],
                 str_contains($fact, 'held in the way') => ['defense', 'The captive took the blow'],
                 str_contains($fact, 'held at bay') => ['ally', 'Held at bay'],
+                str_contains($fact, 'burst from hiding') => ['threat', 'Ambush sprung'],
+                str_contains($fact, 'behind their guard') => ['threat', 'They guarded'],
+                str_contains($fact, 'circled wide') => ['threat', 'They found an angle'],
+                str_contains($fact, 'braced guard') => ['defense', 'The brace held'],
                 default => ['defense', 'Attack evaded'],
             };
             $events[] = [

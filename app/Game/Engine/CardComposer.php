@@ -27,8 +27,10 @@ class CardComposer
     public function compose(Character $character, Scene $scene): array
     {
         $capabilities = $character->effectiveCapabilities();
-        $features = $scene->allFeatures();
-        $actors = $scene->activeActors();
+        // Only what the player can perceive makes cards: hidden features wait
+        // for examine/scout, a lurking ambusher for detect (or its spring).
+        $features = $scene->visibleFeatures();
+        $actors = $scene->visibleActors();
 
         $cards = ['pre' => [], 'main' => [], 'post' => []];
 
@@ -61,6 +63,10 @@ class CardComposer
                 target: ['type' => 'exit', 'id' => null, 'name' => 'the scouted way out'],
                 modifiers: [$this->approachModifier()],
             );
+        }
+
+        foreach ($this->awarenessCards($capabilities, $scene, $actors) as $card) {
+            $cards[$card->slot->value][] = $card;
         }
 
         foreach ($this->tempoCards($character, $capabilities) as $card) {
@@ -283,15 +289,45 @@ class CardComposer
         $hostile = $actor->kind === 'enemy';
 
         if ($hostile) {
+            // The enemy's telegraphed intent colors the strike: a windup is an
+            // opening, a guard a warning. The resolver reads the same intent
+            // for the actual difficulty — the card only tells the truth.
+            $intent = $tags['intent'] ?? null;
+            $description = "Attack {$actor->name} directly.".match ($intent) {
+                'windup' => ' They are mid-windup — committed, and open.',
+                'guard' => ' They have gone guarded — a hard target right now.',
+                'circle' => ' They are circling, hunting an angle on you.',
+                default => '',
+            };
+
             $cards[] = new ActionCard(
                 slot: TurnSlot::Main,
                 verb: 'strike',
                 label: "Strike at {$actor->name}",
-                description: "Attack {$actor->name} directly.",
+                description: $description,
                 target: $target,
                 risk: 'risky',
                 modifiers: [$this->approachModifier(), $this->methodModifier($character)],
             );
+
+            if ($intent === 'windup') {
+                $cards[] = new ActionCard(
+                    slot: TurnSlot::Main,
+                    verb: 'interrupt',
+                    label: "Break {$actor->name}'s windup",
+                    description: "{$actor->name} is gathering something heavy. Get inside it before it lands.",
+                    target: $target,
+                    risk: 'risky',
+                    modifiers: [$this->approachModifier()],
+                );
+                $cards[] = new ActionCard(
+                    slot: TurnSlot::Pre,
+                    verb: 'brace',
+                    label: "Brace for {$actor->name}'s blow",
+                    description: 'Set your footing against what you can see coming — the blow will find less of you.',
+                    target: $target,
+                );
+            }
         }
 
         if (($tags['intimidatable'] ?? false) && isset($capabilities['intimidate'])) {
@@ -437,6 +473,71 @@ class CardComposer
                     break;
                 }
             }
+        }
+
+        return $cards;
+    }
+
+    /**
+     * The perception-and-leadership verbs: scout finds what the scene is
+     * hiding, detect hunts the thing that is hunting you, track turns a
+     * fled enemy into a doorway, command sharpens every companion request.
+     *
+     * @return list<ActionCard>
+     */
+    private function awarenessCards(array $capabilities, Scene $scene, $actors): array
+    {
+        $cards = [];
+
+        if (isset($capabilities['scout'])) {
+            $hiddenRemains = $scene->allFeatures()->contains(
+                fn (SceneFeature $f) => ($f->state['hidden'] ?? false) && ! ($f->state['destroyed'] ?? false),
+            );
+            if ($hiddenRemains || ! ($scene->state['exit_scouted'] ?? false)) {
+                $cards[] = new ActionCard(
+                    slot: TurnSlot::Pre,
+                    verb: 'scout',
+                    label: 'Read the ground',
+                    description: 'Sweep the scene for what others miss — hidden ways, overlooked cover, a route out.',
+                    capability: 'scout',
+                );
+            }
+        }
+
+        if (isset($capabilities['detect'])
+            && $scene->activeActors()->contains(fn (Actor $a) => $a->tags['lurking'] ?? false)) {
+            $cards[] = new ActionCard(
+                slot: TurnSlot::Pre,
+                verb: 'detect',
+                label: 'Something is wrong — find it',
+                description: 'The scene is off in a way you can almost name. Hunt the source before it moves first.',
+                capability: 'detect',
+            );
+        }
+
+        if (isset($capabilities['track'])) {
+            foreach ($scene->actors()->where('status', 'fled')->get() as $quarry) {
+                $cards[] = new ActionCard(
+                    slot: TurnSlot::Main,
+                    verb: 'track',
+                    label: "Follow {$quarry->name}'s trail",
+                    description: "{$quarry->name} ran. Their trail is still warm — follow it out of this place.",
+                    target: ['type' => 'actor', 'id' => $quarry->id, 'name' => $quarry->name],
+                    capability: 'track',
+                    modifiers: [$this->approachModifier()],
+                );
+            }
+        }
+
+        if (isset($capabilities['command'])
+            && $actors->contains(fn (Actor $a) => $a->kind === 'companion')) {
+            $cards[] = new ActionCard(
+                slot: TurnSlot::Pre,
+                verb: 'command',
+                label: 'Call the play',
+                description: "Direct your companions with a commander's precision — every request lands sharper this turn.",
+                capability: 'command',
+            );
         }
 
         return $cards;

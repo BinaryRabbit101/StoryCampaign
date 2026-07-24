@@ -38,16 +38,41 @@ class Scene extends Model
         return $this->hasMany(Actor::class);
     }
 
-    /** @return Collection<int, SceneFeature> */
+    /**
+     * Dressed scenes own their features outright (scene-scoped copies drawn
+     * from the zone's templates at creation); legacy scenes keep the old
+     * overlay of every zone template.
+     *
+     * @return Collection<int, SceneFeature>
+     */
     public function allFeatures()
     {
-        return $this->features()->get()
-            ->concat($this->zone->features()->whereNull('scene_id')->get());
+        $own = $this->features()->get();
+
+        if ($this->state['dressed'] ?? false) {
+            return $own;
+        }
+
+        return $own->concat($this->zone->features()->whereNull('scene_id')->get());
+    }
+
+    /** Features the player can currently see and act on. @return Collection<int, SceneFeature> */
+    public function visibleFeatures()
+    {
+        return $this->allFeatures()->reject(
+            fn (SceneFeature $f) => ($f->state['hidden'] ?? false) || ($f->state['destroyed'] ?? false),
+        )->values();
     }
 
     /** @return Collection<int, Actor> */
     public function activeActors()
     {
         return $this->actors()->where('status', 'active')->get();
+    }
+
+    /** Active actors the player is aware of — a lurking ambusher is not among them. @return Collection<int, Actor> */
+    public function visibleActors()
+    {
+        return $this->activeActors()->reject(fn (Actor $a) => $a->tags['lurking'] ?? false)->values();
     }
 }

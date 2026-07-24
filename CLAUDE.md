@@ -5,7 +5,9 @@ chapters. Players act through one structured form per turn (contextual action
 cards, never free text); the engine owns all mechanics and outcomes; Claude
 owns narration. Every chapter is persisted and compiles into a keepsake book
 at campaign end. World evolution (`game:evolve`, `WorldEvolver`, Chronicle)
-exists in code but is deliberately unscheduled — manual runs only.
+runs on an activity-gated schedule (`GAME_EVOLVE_SCHEDULE` = daily|weekly|off,
+default daily): the Claude call only fires if a turn resolved inside the
+window, so an idle world burns nothing.
 
 Full design rationale: `design/DESIGN_BIBLE.md` (guardrails) and the original
 spec decisions embedded as comments in the code.
@@ -19,7 +21,7 @@ same as sibling projects). Fortify auth, Wayfinder, PHPUnit 12, SQLite, PWA
 - Dev: `npm run dev` + `php artisan serve` (or Herd). Build: `npm run build`.
 - Tests: `php artisan test`. Format: `vendor/bin/pint --dirty`.
 - Scheduler (prod): `php artisan schedule:work` — runs `game:resolve-due`
-  every 5 min. `game:evolve` is not scheduled (only ever run manually).
+  every 5 min and the activity-gated `game:evolve` (see above).
 - `GAME_TURN_CADENCE_MINUTES=0` in `.env` resolves turns inline on submit
   (dev convenience). Production default is 30.
 - Claude CLI config: `CLAUDE_BINARY` / `CLAUDE_MODEL` in `.env`; VAPID keys
@@ -38,8 +40,20 @@ adjudicates legality or outcomes — it is only ever handed resolved facts.
 - `app/Game/Engine/` — `CardComposer` (the intersection engine: capabilities ×
   affordances × constraints → cards, with graceful degradation and composed
   cards), `TurnResolver` (slot chain with legality-driven abort, seeded `Dice`,
-  enemy reaction, branch triggers, next-turn generation), `ActionCard`,
-  `BeatOutcome`.
+  enemy reaction, branch triggers, next-turn generation), `SceneDresser`
+  (scene generation: a seeded SUBSET of zone templates instantiated as
+  scene-scoped copies + spawned actors + a zone `locales` title, marked
+  `state.dressed`), `ActionCard`, `BeatOutcome`.
+- Anti-repetition systems (all engine-side, no LLM): dressed scenes make
+  every transition new ground; features tagged `hidden` are discovery
+  content (examine/scout reveal them); enemies telegraph intents
+  (press/windup/guard/circle in `tags.intent`) that composer cards and
+  resolver difficulty both honor (interrupt/brace answer a windup;
+  reposition denies a won angle); reinforcements may arrive `lurking`
+  (invisible to cards, situation, and narration until detect exposes them
+  or the ambush springs); an `alarm` clock on the scene forces reinforcements
+  after 3 stationary combat turns; `track` turns a fled enemy into a pursuit
+  that carries them, cornered, into the next scene.
 - `app/Services/Claude/` — `ClaudeCli` (stateless CLI runs), `Narrator`
   (resolution → chapter + push), `WorldEvolver` (budgeted evolution + Chronicle),
   `Interviewer` (creation/growth interviews).
@@ -47,8 +61,10 @@ adjudicates legality or outcomes — it is only ever handed resolved facts.
   `TurnStarter`, `BookCompiler` (compilation, not generation; coda on early end).
 - Affordances are JSON tags on `scene_features` (e.g.
   `{"reachable_via":["climb","swing"],"height":11}`). Zone-level features
-  (`scene_id` null) act as templates available to every scene in the zone;
-  zone-level actors are spawn templates.
+  (`scene_id` null) are templates: dressed scenes (`state.dressed`) draw a
+  subset as scene-scoped COPIES at creation (per-scene hidden/destroyed
+  state never leaks back to the shared row); legacy undressed scenes still
+  overlay every zone template. Zone-level actors are spawn templates.
 
 ## Invariants (do not break)
 
@@ -68,6 +84,9 @@ adjudicates legality or outcomes — it is only ever handed resolved facts.
 - Evolution runs are clamped by `config/game.php` bounds no matter what the
   LLM proposes, and log to `evolution_runs` (append-only) for coherence.
 - No mechanics language in any narration prompt output (no dice, cards, meters).
+- Hidden is hidden from the narrator too: `hidden` features and `lurking`
+  actors must never reach cards, situation text, or narration prompts until
+  the engine reveals them (use `visibleFeatures()`/`visibleActors()`).
 - The player-set stage (premise/tone) colors narration and seeds the opening
   through `StageBuilder` only: scene-scoped features/actors (source `stage`),
   clamped by `config/game.php` `stage_budget` + the evolver's stat bounds.
