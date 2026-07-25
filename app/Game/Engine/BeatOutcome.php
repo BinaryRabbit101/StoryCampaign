@@ -17,7 +17,12 @@ class BeatOutcome
 
     public const FAILURE = 'failure';
 
-    /** @param list<string> $facts */
+    /**
+     * @param  list<string>  $facts
+     * @param  string|null  $note  The player's own words for this beat —
+     *                             narration color, read only after every roll
+     *                             is already cast. Never a mechanical input.
+     */
     public function __construct(
         public readonly string $slot,
         public readonly string $verb,
@@ -28,6 +33,7 @@ class BeatOutcome
         public readonly int $difficulty,
         public readonly array $facts = [],
         public readonly bool $skipped = false,
+        public readonly ?string $note = null,
     ) {}
 
     public function succeeded(): bool
@@ -47,11 +53,12 @@ class BeatOutcome
             'difficulty' => $this->difficulty,
             'facts' => $this->facts,
             'skipped' => $this->skipped,
+            'note' => $this->note,
         ];
     }
 
-    public static function skipped(string $slot, string $verb, ?array $target, string $reason): self
+    public static function skipped(string $slot, string $verb, ?array $target, string $reason, ?string $note = null): self
     {
-        return new self($slot, $verb, $target, self::FAILURE, 0, 0, 0, [$reason], skipped: true);
+        return new self($slot, $verb, $target, self::FAILURE, 0, 0, 0, [$reason], skipped: true, note: $note);
     }
 }

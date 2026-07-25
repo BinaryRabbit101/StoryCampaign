@@ -31,6 +31,8 @@ export interface ActionCard {
 export interface SlotChoice {
     card_id: string;
     modifiers: Record<string, string>;
+    /** The player's own words for this one beat: narration color, never mechanics. */
+    note: string;
 }
 
 /** One companion's own request slot: their cards, chosen independently. */
@@ -66,7 +68,22 @@ export interface ChapterEvent {
     degree: string | null;
     skipped: boolean;
     facts: string[];
+    note: string | null;
     roll: { roll: number; total: number; difficulty: number } | null;
+}
+
+/**
+ * A person or a piece of ground the chapter can name. The page finds these
+ * names inside the prose and makes each one tappable, so scenery and things
+ * that can be acted on stop looking alike.
+ */
+export interface ChapterEntity {
+    key: string;
+    kind: 'actor' | 'feature';
+    icon: string;
+    name: string;
+    title: string;
+    lines: string[];
 }
 
 export interface CharacterItem {

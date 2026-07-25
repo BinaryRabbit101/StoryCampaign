@@ -5,6 +5,7 @@ import AmbientBackdrop from '@/components/game/AmbientBackdrop.vue';
 import SlotPicker from '@/components/game/SlotPicker.vue';
 import { enablePush } from '@/lib/push';
 import type {
+    ChapterEntity,
     ChapterEvent,
     CharacterItem,
     CharacterMeters,
@@ -47,6 +48,7 @@ const props = defineProps<{
         intent_line: string | null;
         body: string;
         events: ChapterEvent[];
+        entities: ChapterEntity[];
     } | null;
 }>();
 
@@ -56,7 +58,6 @@ const post = ref<SlotChoice | null>(null);
 // One independent request per companion, keyed by companion id — their own
 // beat, never a claim on the player's three slots.
 const companionChoices = ref<Record<number, SlotChoice | null>>({});
-const intentText = ref('');
 const submitting = ref(false);
 const showSheet = ref(false);
 const showGrowth = ref(false);
@@ -73,9 +74,14 @@ const locked = computed(
 // (fresh from the prologue, or narration still catching up).
 const showSituation = computed(() => props.latestChapter?.kind !== 'chapter');
 
-// ---- Event anchors: [[eN]] tokens in the prose become tappable icons. ----
+// ---- Anchors in the prose ----
+//
+// Two kinds, one detail card. [[eN]] tokens the narrator placed become
+// tappable icons for what the engine resolved; the names of the people and
+// the ground the scene holds become tappable words, so a reader can tell at
+// a glance which nouns in the chapter are things they can act on.
 
-const EVENT_ICONS: Record<string, string> = {
+const ICONS: Record<string, string> = {
     attack: '⚔️',
     injury: '🩸',
     heal: '✚',
@@ -90,44 +96,185 @@ const EVENT_ICONS: Record<string, string> = {
     threat: '⚠️',
     defense: '🛡️',
     ally: '🤝',
+    study: '🔍',
     skipped: '⊘',
     beat: '✦',
+    enemy: '🗡️',
+    person: '🧍',
+    ground: '🧱',
 };
 
-const activeEvent = ref<ChapterEvent | null>(null);
+const icon = (name: string) => ICONS[name] ?? ICONS.beat;
 
-// The detail card opens where the tapped icon sits, not at a fixed spot
+/** Whatever the tapped anchor has to say, in one shape. */
+interface Detail {
+    key: string;
+    icon: string;
+    title: string;
+    titleClass: string;
+    badge: string | null;
+    lines: string[];
+    note: string | null;
+    roll: ChapterEvent['roll'];
+}
+
+const detail = ref<Detail | null>(null);
+
+// The detail card opens where the tapped anchor sits, not at a fixed spot
 // below the prose: the chapter article is the positioning context, and the
-// panel's top tracks the clicked button within it.
+// panel's top tracks the clicked element within it.
 const chapterEl = ref<HTMLElement | null>(null);
-const eventPanelTop = ref(0);
+const detailTop = ref(0);
 
-function toggleEvent(event: ChapterEvent, e: MouseEvent) {
-    if (activeEvent.value?.id === event.id) {
-        activeEvent.value = null;
+function openDetail(next: Detail, e: MouseEvent) {
+    if (detail.value?.key === next.key) {
+        detail.value = null;
         return;
     }
-    activeEvent.value = event;
-    const button = e.currentTarget as HTMLElement | null;
-    if (button && chapterEl.value) {
+    detail.value = next;
+    const anchor = e.currentTarget as HTMLElement | null;
+    if (anchor && chapterEl.value) {
         const article = chapterEl.value.getBoundingClientRect();
-        eventPanelTop.value =
-            button.getBoundingClientRect().bottom - article.top + 6;
+        detailTop.value =
+            anchor.getBoundingClientRect().bottom - article.top + 6;
     }
+}
+
+const degreeClass = (event: ChapterEvent) =>
+    event.skipped
+        ? 'text-muted-foreground'
+        : event.degree === 'failure'
+          ? 'text-red-600 dark:text-red-400'
+          : event.degree === 'partial'
+            ? 'text-amber-600 dark:text-amber-400'
+            : 'text-emerald-600 dark:text-emerald-400';
+
+const eventDetail = (event: ChapterEvent): Detail => ({
+    key: `event:${event.id}`,
+    icon: icon(event.icon),
+    title: event.label,
+    titleClass: degreeClass(event),
+    badge: event.slot,
+    lines: event.facts,
+    note: event.note,
+    roll: event.roll,
+});
+
+const entityDetail = (entity: ChapterEntity): Detail => ({
+    key: `entity:${entity.key}`,
+    icon: icon(entity.icon),
+    title: entity.name,
+    titleClass: 'text-foreground',
+    badge: entity.title,
+    lines: entity.lines,
+    note: null,
+    roll: null,
+});
+
+function openEvent(event: ChapterEvent, e: MouseEvent) {
+    openDetail(eventDetail(event), e);
+}
+
+function openEntity(entity: ChapterEntity, e: MouseEvent) {
+    openDetail(entityDetail(entity), e);
 }
 
 const eventsById = computed(
     () => new Map((props.latestChapter?.events ?? []).map((e) => [e.id, e])),
 );
 
-// The chapter body split around anchor tokens; unknown tokens vanish silently.
-const bodySegments = computed(() => {
+function escapeRegExp(value: string): string {
+    return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+/**
+ * The forms the narrator is likely to have used: the name the world stores,
+ * and the same name without its leading article — prose writes "the wall of
+ * stacked crates" where the world calls it "a wall of stacked crates".
+ */
+function nameVariants(name: string): string[] {
+    const bare = name.replace(/^(the|a|an)\s+/i, '');
+    return bare === name ? [name] : [name, bare];
+}
+
+// One alternation over every entity name, longest first so a long name always
+// wins over a shorter one nested inside it.
+const entityMatcher = computed(() => {
+    const variants: { pattern: string; entity: ChapterEntity }[] = [];
+    for (const entity of props.latestChapter?.entities ?? []) {
+        for (const pattern of nameVariants(entity.name)) {
+            if (pattern.trim()) variants.push({ pattern, entity });
+        }
+    }
+    if (!variants.length) return null;
+
+    variants.sort((a, b) => b.pattern.length - a.pattern.length);
+
+    return {
+        pattern: new RegExp(
+            `\\b(${variants.map((v) => escapeRegExp(v.pattern)).join('|')})\\b`,
+            'gi',
+        ),
+        byName: new Map(
+            variants.map((v) => [v.pattern.toLowerCase(), v.entity]),
+        ),
+    };
+});
+
+interface Segment {
+    text: string;
+    event: ChapterEvent | null;
+    entity: ChapterEntity | null;
+}
+
+// The chapter body split around both kinds of anchor. Unknown [[eN]] tokens
+// vanish silently; the stored body itself is never rewritten.
+const bodySegments = computed<Segment[]>(() => {
     const body = props.latestChapter?.body ?? '';
-    return body.split(/(\[\[e\d+\]\])/).map((part) => {
-        const match = part.match(/^\[\[(e\d+)\]\]$/);
-        if (!match) return { text: part, event: null };
-        return { text: '', event: eventsById.value.get(match[1]) ?? null };
-    });
+    const matcher = entityMatcher.value;
+    const segments: Segment[] = [];
+
+    for (const part of body.split(/(\[\[e\d+\]\])/)) {
+        const token = part.match(/^\[\[(e\d+)\]\]$/);
+        if (token) {
+            segments.push({
+                text: '',
+                event: eventsById.value.get(token[1]) ?? null,
+                entity: null,
+            });
+            continue;
+        }
+
+        if (!matcher || !part) {
+            segments.push({ text: part, event: null, entity: null });
+            continue;
+        }
+
+        let cursor = 0;
+        matcher.pattern.lastIndex = 0;
+        for (const hit of part.matchAll(matcher.pattern)) {
+            const entity = matcher.byName.get(hit[1].toLowerCase());
+            if (!entity || hit.index === undefined) continue;
+            if (hit.index > cursor) {
+                segments.push({
+                    text: part.slice(cursor, hit.index),
+                    event: null,
+                    entity: null,
+                });
+            }
+            segments.push({ text: hit[0], event: null, entity });
+            cursor = hit.index + hit[0].length;
+        }
+        if (cursor < part.length) {
+            segments.push({
+                text: part.slice(cursor),
+                event: null,
+                entity: null,
+            });
+        }
+    }
+
+    return segments;
 });
 
 // Events the narrator failed to anchor (or pre-feature chapters): still shown,
@@ -138,15 +285,6 @@ const unanchoredEvents = computed(() => {
         (e) => !body.includes(`[[${e.id}]]`),
     );
 });
-
-const degreeClass = (event: ChapterEvent) =>
-    event.skipped
-        ? 'text-muted-foreground'
-        : event.degree === 'failure'
-          ? 'text-red-600 dark:text-red-400'
-          : event.degree === 'partial'
-            ? 'text-amber-600 dark:text-amber-400'
-            : 'text-emerald-600 dark:text-emerald-400';
 
 // Staged, visible resource commitment: the running cost of the whole chain.
 const runningCost = computed(() => {
@@ -223,13 +361,11 @@ function submit() {
             main: main.value,
             post: post.value,
             companions: companionChoices.value,
-            intent_text: intentText.value || null,
         },
         {
             onSuccess: () => {
                 pre.value = main.value = post.value = null;
                 companionChoices.value = {};
-                intentText.value = '';
             },
             onFinish: () => (submitting.value = false),
         },
@@ -514,16 +650,29 @@ const healthPct = computed(
                         type="button"
                         class="mx-0.5 inline-flex h-5 w-5 -translate-y-px items-center justify-center rounded-full align-middle text-[11px] leading-none not-italic transition-transform hover:scale-125"
                         :class="
-                            activeEvent?.id === seg.event.id
+                            detail?.key === `event:${seg.event.id}`
                                 ? 'bg-violet-500/25 ring-1 ring-violet-500'
                                 : 'bg-muted'
                         "
                         :title="seg.event.label"
-                        @click="toggleEvent(seg.event, $event)"
+                        @click="openEvent(seg.event, $event)"
                     >
-                        {{
-                            EVENT_ICONS[seg.event.icon] ?? EVENT_ICONS.beat
-                        }}</button
+                        {{ icon(seg.event.icon) }}</button
+                    ><button
+                        v-else-if="seg.entity"
+                        type="button"
+                        class="inline cursor-pointer border-b border-dotted text-left transition-colors"
+                        :class="
+                            detail?.key === `entity:${seg.entity.key}`
+                                ? 'border-violet-500 text-violet-600 dark:text-violet-400'
+                                : seg.entity.kind === 'actor'
+                                  ? 'border-amber-600/50 hover:text-amber-700 dark:border-amber-400/40 dark:hover:text-amber-400'
+                                  : 'border-sky-600/50 hover:text-sky-700 dark:border-sky-400/40 dark:hover:text-sky-400'
+                        "
+                        :title="`${seg.entity.name} — tap for detail`"
+                        @click="openEntity(seg.entity, $event)"
+                    >
+                        {{ seg.text }}</button
                     ><span v-else>{{ seg.text }}</span></template
                 >
             </div>
@@ -549,68 +698,68 @@ const healthPct = computed(
                     type="button"
                     class="inline-flex h-6 w-6 items-center justify-center rounded-full text-xs transition-transform hover:scale-110"
                     :class="
-                        activeEvent?.id === event.id
+                        detail?.key === `event:${event.id}`
                             ? 'bg-violet-500/25 ring-1 ring-violet-500'
                             : 'bg-muted'
                     "
                     :title="event.label"
-                    @click="toggleEvent(event, $event)"
+                    @click="openEvent(event, $event)"
                 >
-                    {{ EVENT_ICONS[event.icon] ?? EVENT_ICONS.beat }}
+                    {{ icon(event.icon) }}
                 </button>
             </div>
 
+            <!-- One detail card for both kinds of anchor: what the engine
+                 resolved, or what a named person or piece of ground is. -->
             <Transition name="pop">
                 <div
-                    v-if="activeEvent"
-                    :key="activeEvent.id"
+                    v-if="detail"
+                    :key="detail.key"
                     class="absolute right-3 left-3 z-10 rounded-lg border border-violet-500/40 bg-popover p-3 text-sm shadow-lg shadow-violet-500/10"
-                    :style="{ top: `${eventPanelTop}px` }"
+                    :style="{ top: `${detailTop}px` }"
                 >
                     <div class="flex items-start justify-between gap-2">
                         <p class="font-medium">
-                            {{
-                                EVENT_ICONS[activeEvent.icon] ??
-                                EVENT_ICONS.beat
-                            }}
-                            <span :class="degreeClass(activeEvent)">{{
-                                activeEvent.label
+                            {{ detail.icon }}
+                            <span :class="detail.titleClass">{{
+                                detail.title
                             }}</span>
                             <span
-                                v-if="activeEvent.slot"
+                                v-if="detail.badge"
                                 class="ml-1 rounded-full bg-muted px-2 py-0.5 text-[10px] tracking-wide text-muted-foreground uppercase"
-                                >{{ activeEvent.slot }}</span
+                                >{{ detail.badge }}</span
                             >
                         </p>
                         <button
                             class="text-xs text-muted-foreground hover:text-foreground"
-                            @click="activeEvent = null"
+                            @click="detail = null"
                         >
                             ✕
                         </button>
                     </div>
                     <ul class="mt-1.5 space-y-0.5 text-muted-foreground">
-                        <li v-for="fact in activeEvent.facts" :key="fact">
-                            {{ fact }}
+                        <li v-for="line in detail.lines" :key="line">
+                            {{ line }}
                         </li>
                     </ul>
                     <p
-                        v-if="activeEvent.roll"
+                        v-if="detail.note"
+                        class="mt-1.5 text-xs text-violet-600 italic dark:text-violet-400"
+                    >
+                        Your words: “{{ detail.note }}”
+                    </p>
+                    <p
+                        v-if="detail.roll"
                         class="mt-1.5 font-mono text-xs text-muted-foreground"
                     >
-                        d20 {{ activeEvent.roll.roll
+                        d20 {{ detail.roll.roll
                         }}<template
-                            v-if="
-                                activeEvent.roll.total !== activeEvent.roll.roll
-                            "
+                            v-if="detail.roll.total !== detail.roll.roll"
                         >
-                            +
-                            {{
-                                activeEvent.roll.total - activeEvent.roll.roll
-                            }}
-                            = {{ activeEvent.roll.total }}</template
+                            + {{ detail.roll.total - detail.roll.roll }} =
+                            {{ detail.roll.total }}</template
                         >
-                        vs {{ activeEvent.roll.difficulty }}
+                        vs {{ detail.roll.difficulty }}
                     </p>
                 </div>
             </Transition>
@@ -732,23 +881,6 @@ const healthPct = computed(
                     :cards="turn.cards.post"
                     :optional="true"
                 />
-
-                <div>
-                    <label
-                        class="mb-1 block text-xs font-medium text-muted-foreground"
-                    >
-                        In your own words
-                        <span class="font-normal"
-                            >(colors the telling; changes nothing)</span
-                        >
-                    </label>
-                    <input
-                        v-model="intentText"
-                        maxlength="280"
-                        placeholder="I whisper a prayer as I swing…"
-                        class="w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
-                    />
-                </div>
 
                 <div class="flex items-center justify-between gap-3">
                     <span

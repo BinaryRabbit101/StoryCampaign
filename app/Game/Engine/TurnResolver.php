@@ -269,8 +269,8 @@ class TurnResolver
         }
 
         // Tempo and quiet beats auto-succeed; everything else rolls.
-        if (in_array($verb, ['time_slow', 'haste', 'ready', 'examine', 'wait', 'catch_breath', 'reposition', 'shield', 'brace', 'command'], true)) {
-            return $this->quietBeat($card, $character, $scene, $conditions);
+        if (in_array($verb, ['time_slow', 'haste', 'ready', 'examine', 'inspect', 'wait', 'catch_breath', 'reposition', 'shield', 'brace', 'command'], true)) {
+            return $this->quietBeat($card, $character, $scene, $conditions, $this->note($choice));
         }
 
         $difficulty = 10 + match ($card['risk']) {
@@ -325,10 +325,23 @@ class TurnResolver
             array_unshift($facts, "The attack came as {$method}.");
         }
 
-        return new BeatOutcome($card['slot'], $verb, $card['target'] ?? null, $degree, $roll, $total, $difficulty, $facts);
+        return new BeatOutcome($card['slot'], $verb, $card['target'] ?? null, $degree, $roll, $total, $difficulty, $facts,
+            note: $this->note($choice));
     }
 
-    private function quietBeat(array $card, Character $character, Scene $scene, array &$conditions): BeatOutcome
+    /**
+     * The player's own words for this beat. Same class as the old whole-turn
+     * intent line: it colors how the narrator tells the beat and never enters
+     * the mechanics path — it is read after every roll is already cast.
+     */
+    private function note(array $choice): ?string
+    {
+        $note = trim((string) ($choice['note'] ?? ''));
+
+        return $note === '' ? null : $note;
+    }
+
+    private function quietBeat(array $card, Character $character, Scene $scene, array &$conditions, ?string $note = null): BeatOutcome
     {
         $facts = [];
 
@@ -368,6 +381,14 @@ class TurnResolver
                     $facts[] = 'They studied the scene: '.$this->sceneSummary($scene);
                 }
                 break;
+            case 'inspect':
+                // Reading one thing properly, rather than the whole scene:
+                // what it is and what it would give, in plain sight-language.
+                $feature = $scene->allFeatures()->firstWhere('id', $card['target']['id'] ?? 0);
+                $facts[] = $feature === null
+                    ? 'What they went to look at was no longer there to look at.'
+                    : "They read {$feature->name} closely. ".implode(' ', $feature->readings());
+                break;
             case 'wait':
                 $facts[] = 'They held still and let the scene move first.';
                 break;
@@ -405,7 +426,7 @@ class TurnResolver
         }
 
         return new BeatOutcome($card['slot'], $card['verb'], $card['target'] ?? null,
-            BeatOutcome::SUCCESS, 0, 0, 0, $facts);
+            BeatOutcome::SUCCESS, 0, 0, 0, $facts, note: $note);
     }
 
     /** @return list<string> */
@@ -501,6 +522,24 @@ class TurnResolver
                     $facts[] = "Words landed: {$actor->name} was ".($verb === 'calm' ? 'calmed' : 'won over').'.';
                 } else {
                     $facts[] = "The words found no purchase on {$targetName}.";
+                }
+                break;
+
+            case 'speak':
+                // Plain conversation: no trained tongue behind it, so it
+                // opens a door at best — it never routs anyone the way the
+                // capability verbs can.
+                $actor = Actor::find($card['target']['id']);
+                if ($succeeded && $actor !== null) {
+                    $tags = $actor->tags ?? [];
+                    $tags['disposition'] = 'swayed';
+                    $tags['talkable'] = true;
+                    $actor->update(['tags' => $tags]);
+                    $facts[] = "{$actor->name} heard them out and warmed to them — the conversation is open now.";
+                } elseif ($degree === BeatOutcome::PARTIAL) {
+                    $facts[] = "{$targetName} listened, said little, and gave away less.";
+                } else {
+                    $facts[] = "{$targetName} had no interest in talking.";
                 }
                 break;
 
@@ -805,10 +844,16 @@ class TurnResolver
 
             case 'improvise':
                 // Base stats, no special bonus — never better than a real
-                // enumerated option, so there's no incentive to game it.
-                $facts[] = $succeeded
-                    ? 'The improvised gambit worked — barely, and only through nerve.'
-                    : 'The improvisation fell apart; the moment reasserted itself.';
+                // enumerated option, so there's no incentive to game it. The
+                // target only says what the gambit was aimed at; it buys the
+                // attempt nothing.
+                $aimed = ($card['target'] ?? null) !== null;
+                $facts[] = match (true) {
+                    $succeeded && $aimed => "The improvised gambit against {$targetName} worked — barely, and only through nerve.",
+                    $succeeded => 'The improvised gambit worked — barely, and only through nerve.',
+                    $aimed => "The improvisation against {$targetName} fell apart; the moment reasserted itself.",
+                    default => 'The improvisation fell apart; the moment reasserted itself.',
+                };
                 break;
 
             default:

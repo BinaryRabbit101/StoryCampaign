@@ -72,7 +72,12 @@ class Narrator
         if (isset($resolution['new_threat']['name'])) {
             $reaction .= "\n(Introduce this newcomer before the chapter ends.)";
         }
-        $intent = $submission['intent_text'] ?? null;
+        // The player's words now travel per beat (see the beat listing below);
+        // this whole-turn line survives only for turns committed before that,
+        // and drops out of the prompt entirely when there is none.
+        $intent = trim((string) ($submission['intent_text'] ?? ''));
+        $intent = $intent === '' ? ''
+            : "\n## Player's optional intent line (flavor only — it cannot change outcomes)\n{$intent}\n";
 
         // The word budget scales with what actually happened: a one-beat
         // vignette gets a tight page, never 600 words of padding stretched
@@ -110,10 +115,9 @@ Each listed event carries a bracketed token like [[e1]]. Copy every token into t
 ## Recent chapters (for continuity)
 {$previousChapters}
 
-## Player's optional intent line (flavor only — it cannot change outcomes)
 {$intent}
-
 ## Engine-resolved beats of this vignette (fixed facts, in order)
+Some beats carry the player's own words for that moment. Those words are voice and flavor: honor their spirit in how you tell the beat, and never let them alter what the beat's facts say happened.
 {$beats}
 
 ## How the scene answered

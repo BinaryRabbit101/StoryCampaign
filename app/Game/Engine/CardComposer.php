@@ -77,6 +77,13 @@ class CardComposer
             $cards[$card->slot->value][] = $card;
         }
 
+        // The scene is never furniture: everything the player can see is
+        // something they can look at or improvise against, whether or not
+        // they have a capability that fits it.
+        foreach ($this->groundedCards($features, $actors) as $card) {
+            $cards[$card->slot->value][] = $card;
+        }
+
         // The frontier: once the world has forged the next zone, the way
         // out of this one stands open as a real, named choice.
         $frontier = $scene->campaign?->nextZone;
@@ -361,8 +368,10 @@ class CardComposer
             }
         }
 
+        $spokenTo = false;
         foreach (['persuade', 'deceive', 'calm'] as $social) {
             if (($tags[$social.'able'] ?? ($tags['talkable'] ?? false)) && isset($capabilities[$social])) {
+                $spokenTo = true;
                 $cards[] = new ActionCard(
                     slot: TurnSlot::Main,
                     verb: $social,
@@ -372,6 +381,19 @@ class CardComposer
                     capability: $social,
                 );
             }
+        }
+
+        // A trained tongue is a capability; plain conversation is not. Anyone
+        // the player is not fighting can be spoken to — no gift required, and
+        // no better than the trained verbs it stands in for.
+        if (! $hostile && ! $spokenTo) {
+            $cards[] = new ActionCard(
+                slot: TurnSlot::Main,
+                verb: 'speak',
+                label: "Speak with {$actor->name}",
+                description: "Open a plain conversation with {$actor->name} — no craft behind it, just what you have to say.",
+                target: $target,
+            );
         }
 
         // Recruitment grows out of the social verbs: a willing soul, or one
@@ -650,21 +672,16 @@ class CardComposer
 
     /**
      * Generic fallbacks (always present) and post-slot recovery verbs.
-     * Improvise resolves against base stats with no special bonus — never
-     * better than a real enumerated option.
+     * Improvisation itself lives in groundedCards, where it can name what
+     * it is aimed at — but it resolves the same way either place: against
+     * base stats with no special bonus, never better than a real
+     * enumerated option.
      *
      * @return list<ActionCard>
      */
     private function genericCards(Character $character, $actors): array
     {
         $cards = [
-            new ActionCard(
-                slot: TurnSlot::Main,
-                verb: 'improvise',
-                label: 'Improvise',
-                description: 'Attempt something the moment suggests. Describe it in your intent — the outcome rides on plain luck and grit.',
-                risk: 'risky',
-            ),
             new ActionCard(
                 slot: TurnSlot::Main,
                 verb: 'examine',
@@ -712,6 +729,76 @@ class CardComposer
             verb: 'reposition',
             label: 'Reposition',
             description: 'Move to safer footing once the dust settles.',
+        );
+
+        return $cards;
+    }
+
+    /**
+     * Everything the player can see is something they can act on, capability
+     * or not — otherwise a scene whose affordances miss the character's gifts
+     * offers nothing but the same three fallbacks every turn.
+     *
+     * Two capability-free families, both aimed at named things:
+     *  - `inspect` — read one specific thing properly (a quiet pre beat), so
+     *    the scene stops being a list of names the player cannot interrogate.
+     *  - `improvise` — the riskiest card in the game finally says what it is
+     *    about. It still rolls against base stats with no bonus, so a
+     *    grounded improvisation is never better than the enumerated option
+     *    standing beside it.
+     *
+     * Shared verb + no capability means the picker collapses each family into
+     * a single row of target chips: the form grows a choice, not a wall.
+     *
+     * @return list<ActionCard>
+     */
+    private function groundedCards($features, $actors): array
+    {
+        $cards = [];
+
+        $standing = $features->reject(fn (SceneFeature $f) => $f->state['destroyed'] ?? false)->take(6);
+
+        foreach ($standing as $feature) {
+            $target = ['type' => 'feature', 'id' => $feature->id, 'name' => $feature->name];
+
+            $cards[] = new ActionCard(
+                slot: TurnSlot::Pre,
+                verb: 'inspect',
+                label: "Look closer at {$feature->name}",
+                description: "Read {$feature->name} properly before you commit — what it is, what it would take, and what it might give you.",
+                target: $target,
+            );
+
+            $cards[] = new ActionCard(
+                slot: TurnSlot::Main,
+                verb: 'improvise',
+                label: "Improvise with {$feature->name}",
+                description: "Turn {$feature->name} to your advantage in some way none of the offered options cover. No training behind it — say what you mean to try in your own words, and trust your nerve.",
+                target: $target,
+                risk: 'risky',
+                modifiers: [$this->approachModifier()],
+            );
+        }
+
+        foreach ($actors->reject(fn (Actor $a) => $a->kind === 'companion')->take(4) as $actor) {
+            $cards[] = new ActionCard(
+                slot: TurnSlot::Main,
+                verb: 'improvise',
+                label: "Improvise on {$actor->name}",
+                description: "Try something on {$actor->name} that none of the offered options cover. No training behind it — say what you mean to try in your own words, and trust your nerve.",
+                target: ['type' => 'actor', 'id' => $actor->id, 'name' => $actor->name],
+                risk: 'risky',
+                modifiers: [$this->approachModifier()],
+            );
+        }
+
+        $cards[] = new ActionCard(
+            slot: TurnSlot::Main,
+            verb: 'improvise',
+            label: 'Do something else entirely',
+            description: 'Something off this list and aimed at nothing here in particular. Write what you attempt in your own words below — the outcome rides on plain luck and grit.',
+            risk: 'risky',
+            modifiers: [$this->approachModifier()],
         );
 
         return $cards;

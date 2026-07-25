@@ -3,6 +3,7 @@
 namespace Tests\Feature;
 
 use App\Game\Engine\CardComposer;
+use App\Game\Engine\ChapterEntities;
 use App\Game\Engine\ChapterEvents;
 use App\Game\Engine\TurnResolver;
 use App\Game\Meters;
@@ -1198,6 +1199,154 @@ class GameEngineTest extends TestCase
         $this->assertSame('active', $campaign->status);
         $this->assertSame(12, $campaign->character->capabilities->firstWhere('capability', 'reach')->magnitude);
         $this->assertTrue($campaign->character->constraints->pluck('name')->contains('ponderous'));
+    }
+
+    /**
+     * The staleness bug: a scene whose affordances miss the character's gifts
+     * used to produce no cards at all, so three turns running showed the same
+     * three fallbacks. Everything visible must be actionable regardless.
+     */
+    public function test_a_feature_no_capability_fits_is_still_something_to_act_on()
+    {
+        $campaign = $this->createCatCampaign();
+        $turn = app(TurnStarter::class)->openFirstTurn($campaign);
+        // lift_weight(180) with no lift capability: the old composer had
+        // nothing to say about the harbor chain at all.
+        $chain = $this->placeFeature($campaign->activeScene, 'the harbor chain');
+        $turn = $this->refreshCards($turn);
+
+        $capabilityCards = collect($turn->cards['main'])
+            ->filter(fn ($c) => ($c['target']['id'] ?? null) === $chain->id && $c['capability'] !== null);
+        $this->assertTrue($capabilityCards->isEmpty(), 'no capability of the Cat fits this feature');
+
+        $inspect = collect($turn->cards['pre'])
+            ->first(fn ($c) => $c['verb'] === 'inspect' && $c['target']['id'] === $chain->id);
+        $this->assertNotNull($inspect);
+
+        $improvise = collect($turn->cards['main'])
+            ->first(fn ($c) => $c['verb'] === 'improvise' && ($c['target']['id'] ?? null) === $chain->id);
+        $this->assertNotNull($improvise);
+        $this->assertSame('risky', $improvise['risk']);
+
+        // The untargeted escape hatch survives beside the grounded ones.
+        $this->assertTrue(collect($turn->cards['main'])
+            ->contains(fn ($c) => $c['verb'] === 'improvise' && $c['target'] === null));
+    }
+
+    public function test_inspecting_a_feature_reads_it_in_plain_language()
+    {
+        $campaign = $this->createCatCampaign();
+        $turn = app(TurnStarter::class)->openFirstTurn($campaign);
+        $roof = $this->placeFeature($campaign->activeScene, 'the warehouse roof');
+        $turn = $this->refreshCards($turn);
+
+        $inspect = collect($turn->cards['pre'])
+            ->first(fn ($c) => $c['verb'] === 'inspect' && $c['target']['id'] === $roof->id);
+        $wait = collect($turn->cards['main'])->firstWhere('verb', 'wait');
+
+        $turn->update([
+            'status' => Turn::STATUS_LOCKED,
+            'submission' => [
+                'pre' => ['card_id' => $inspect['id'], 'modifiers' => []],
+                'main' => ['card_id' => $wait['id'], 'modifiers' => []],
+            ],
+            'submitted_at' => now(),
+        ]);
+
+        app(TurnResolver::class)->resolve($turn->fresh());
+
+        $beat = collect($turn->fresh()->resolution['beats'])->firstWhere('verb', 'inspect');
+        $reading = implode(' ', $beat['facts']);
+
+        $this->assertStringContainsString('the warehouse roof', $reading);
+        $this->assertStringContainsString('climbed', $reading);
+        // The engine's magnitudes stay backstage: these facts reach the
+        // narrator, so height(11) must arrive as sight, not as a number.
+        $this->assertStringNotContainsString('11', $reading);
+    }
+
+    public function test_anyone_not_being_fought_can_be_spoken_to_without_a_social_gift()
+    {
+        $campaign = $this->createCatCampaign();
+        $turn = app(TurnStarter::class)->openFirstTurn($campaign);
+        $dockhand = $this->placeActor($campaign->activeScene, 'a stray dockhand');
+        $turn = $this->refreshCards($turn);
+
+        $verbs = collect($turn->cards['main'])
+            ->filter(fn ($c) => ($c['target']['id'] ?? null) === $dockhand->id)
+            ->pluck('verb');
+
+        // The Cat has no persuade/deceive/calm, so the trained verbs are absent…
+        $this->assertEmpty($verbs->intersect(['persuade', 'deceive', 'calm']));
+        // …but plain conversation is not a gift.
+        $this->assertTrue($verbs->contains('speak'));
+    }
+
+    public function test_a_per_beat_note_reaches_the_narrator_and_never_the_dice()
+    {
+        $campaign = $this->createCatCampaign();
+        $turn = app(TurnStarter::class)->openFirstTurn($campaign);
+        $this->placeActor($campaign->activeScene, 'a dockside tough');
+        $turn = $this->refreshCards($turn);
+
+        $strike = collect($turn->cards['main'])->firstWhere('verb', 'strike');
+
+        $turn->update([
+            'status' => Turn::STATUS_LOCKED,
+            'submission' => [
+                'main' => [
+                    'card_id' => $strike['id'],
+                    'modifiers' => ['approach' => 'balanced', 'method' => 'unspecified'],
+                    'note' => 'I go low and quiet, and I do not say a word.',
+                ],
+            ],
+            'submitted_at' => now(),
+        ]);
+
+        app(TurnResolver::class)->resolve($turn->fresh());
+        $turn->refresh();
+
+        $beat = collect($turn->resolution['beats'])->firstWhere('verb', 'strike');
+
+        // risky(+3) on a balanced approach against an untelegraphed enemy:
+        // exactly 13, whatever the player wrote beside it.
+        $this->assertSame(13, $beat['difficulty']);
+        $this->assertSame('I go low and quiet, and I do not say a word.', $beat['note']);
+        $this->assertNotContains($beat['note'], $beat['facts']);
+
+        $line = ChapterEvents::promptLine(collect(ChapterEvents::for($turn))->firstWhere('verb', 'strike'));
+        $this->assertStringContainsString('I go low and quiet', $line);
+        $this->assertStringContainsString('cannot change the outcome', $line);
+    }
+
+    public function test_chapter_entities_name_what_is_seen_and_omit_what_is_hidden()
+    {
+        $campaign = $this->createCatCampaign();
+        $turn = app(TurnStarter::class)->openFirstTurn($campaign);
+        $scene = $campaign->activeScene;
+
+        $this->placeFeature($scene, 'the warehouse roof');
+        $this->placeFeature($scene, "the smuggler's door", ['hidden' => true]);
+        $this->placeActor($scene, 'the lantern watchman');
+
+        $lurker = $this->placeActor($scene, 'a dockside tough');
+        $lurker->update(['tags' => ($lurker->tags ?? []) + ['lurking' => true, 'lurking_since' => 1]]);
+
+        $names = collect(ChapterEntities::for($turn->fresh()))->pluck('name');
+
+        $this->assertTrue($names->contains('the warehouse roof'));
+        $this->assertTrue($names->contains('the lantern watchman'));
+        // Hidden is hidden from the reader's detail card too.
+        $this->assertFalse($names->contains("the smuggler's door"));
+        $this->assertFalse($names->contains('a dockside tough'));
+
+        // Longest first, so a long name always wins over one nested in it.
+        $lengths = $names->map(fn ($n) => mb_strlen($n))->all();
+        $this->assertSame($lengths, collect($lengths)->sortDesc()->values()->all());
+
+        $roof = collect(ChapterEntities::for($turn->fresh()))->firstWhere('name', 'the warehouse roof');
+        $this->assertSame('feature', $roof['kind']);
+        $this->assertStringContainsString('climbed', implode(' ', $roof['lines']));
     }
 
     public function test_widget_endpoint_requires_a_valid_token()

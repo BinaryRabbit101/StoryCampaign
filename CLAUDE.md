@@ -51,8 +51,11 @@ adjudicates legality or outcomes — it is only ever handed resolved facts.
   (scene generation: a seeded SUBSET of zone templates instantiated as
   scene-scoped copies + spawned actors + a zone `locales` title, marked
   `state.dressed`), `ActionCard`, `BeatOutcome`.
-- Anti-repetition systems (all engine-side, no LLM): dressed scenes make
-  every transition new ground; features tagged `hidden` are discovery
+- Anti-repetition systems (all engine-side, no LLM): every visible feature
+  and actor carries capability-free `inspect`/`improvise`/`speak` cards, so
+  ground the character's gifts don't fit is still actionable and the card
+  list moves with the scene instead of collapsing to fixed fallbacks;
+  dressed scenes make every transition new ground; features tagged `hidden` are discovery
   content (examine/scout reveal them); enemies telegraph intents
   (press/windup/guard/circle in `tags.intent`) that composer cards and
   resolver difficulty both honor (interrupt/brace answer a windup;
@@ -84,10 +87,12 @@ adjudicates legality or outcomes — it is only ever handed resolved facts.
 - Every turn stop must offer ≥ 2 legal cards (generic fallbacks guarantee it).
 - Improvise resolves against base stats with no bonus — never better than a
   real enumerated option.
-- The optional intent text colors narration only; it must never reach the
-  mechanics path. The strike `method` modifier (bite, tail-whip, …) is the
-  same class: engine-offered and validated, carried into the beat's facts
-  for the narrator, but never an input to difficulty or damage.
+- The optional per-beat note ("in your own words", one per chosen card, stored
+  as `submission.<slot>.note` and carried on `BeatOutcome::$note`) colors
+  narration only; it must never reach the mechanics path — the resolver reads
+  it after every roll is already cast. The strike `method` modifier (bite,
+  tail-whip, …) is the same class: engine-offered and validated, carried into
+  the beat's facts for the narrator, but never an input to difficulty or damage.
 - Chapters are append-only, persisted before any push is sent; the book is a
   compilation (the only new generation at campaign end is the optional coda
   and title flourish).

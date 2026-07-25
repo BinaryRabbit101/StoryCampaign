@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers;
 
+use App\Game\Engine\ChapterEntities;
 use App\Game\Engine\ChapterEvents;
 use App\Game\Engine\TurnResolver;
 use App\Game\TurnSlot;
@@ -63,13 +64,17 @@ class PlayController extends Controller
             'latestChapter' => $latestChapter === null ? null : [
                 ...$latestChapter->only(['number', 'kind', 'intent_line', 'body']),
                 'events' => $chapterTurn === null ? [] : ChapterEvents::for($chapterTurn),
+                // The people and ground the prose can name — matched inside
+                // the chapter text so the reader can touch them for detail.
+                'entities' => $chapterTurn === null ? [] : ChapterEntities::for($chapterTurn),
             ],
         ]);
     }
 
     /**
-     * The one structured form: pre/main/post card ids + modifiers + optional
-     * intent line. Locks on submit — no second action until resolution.
+     * The one structured form: pre/main/post card ids + modifiers, each with
+     * an optional line in the player's own words. Locks on submit — no second
+     * action until resolution.
      */
     public function submit(Request $request, Campaign $campaign): RedirectResponse
     {
@@ -83,15 +88,19 @@ class PlayController extends Controller
             'main' => ['required', 'array'],
             'main.card_id' => ['required', 'string'],
             'main.modifiers' => ['array'],
+            'main.note' => ['nullable', 'string', 'max:280'],
             'pre' => ['nullable', 'array'],
             'pre.card_id' => ['required_with:pre', 'string'],
             'pre.modifiers' => ['array'],
+            'pre.note' => ['nullable', 'string', 'max:280'],
             'post' => ['nullable', 'array'],
             'post.card_id' => ['required_with:post', 'string'],
             'post.modifiers' => ['array'],
+            'post.note' => ['nullable', 'string', 'max:280'],
             'companions' => ['nullable', 'array'],
             'companions.*' => ['nullable', 'array'],
             'companions.*.card_id' => ['nullable', 'string'],
+            'companions.*.note' => ['nullable', 'string', 'max:280'],
             'intent_text' => ['nullable', 'string', 'max:280'],
         ]);
 
@@ -105,6 +114,9 @@ class PlayController extends Controller
             $submission[$slot->value] = [
                 'card_id' => $choice['card_id'],
                 'modifiers' => $this->validateChoice($turn, $slot, $choice),
+                // Narration color for this one beat, stored beside the choice
+                // it belongs to. It never reaches the mechanics path.
+                'note' => $this->note($choice),
             ];
         }
 
@@ -203,10 +215,22 @@ class PlayController extends Controller
                 ]);
             }
 
-            $clean[(string) $entry['id']] = ['card_id' => $card['id'], 'modifiers' => []];
+            $clean[(string) $entry['id']] = [
+                'card_id' => $card['id'],
+                'modifiers' => [],
+                'note' => $this->note($choice),
+            ];
         }
 
         return $clean;
+    }
+
+    /** The player's own words for one beat, trimmed to nothing-or-something. */
+    private function note(array $choice): ?string
+    {
+        $note = trim((string) ($choice['note'] ?? ''));
+
+        return $note === '' ? null : $note;
     }
 
     private function resolveInline(Turn $turn): void

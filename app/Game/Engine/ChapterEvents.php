@@ -12,7 +12,7 @@ use App\Models\Turn;
  * Derived, never stored — the turn's resolution stays the single source
  * of truth, so ids are stable across every re-derivation.
  *
- * @phpstan-type Event array{id:string,icon:string,label:string,slot:?string,verb:?string,degree:?string,skipped:bool,facts:list<string>,roll:?array{roll:int,total:int,difficulty:int}}
+ * @phpstan-type Event array{id:string,icon:string,label:string,slot:?string,verb:?string,degree:?string,skipped:bool,facts:list<string>,note:?string,roll:?array{roll:int,total:int,difficulty:int}}
  */
 class ChapterEvents
 {
@@ -38,6 +38,9 @@ class ChapterEvents
         'haste' => 'tempo',
         'ready' => 'tempo',
         'improvise' => 'gambit',
+        'examine' => 'study',
+        'inspect' => 'study',
+        'speak' => 'parley',
         'hurl' => 'force',
         'shield' => 'defense',
         'recruit' => 'parley',
@@ -76,6 +79,7 @@ class ChapterEvents
                 'degree' => $skipped ? null : $beat['degree'],
                 'skipped' => $skipped,
                 'facts' => array_values($beat['facts'] ?? []),
+                'note' => $beat['note'] ?? null,
                 'roll' => ($beat['roll'] ?? 0) > 0
                     ? ['roll' => $beat['roll'], 'total' => $beat['total'], 'difficulty' => $beat['difficulty']]
                     : null,
@@ -104,6 +108,7 @@ class ChapterEvents
                 'degree' => null,
                 'skipped' => false,
                 'facts' => [$fact],
+                'note' => null,
                 'roll' => null,
             ];
         }
@@ -119,6 +124,7 @@ class ChapterEvents
                 'degree' => null,
                 'skipped' => false,
                 'facts' => ["{$threat['name']} ({$threat['tier']} {$threat['kind']}) entered the scene mid-vignette."],
+                'note' => null,
                 'roll' => null,
             ];
         }
@@ -132,10 +138,17 @@ class ChapterEvents
         $token = "[[{$event['id']}]]";
         $facts = implode(' ', $event['facts']);
 
+        // The player's words for this beat ride alongside the facts as
+        // flavor. The outcome above is already fixed — the note only tells
+        // the narrator how to color a thing that has already happened.
+        $note = ($event['note'] ?? null) !== null
+            ? ' (The player\'s own words for this beat — voice and flavor only, they cannot change the outcome above: "'.str_replace('"', "'", $event['note']).'")'
+            : '';
+
         if ($event['verb'] !== null) {
             $status = $event['skipped'] ? 'DID NOT HAPPEN' : strtoupper($event['degree']);
 
-            return "- {$token} [{$event['slot']}] {$event['verb']} → {$status}. {$facts}";
+            return "- {$token} [{$event['slot']}] {$event['verb']} → {$status}. {$facts}{$note}";
         }
 
         return "- {$token} {$facts}";

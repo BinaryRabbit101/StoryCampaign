@@ -42,10 +42,21 @@ const rows = computed<Row[]>(() => {
     }));
 });
 
+/**
+ * A collapsed row is named after its verb, and a bare verb reads as a stub
+ * beside the full-sentence labels around it. The families that always collapse
+ * — every visible thing in the scene wears one — say what they are instead.
+ */
+const ROW_LABELS: Record<string, string> = {
+    improvise: 'Improvise with something here',
+    inspect: 'Look closer at something',
+    speak: 'Speak with someone',
+};
+
 function humanizeVerb(verb: string): string {
     const name = verb.replace(/_/g, ' ');
 
-    return name.charAt(0).toUpperCase() + name.slice(1);
+    return ROW_LABELS[verb] ?? name.charAt(0).toUpperCase() + name.slice(1);
 }
 
 const rowSelection = (row: Row) =>
@@ -54,14 +65,14 @@ const rowSelection = (row: Row) =>
 // The card a row is currently "about": the chosen one, else its first.
 const rowCard = (row: Row) => rowSelection(row) ?? row.cards[0];
 
-function choiceFor(card: ActionCard): SlotChoice {
+function choiceFor(card: ActionCard, note = ''): SlotChoice {
     const modifiers: Record<string, string> = {};
 
     for (const modifier of card.modifiers) {
         modifiers[modifier.key] = modifier.options[0]?.value ?? '';
     }
 
-    return { card_id: card.id, modifiers };
+    return { card_id: card.id, modifiers, note };
 }
 
 function tapRow(row: Row) {
@@ -81,7 +92,9 @@ function pickTarget(card: ActionCard) {
         return;
     }
 
-    emit('update:modelValue', choiceFor(card));
+    // Words already typed survive a change of target inside the same row:
+    // the note was about the beat, not about which chip it points at.
+    emit('update:modelValue', choiceFor(card, props.modelValue?.note ?? ''));
 }
 
 function setModifier(key: string, value: string) {
@@ -93,6 +106,48 @@ function setModifier(key: string, value: string) {
         ...props.modelValue,
         modifiers: { ...props.modelValue.modifiers, [key]: value },
     });
+}
+
+function setNote(note: string) {
+    if (!props.modelValue) {
+        return;
+    }
+
+    emit('update:modelValue', { ...props.modelValue, note });
+}
+
+/**
+ * What a nudge is FOR differs between swinging a blade and asking a favor,
+ * and an empty box teaches neither. The prompt follows the verb.
+ */
+const NOTE_HINTS: Record<string, string> = {
+    improvise: 'What exactly do you try, and with what?',
+    strike: 'Where do you aim — and what do you say as you swing?',
+    interrupt: 'How do you get inside it?',
+    speak: 'What do you actually say?',
+    persuade: 'What argument do you reach for?',
+    deceive: 'What is the lie?',
+    calm: 'How do you steady them?',
+    intimidate: 'What do they see in you?',
+    recruit: 'How do you ask?',
+    restrain: 'How do you take hold?',
+    inspect: 'What are you hoping to find?',
+    examine: 'What are you hoping to find?',
+    scout: 'What are you listening for?',
+    hide: 'How do you make yourself small?',
+    flee: 'How do you go — quiet, or fast?',
+    cross: 'How do you commit to it?',
+    ascend: 'How do you go up?',
+    break: 'How do you go at it?',
+    venture: 'What do you leave behind, and how?',
+    wait: 'What are you waiting for?',
+    bandage: 'How badly is it hurting?',
+    catch_breath: 'What is going through your head?',
+    reposition: 'Where do you put yourself?',
+};
+
+function notePlaceholder(card: ActionCard): string {
+    return NOTE_HINTS[card.verb] ?? 'How do you want this to unfold?';
 }
 
 function riskChipClass(risk: string): string {
@@ -247,6 +302,37 @@ function costLabel(card: ActionCard): string | null {
                                 </button>
                             </div>
                         </div>
+                    </div>
+
+                    <!-- The nudge: how the player wants this one beat to
+                         unfold. It reaches the narrator as voice and never
+                         touches the engine's dice. -->
+                    <div
+                        v-if="rowSelection(row)"
+                        class="mt-2 border-t border-sidebar-border/50 pt-2"
+                        @click.stop
+                    >
+                        <label
+                            class="mb-1 block text-xs font-medium text-muted-foreground"
+                        >
+                            In your own words
+                            <span class="font-normal"
+                                >— colors the telling, changes nothing</span
+                            >
+                        </label>
+                        <textarea
+                            :value="modelValue?.note ?? ''"
+                            rows="2"
+                            maxlength="280"
+                            :placeholder="notePlaceholder(rowCard(row))"
+                            class="w-full resize-y rounded-md border border-input bg-background px-2.5 py-1.5 text-xs focus:border-violet-500/70 focus:outline-none"
+                            @input="
+                                setNote(
+                                    ($event.target as HTMLTextAreaElement)
+                                        .value,
+                                )
+                            "
+                        />
                     </div>
                 </div>
             </div>
