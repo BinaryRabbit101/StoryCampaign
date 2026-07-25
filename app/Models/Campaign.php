@@ -2,6 +2,8 @@
 
 namespace App\Models;
 
+use App\Game\StoryAspects;
+use App\Game\WorldFlavor;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
@@ -9,7 +11,7 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\Relations\HasOne;
 
-#[Fillable(['user_id', 'name', 'premise', 'tone', 'starting_zone_id', 'next_zone_id', 'pending_sheet', 'status', 'title', 'back_cover', 'ended_early', 'started_at', 'ended_at'])]
+#[Fillable(['user_id', 'name', 'premise', 'tone', 'world_flavor', 'genre', 'drive', 'tech_level', 'starting_zone_id', 'next_zone_id', 'pending_sheet', 'status', 'title', 'back_cover', 'ended_early', 'started_at', 'ended_at'])]
 class Campaign extends Model
 {
     use HasFactory;
@@ -91,11 +93,48 @@ class Campaign extends Model
         if ($this->premise !== null && $this->premise !== '') {
             $lines[] = "Premise and goal (the player decides when it is fulfilled): {$this->premise}";
         }
+        $lines[] = StoryAspects::brief(StoryAspects::drives(), $this->drive, 'What drives this tale:');
         if ($this->tone !== null && $this->tone !== '') {
             $lines[] = "Tone of the telling: {$this->tone}";
         }
 
-        return implode("\n", $lines);
+        return implode("\n", array_filter($lines));
+    }
+
+    /**
+     * The land this tale is set in — rolled once and kept. Campaigns created
+     * before the roll existed take one the first time it is asked for, so an
+     * old save never inherits whatever setting the bible happens to cite.
+     */
+    public function worldFlavor(): string
+    {
+        if ($this->world_flavor === null || ! WorldFlavor::has($this->world_flavor)) {
+            // A tale with ground already standing cannot be relocated
+            // mid-story: its world was built from the harbor lineage, so it
+            // keeps it. Only a campaign with no world yet gets a fresh roll,
+            // and only ever inside its own genre.
+            $this->forceFill([
+                'world_flavor' => $this->zones()->exists() ? WorldFlavor::DEFAULT : WorldFlavor::roll(
+                    pool: WorldFlavor::keysForGenre(StoryAspects::resolve(StoryAspects::genres(), $this->genre)),
+                ),
+            ])->save();
+        }
+
+        return $this->world_flavor;
+    }
+
+    /**
+     * What the world IS, as one prompt block: the land, the genre it wears,
+     * and how much magic or machinery runs in it. Every Claude call that
+     * invents or narrates ground works inside this.
+     */
+    public function worldBrief(): string
+    {
+        return implode("\n", array_filter([
+            WorldFlavor::brief($this->worldFlavor()),
+            StoryAspects::brief(StoryAspects::genres(), $this->genre, 'Genre of this world:'),
+            StoryAspects::brief(StoryAspects::techLevels(), $this->tech_level, 'Magic and machinery here:'),
+        ]));
     }
 
     public function nextChapterNumber(): int

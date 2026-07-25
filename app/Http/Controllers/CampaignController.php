@@ -2,6 +2,8 @@
 
 namespace App\Http\Controllers;
 
+use App\Game\StoryAspects;
+use App\Game\WorldFlavor;
 use App\Models\Actor;
 use App\Models\Campaign;
 use App\Models\Character;
@@ -11,6 +13,7 @@ use App\Services\Claude\Interviewer;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Validation\Rule;
 use Inertia\Inertia;
 use Inertia\Response;
 
@@ -46,6 +49,12 @@ class CampaignController extends Controller
         return Inertia::render('Campaigns/Index', [
             'campaigns' => $campaigns,
             'characters' => $characters,
+            // The story axes, each pickable or typed. Leaving them alone is
+            // the normal path: the engine rolls the world and it is a
+            // surprise. None of them touch a single mechanic.
+            'genres' => StoryAspects::options(StoryAspects::genres()),
+            'drives' => StoryAspects::options(StoryAspects::drives()),
+            'techLevels' => StoryAspects::options(StoryAspects::techLevels()),
         ]);
     }
 
@@ -56,6 +65,12 @@ class CampaignController extends Controller
             'character_id' => ['nullable', 'integer'],
             'premise' => ['nullable', 'string', 'max:500'],
             'tone' => ['nullable', 'string', 'max:120'],
+            'world_flavor' => ['nullable', 'string', Rule::in(WorldFlavor::keys())],
+            // The story axes take a catalog key OR the player's own words —
+            // the catalog is a menu, not a fence. Bounded, not enumerated.
+            'genre' => ['nullable', 'string', 'max:'.StoryAspects::MAX_LENGTH],
+            'drive' => ['nullable', 'string', 'max:'.StoryAspects::MAX_LENGTH],
+            'tech_level' => ['nullable', 'string', 'max:'.StoryAspects::MAX_LENGTH],
         ]);
 
         $original = ($validated['character_id'] ?? null) === null ? null
@@ -63,11 +78,25 @@ class CampaignController extends Controller
                 ->findOrFail($validated['character_id']);
 
         // Every tale opens in a world forged for it — there is no zone to
-        // choose; the premise and tone shape what the forge builds.
+        // choose; the aspects the player set shape what the forge builds. The
+        // LAND it builds on is the engine's roll, drawn only from lands that
+        // can wear the chosen genre and never repeating one the player just
+        // played, so a run of new tales cannot keep opening in the same
+        // country — and a starfaring tale cannot open on chalk downs.
+        $recent = $request->user()->campaigns()->latest('id')->limit(3)->pluck('world_flavor')->all();
+        $genre = StoryAspects::resolve(StoryAspects::genres(), $validated['genre'] ?? null);
+
         $campaign = $request->user()->campaigns()->create([
             'name' => $validated['name'],
             'premise' => $validated['premise'] ?? null,
             'tone' => $validated['tone'] ?? null,
+            'genre' => $validated['genre'] ?? null,
+            'drive' => $validated['drive'] ?? null,
+            'tech_level' => $validated['tech_level'] ?? null,
+            'world_flavor' => $validated['world_flavor'] ?? WorldFlavor::roll(
+                avoid: $recent,
+                pool: WorldFlavor::keysForGenre($genre),
+            ),
             'status' => 'interview',
         ]);
 

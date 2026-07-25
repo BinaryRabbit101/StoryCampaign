@@ -37,7 +37,18 @@ same as sibling projects). Fortify auth, Wayfinder, PHPUnit 12, SQLite, PWA
 **Engine decides WHETHER; Claude decides HOW it's told.** Claude never
 adjudicates legality or outcomes — it is only ever handed resolved facts.
 
-- `app/Game/` — mechanics. `Capability` (the shared verb vocabulary),
+- `app/Game/` — mechanics. `WorldFlavor` (the LAND catalog: ~29 settings from
+  ash steppe and canopy town to derelict station, neon sprawl, and frontier
+  boomtown, each tagged with the genres it can wear — rolled by the engine at
+  campaign creation from the chosen genre's pool, never repeating the
+  player's last three lands, stored on `campaigns.world_flavor` and fixed for
+  life; also carries the cold-forge kit the engine builds zones from when
+  Claude is unavailable), `StoryAspects` (the three player-set story axes —
+  genre, what drives the tale, magic/machinery level — each a catalog pick OR
+  the player's own typed words, stored on `campaigns.genre|drive|tech_level`;
+  narration colour only, with ONE soft engine consequence: genre narrows the
+  land pool, resolved from typed text by alias match),
+  `Capability` (the shared verb vocabulary),
   `TraitCatalog` (the point-buy creation path: engine-priced gifts cost
   points, burdens refund them, builds must break even against
   `creation_points`; Claude only writes prose around the finished sheet),
@@ -67,8 +78,10 @@ adjudicates legality or outcomes — it is only ever handed resolved facts.
 - `app/Services/Claude/` — `ClaudeCli` (stateless CLI runs), `Narrator`
   (resolution → chapter + push, then frontier pre-forge), `ZoneForge`
   (campaign-scoped zones: Claude proposes a whole region, engine clamps to
-  the `zone_forge` budget + affordance grammar; cold-forge fallback clones a
-  shared seed zone so play never stalls), `WorldEvolver` (per-campaign
+  the `zone_forge` budget + affordance grammar; the cold-forge fallback
+  builds the zone engine-side from the campaign's `WorldFlavor` kit — it must
+  never clone shared ground, or every offline tale wakes in the same place),
+  `WorldEvolver` (per-campaign
   budgeted evolution + Chronicle), `Interviewer` (creation/growth interviews).
 - `app/Services/` — `CapabilityClamp` (bible bounds + constraint re-coupling),
   `TurnStarter`, `BookCompiler` (compilation, not generation; coda on early end).
@@ -102,9 +115,23 @@ adjudicates legality or outcomes — it is only ever handed resolved facts.
 - Hidden is hidden from the narrator too: `hidden` features and `lurking`
   actors must never reach cards, situation text, or narration prompts until
   the engine reveals them (use `visibleFeatures()`/`visibleActors()`).
+- The design bible fixes VOICE and bounds — never the setting or the genre.
+  Both are per-campaign: the land from `WorldFlavor`, the genre/drive/tech
+  level from `StoryAspects`. Every prompt that invents or narrates ground
+  (forge, stage, interview/prologue, narration, evolution) must carry
+  `Campaign::worldBrief()` (land + genre + tech) and `stageBrief()` (premise +
+  drive + tone), and state they outrank anything the bible illustrates.
+  Naming one setting in the bible is how every campaign ended up in the same
+  harbor.
+- Story flexible, rules fixed: genre, drive, and tech level are narration
+  colour and NOTHING else. They never change cards, difficulty, dice, stat
+  clamps, or the affordance grammar, and they may never grant a capability —
+  powers come only from the engine-priced sheet and items. The cold-forge
+  kits are mechanically identical across every land and genre; only the
+  fiction moves.
 - Worlds are campaign-scoped: `zones.campaign_id` marks a tale's private
-  world; campaign_id null is the shared world (seed archetypes + cold-forge
-  donors). Zones enter a campaign's world ONLY through `ZoneForge` (creation
+  world; campaign_id null is the shared world (seed archetypes + evolution's
+  garden). Zones enter a campaign's world ONLY through `ZoneForge` (creation
   + frontier, both engine-clamped); the player never picks or names a zone
   directly, and a venture card is legal only toward the campaign's own
   pre-forged `next_zone_id`. Items still enter only through evolution.

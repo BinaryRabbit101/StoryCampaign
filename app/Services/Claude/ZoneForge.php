@@ -3,6 +3,7 @@
 namespace App\Services\Claude;
 
 use App\Game\Capability;
+use App\Game\WorldFlavor;
 use App\Models\Actor;
 use App\Models\Campaign;
 use App\Models\Chapter;
@@ -69,7 +70,7 @@ class ZoneForge
         $campaign->update(['next_zone_id' => $zone->id]);
     }
 
-    /** Claude-forged, engine-clamped; shared-world clone when the forge is cold. */
+    /** Claude-forged, engine-clamped; engine-built from the campaign's land when the forge is cold. */
     public function forge(Campaign $campaign, ?Zone $leaving): Zone
     {
         try {
@@ -79,7 +80,7 @@ class ZoneForge
         } catch (Throwable $e) {
             report($e);
 
-            return $this->cloneSharedZone($campaign, $leaving);
+            return $this->coldForge($campaign);
         }
     }
 
@@ -191,7 +192,7 @@ class ZoneForge
         return $clean;
     }
 
-    private function materialize(Campaign $campaign, array $plan): Zone
+    private function materialize(Campaign $campaign, array $plan, string $source = 'forge'): Zone
     {
         $zone = Zone::create([
             'campaign_id' => $campaign->id,
@@ -199,7 +200,7 @@ class ZoneForge
             'name' => $plan['name'],
             'description' => $plan['description'],
             'tags' => ['locales' => $plan['locales']],
-            'source' => 'forge',
+            'source' => $source,
         ]);
 
         foreach ($plan['features'] as $feature) {
@@ -209,7 +210,7 @@ class ZoneForge
                 'name' => $feature['name'],
                 'feature_type' => $feature['feature_type'],
                 'affordances' => $feature['affordances'],
-                'source' => 'forge',
+                'source' => $source,
             ]);
         }
 
@@ -223,7 +224,7 @@ class ZoneForge
                 'stats' => $actor['stats'],
                 'tags' => $actor['tags'],
                 'status' => 'active',
-                'source' => 'forge',
+                'source' => $source,
             ]);
         }
 
@@ -231,52 +232,21 @@ class ZoneForge
     }
 
     /**
-     * The cold-forge fallback: clone a shared-world zone (templates and all)
-     * as this campaign's own ground, so play continues on known archetypes
-     * rather than stalling on a failed Claude call.
+     * The cold forge: when Claude is unavailable, the ENGINE builds the zone
+     * from this campaign's own land (App\Game\WorldFlavor) — named ground,
+     * locales, a full affordance skeleton, and four actors. It used to clone
+     * a shared-world zone instead, which is why every offline campaign woke
+     * up in the same harbor. Nothing here touches the shared world.
      */
-    private function cloneSharedZone(Campaign $campaign, ?Zone $leaving): Zone
+    private function coldForge(Campaign $campaign): Zone
     {
-        $donor = Zone::shared()
-            ->when($leaving !== null, fn ($q) => $q->where('name', '!=', $leaving->name))
-            ->inRandomOrder()
-            ->firstOrFail();
+        $used = $campaign->zones()->pluck('name')->all();
 
-        $zone = Zone::create([
-            'campaign_id' => $campaign->id,
-            'slug' => $this->uniqueSlug($donor->name, $campaign),
-            'name' => $donor->name,
-            'description' => $donor->description,
-            'tags' => $donor->tags,
-            'source' => 'seed',
-        ]);
-
-        foreach ($donor->features()->whereNull('scene_id')->get() as $feature) {
-            SceneFeature::create([
-                'scene_id' => null,
-                'zone_id' => $zone->id,
-                'name' => $feature->name,
-                'feature_type' => $feature->feature_type,
-                'affordances' => $feature->affordances,
-                'source' => $feature->source,
-            ]);
-        }
-
-        foreach ($donor->actors()->whereNull('scene_id')->where('status', 'active')->get() as $actor) {
-            Actor::create([
-                'scene_id' => null,
-                'zone_id' => $zone->id,
-                'name' => $actor->name,
-                'kind' => $actor->kind,
-                'tier' => $actor->tier,
-                'stats' => $actor->stats,
-                'tags' => $actor->tags,
-                'status' => 'active',
-                'source' => $actor->source,
-            ]);
-        }
-
-        return $zone;
+        return $this->materialize(
+            $campaign,
+            WorldFlavor::coldPlan($campaign->worldFlavor(), $used),
+            source: 'cold',
+        );
     }
 
     private function uniqueSlug(string $name, Campaign $campaign): string
@@ -295,7 +265,8 @@ class ZoneForge
         $biblePath = config('game.design_bible_path');
         $bible = File::exists($biblePath) ? mb_substr(File::get($biblePath), 0, 4000) : 'No bible found — be conservative.';
 
-        $stage = $campaign->stageBrief() ?: '(none set — invent freely inside the bible\'s tone)';
+        $land = $campaign->worldBrief();
+        $stage = $campaign->stageBrief() ?: '(none set — invent freely inside this land and the bible\'s tone)';
         // Queried, not lazy-loaded: at creation time the character may not
         // exist yet, and caching a null relation here would poison callers.
         $character = $campaign->character()->first()?->description ?? '(character not yet known)';
@@ -313,9 +284,13 @@ class ZoneForge
         $existing = $campaign->zones()->pluck('name')->join(', ') ?: '(none yet)';
 
         return <<<PROMPT
-You are the world-forge of a living-world RPG. Forge ONE new zone — a whole region of this campaign's private world — colored by the player's stage and the story so far. {$context}
+You are the world-forge of a living-world RPG. Forge ONE new zone — a whole region of this campaign's private world — colored by the land below, the player's stage, and the story so far. {$context}
 
-## Design bible (honor tone and themes absolutely)
+## The world this campaign is set in (FIXED — build inside it, and nowhere else)
+{$land}
+Every name, feature, and creature you invent must belong to this world — its land, its genre, and its stated level of magic and machinery. Do not import the setting or genre of any example you have been shown: anything the design bible below illustrates is an example of VOICE, not of place or genre, and this world overrides it.
+
+## Design bible (honor its voice, guardrails, and bounds — but NOT its examples of place or genre)
 {$bible}
 
 ## The stage the player set

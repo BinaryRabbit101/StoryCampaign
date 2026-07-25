@@ -7,6 +7,8 @@ use App\Game\Engine\ChapterEntities;
 use App\Game\Engine\ChapterEvents;
 use App\Game\Engine\TurnResolver;
 use App\Game\Meters;
+use App\Game\StoryAspects;
+use App\Game\WorldFlavor;
 use App\Models\Actor;
 use App\Models\Campaign;
 use App\Models\Character;
@@ -32,16 +34,19 @@ class GameEngineTest extends TestCase
     {
         $this->seed(WorldSeeder::class);
 
-        // No live CLI in tests: the forge's Claude call fails fast, so
-        // every campaign world falls back to a shared-zone clone.
+        // No live CLI in tests: the forge's Claude call fails fast, so every
+        // campaign world is cold-forged from the campaign's own land.
         $this->mock(ClaudeCli::class, function ($mock) {
             $mock->shouldReceive('promptForJson')->andThrow(new \RuntimeException('offline'))->byDefault();
             $mock->shouldReceive('prompt')->andReturn('A tale begins.')->byDefault();
         });
 
+        // The land is normally the engine's roll; tests pin it so the cold
+        // forge builds a known zone and card assertions stay deterministic.
         $campaign = Campaign::create([
             'user_id' => User::factory()->create()->id,
             'name' => 'Test Tale',
+            'world_flavor' => 'harbor-city',
             'status' => 'active',
             'started_at' => now(),
         ]);
@@ -393,12 +398,146 @@ class GameEngineTest extends TestCase
         $this->assertSame('Find my sister, whatever it costs.', $second->premise);
         $this->assertStringContainsString('Premise and goal', $second->stageBrief());
 
-        // The tale opens in its own world: a campaign-scoped zone (the
-        // cold-forge clone here, since no live CLI), never shared ground.
+        // The tale opens in its own world: a campaign-scoped zone (cold-forged
+        // here, since no live CLI), never shared ground.
         $zone = $second->activeScene->zone;
         $this->assertSame($second->id, $zone->campaign_id);
         $this->assertSame($zone->id, $second->starting_zone_id);
         $this->assertTrue($zone->features()->whereNull('scene_id')->exists());
+
+        // And it stands on a land the engine rolled, never the same one the
+        // player's previous tale drew.
+        $this->assertTrue(WorldFlavor::has($second->world_flavor));
+        $this->assertNotSame($campaign->world_flavor, $second->world_flavor);
+        $this->assertSame(
+            WorldFlavor::coldPlan($second->world_flavor)['name'],
+            $zone->name,
+        );
+    }
+
+    public function test_new_tales_are_set_in_different_lands_never_a_shared_harbor()
+    {
+        $campaign = $this->createCatCampaign();
+        $this->mock(ClaudeCli::class)->shouldReceive('prompt')->andReturn('She returned.');
+
+        // Ten tales started back to back: the engine rolls the land each
+        // time, so the openings are not one setting wearing new names.
+        $lands = collect(range(1, 10))->map(function (int $i) use ($campaign) {
+            $this->actingAs($campaign->user)->post('/campaigns', [
+                'name' => "Tale {$i}",
+                'character_id' => $campaign->character->id,
+            ])->assertRedirect();
+
+            return $campaign->user->campaigns()->where('name', "Tale {$i}")->value('world_flavor');
+        });
+
+        $this->assertGreaterThan(3, $lands->unique()->count());
+
+        // A roll never repeats any of the last three lands played, so a run
+        // of new tales cannot settle into one country.
+        $lands->sliding(4)->each(fn ($window) => $this->assertCount(4, $window->unique()));
+
+        // And every opening zone is built from ITS OWN campaign's land —
+        // nothing was cloned out of the shared seed world.
+        $campaign->user->campaigns()->where('name', 'like', 'Tale %')->get()
+            ->each(function (Campaign $tale) {
+                $zone = $tale->zones()->firstOrFail();
+                $this->assertSame(WorldFlavor::coldPlan($tale->world_flavor)['name'], $zone->name);
+                $this->assertSame('cold', $zone->source);
+            });
+    }
+
+    public function test_the_genre_narrows_the_land_pool_and_typed_words_are_kept()
+    {
+        $campaign = $this->createCatCampaign();
+        $this->mock(ClaudeCli::class)->shouldReceive('prompt')->andReturn('She returned.');
+
+        // A starfaring tale cannot open on chalk downs: the roll draws only
+        // from lands that can honestly wear the genre.
+        foreach (['space', 'western', 'cyberpunk', 'pirates', 'anime'] as $i => $genre) {
+            $this->actingAs($campaign->user)->post('/campaigns', [
+                'name' => "Genre {$i}",
+                'character_id' => $campaign->character->id,
+                'genre' => $genre,
+                'drive' => 'escape',
+                'tech_level' => 'starfaring',
+            ])->assertRedirect();
+
+            $tale = $campaign->user->campaigns()->where('name', "Genre {$i}")->firstOrFail();
+            $this->assertContains($tale->world_flavor, WorldFlavor::keysForGenre($genre));
+            $this->assertContains($genre, WorldFlavor::get($tale->world_flavor)['genres']);
+
+            // All three axes reach the prompts, and none of them reach a rule.
+            $this->assertStringContainsString(WorldFlavor::get($tale->world_flavor)['title'], $tale->worldBrief());
+            $this->assertStringContainsString('Genre of this world:', $tale->worldBrief());
+            $this->assertStringContainsString('Magic and machinery here:', $tale->worldBrief());
+            $this->assertStringContainsString('What drives this tale:', $tale->stageBrief());
+        }
+
+        // Words the catalog has never seen are kept verbatim — the menu is not
+        // a fence — and simply leave the land pool open.
+        $this->actingAs($campaign->user)->post('/campaigns', [
+            'name' => 'My Own Words',
+            'character_id' => $campaign->character->id,
+            'genre' => 'dream-logic bureaucracy',
+            'drive' => 'file the correct form',
+        ])->assertRedirect();
+
+        $typed = $campaign->user->campaigns()->where('name', 'My Own Words')->firstOrFail();
+        $this->assertSame('dream-logic bureaucracy', $typed->genre);
+        $this->assertStringContainsString('dream-logic bureaucracy', $typed->worldBrief());
+        $this->assertStringContainsString('file the correct form', $typed->stageBrief());
+        $this->assertTrue(WorldFlavor::has($typed->world_flavor));
+    }
+
+    public function test_every_genre_has_lands_and_typed_genres_resolve_by_alias()
+    {
+        // A genre with no land is a campaign that cannot open in it.
+        foreach (array_keys(StoryAspects::genres()) as $genre) {
+            $lands = WorldFlavor::keysForGenre($genre);
+            $this->assertGreaterThanOrEqual(3, count($lands), "{$genre} has too few lands");
+            $this->assertNotSame(WorldFlavor::keys(), $lands, "{$genre} matched nothing and fell back to everything");
+        }
+
+        // Every genre a land claims must exist in the catalog.
+        foreach (WorldFlavor::all() as $key => $flavor) {
+            $this->assertNotEmpty($flavor['genres'], "{$key} wears no genre");
+            foreach ($flavor['genres'] as $genre) {
+                $this->assertArrayHasKey($genre, StoryAspects::genres(), "{$key} claims unknown genre {$genre}");
+            }
+        }
+
+        // Typed words resolve to a catalog key when they plainly mean one.
+        $this->assertSame('space', StoryAspects::resolve(StoryAspects::genres(), 'sci-fi with aliens'));
+        $this->assertSame('western', StoryAspects::resolve(StoryAspects::genres(), 'a wild west story'));
+        $this->assertNull(StoryAspects::resolve(StoryAspects::genres(), 'dream-logic bureaucracy'));
+    }
+
+    public function test_a_player_may_name_the_land_and_an_unknown_one_is_refused()
+    {
+        $campaign = $this->createCatCampaign();
+        $this->mock(ClaudeCli::class)->shouldReceive('prompt')->andReturn('She returned.');
+
+        // The roll is the default, not the rule: a player who knows where they
+        // want to be says so, and the world is built there.
+        $this->actingAs($campaign->user)->post('/campaigns', [
+            'name' => 'The Fells',
+            'character_id' => $campaign->character->id,
+            'world_flavor' => 'winter-fells',
+        ])->assertRedirect();
+
+        $chosen = $campaign->user->campaigns()->where('name', 'The Fells')->firstOrFail();
+        $this->assertSame('winter-fells', $chosen->world_flavor);
+        $this->assertSame(
+            WorldFlavor::coldPlan('winter-fells')['name'],
+            $chosen->zones()->firstOrFail()->name,
+        );
+
+        // A land outside the catalog is refused, never silently invented.
+        $this->actingAs($campaign->user)
+            ->post('/campaigns', ['name' => 'Nowhere', 'world_flavor' => 'atlantis'])
+            ->assertSessionHasErrors('world_flavor');
+        $this->assertNull($campaign->user->campaigns()->where('name', 'Nowhere')->first());
     }
 
     public function test_companions_are_recruited_then_coordinated_never_controlled()
@@ -529,9 +668,9 @@ class GameEngineTest extends TestCase
         $this->assertSame(3, $scene->actors()->where('source', 'stage')->count());
         $this->assertSame(0, $scene->actors()->where('source', 'seed')->count());
         $this->assertSame(4, $scene->features()->where('source', 'stage')->count());
-        // The zone still lends the stage some shared ground (features only,
-        // never actors — the cast is the campaign's own).
-        $this->assertGreaterThanOrEqual(2, $scene->features()->where('source', 'seed')->count());
+        // The zone still lends the stage some of its own ground (features
+        // only, never actors — the cast is the campaign's own).
+        $this->assertGreaterThanOrEqual(2, $scene->features()->where('source', '!=', 'stage')->count());
         $this->assertSame(0, Actor::whereNull('scene_id')->where('source', 'stage')->count());
 
         // The situation names the stage-built cast, and cards intersect with
@@ -873,6 +1012,32 @@ class GameEngineTest extends TestCase
         $this->assertSame('regular', $brute->tier);
         $this->assertSame(12, $brute->stats['health']['max']);
         $this->assertSame(4, $brute->stats['attack']);
+    }
+
+    public function test_every_land_can_be_cold_forged_into_a_playable_zone()
+    {
+        // The cold forge is the offline path, so a gap in ANY land's kit is a
+        // campaign that cannot open. Every one must build the full skeleton:
+        // something to climb, cross, hide behind, flee into, break, and find.
+        foreach (WorldFlavor::keys() as $key) {
+            $plan = WorldFlavor::coldPlan($key);
+
+            $this->assertNotSame('', $plan['name'], $key);
+            $this->assertCount(6, $plan['features'], $key);
+            $this->assertCount(4, $plan['actors'], $key);
+            $this->assertCount(3, $plan['locales'], $key);
+            $this->assertStringContainsString(WorldFlavor::get($key)['title'], WorldFlavor::brief($key));
+
+            $affordances = collect($plan['features'])->pluck('affordances');
+            foreach (['reachable_via', 'crossable_via', 'hideable', 'flee_destination', 'breakable', 'hidden'] as $affordance) {
+                $this->assertTrue($affordances->contains(fn ($a) => isset($a[$affordance])), "{$key} lacks {$affordance}");
+            }
+
+            // A second zone in the same land is new ground, not a repeat.
+            $next = WorldFlavor::coldPlan($key, [$plan['name']]);
+            $this->assertNotSame($plan['name'], $next['name'], $key);
+            $this->assertNotSame($plan['locales'], $next['locales'], $key);
+        }
     }
 
     public function test_the_frontier_forges_the_next_zone_after_enough_ranging()

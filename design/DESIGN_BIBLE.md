@@ -5,25 +5,48 @@
 > are duplicated in `config/game.php` where the engine enforces them as hard
 > clamps — this file is where the authors stay in control despite live updates.
 
-## Tone & setting
+## Tone — NOT setting, NOT genre
 
-A lantern-lit harbor city and the wilds pressing in around it. Grounded low
-fantasy: strange gifts and stranger creatures, but no world-breaking magic.
-Melancholy warmth — danger is real, death is rare, wonder is common. The
-world is old and keeps its own counsel; changes overnight should feel like
-weather, rumor, and slow geology, not patch notes.
+This document fixes VOICE and BOUNDS. It does not fix a place or a genre.
+Both belong to the campaign and arrive in the prompt:
+
+- The **land** is rolled by the engine at creation from `App\Game\WorldFlavor`
+  — ash steppe, canopy town, derelict station, neon sprawl, boomtown, walled
+  town, and two dozen more.
+- The **genre**, what **drives** the tale, and the **magic and machinery** in
+  it come from `App\Game\StoryAspects`, either picked by the player or typed
+  in their own words.
+
+Whatever a campaign was handed outranks every example in this file. Never
+carry a setting or genre across from an example: if it is not named in the
+prompt, it is not in that world. A tale may be a western, a horror, a
+starfaring one, or a modern day with nothing uncanny in it at all — this
+document does not get a vote on which.
+
+Melancholy warmth is the house voice: danger is real, death is rare, wonder is
+common. The world is old and keeps its own counsel; changes overnight should
+feel like weather, rumor, and slow geology, not patch notes.
 
 Narration voice: third-person past tense, close to the character. Concrete
 and sensory over abstract. Action-forward: what people do carries every
 chapter, and description rides inside the motion — never standalone
 scene-painting. Never mention mechanics, dice, cards, meters, or systems.
 
-## Allowed themes
+## Guardrails (these hold in every genre)
 
-- Rooftop chases, harbor smuggling, guild rivalries, wild borderlands.
-- Creatures: naturalistic or folkloric. No demons-and-hellfire, no sci-fi.
 - Violence lands at "adventure novel," not gore. No cruelty to the helpless.
+  A horror campaign gets its dread from what is withheld, not from what is
+  described happening to someone.
+- Creatures, technology, and powers must fit the campaign's own genre and
+  stated magic level — and must never grant the character anything. Powers
+  come from the sheet and from items, both engine-priced.
 - NPCs have lives and memory; recurring faces are encouraged.
+- Themes travel; their dressing does not. Pursuit across difficult ground,
+  contraband, rival factions, frontier country, abandoned places — each in
+  the campaign's own land and genre. The chase is the theme; the rooftops
+  are not.
+- The story is flexible; the rules are not. Nothing in the fiction may bend
+  what the engine resolved, and no genre earns different numbers.
 
 ## Hard bounds (mirrored in config/game.php — the engine clamps regardless)
 
@@ -41,9 +64,9 @@ scene-painting. Never mention mechanics, dice, cards, meters, or systems.
 
 ## Evolution guidance
 
-- Prefer new **affordance types** over new enemies: water to swim, wind to
-  ride, verticality to climb, surfaces that break. The capability grammar is
-  fixed; grow its vocabulary of scene features.
+- Prefer new **affordance types** over new enemies: something to swim, wind
+  to ride, verticality to climb, surfaces that break. The capability grammar
+  is fixed; grow its vocabulary of scene features, in the land's own terms.
 - Reward invested capabilities retroactively: if some player learned `glide`,
   a wind current appearing three days later is the world winking at them.
 - Chronicle entries are story beats. "The northern mines collapsed overnight,

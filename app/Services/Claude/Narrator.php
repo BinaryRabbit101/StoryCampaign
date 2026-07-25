@@ -92,6 +92,7 @@ class Narrator
         $nextTurn = $campaign->turns()->where('status', Turn::STATUS_AWAITING)->orderByDesc('number')->first();
         $aftermath = $nextTurn === null ? 'Unknown — end where the beats leave off.'
             : trim(preg_replace('/\s*Health \d+\/\d+\./', '', $nextTurn->situation));
+        $land = $campaign->worldBrief();
         $stage = $campaign->stageBrief() ?: '(none set — let the tale find its own direction)';
 
         return <<<PROMPT
@@ -105,6 +106,9 @@ You are the narrator of a living-world RPG. Write the next chapter of this campa
 - Match length to substance: few beats mean a short chapter. Never pad toward a word count — a tight half-page beats a stretched full one.
 
 Each listed event carries a bracketed token like [[e1]]. Copy every token into the chapter VERBATIM, each exactly once, placed immediately after the sentence where that event lands in the prose. The tokens are invisible anchors in the reader's edition — never mention them, never describe them, never invent new ones.
+
+## The land this tale walks (fixed — every image, name, and smell belongs here)
+{$land}
 
 ## Character
 {$character->name}: {$character->description}
@@ -141,6 +145,10 @@ PROMPT;
         $biblePath = config('game.design_bible_path');
         $bible = File::exists($biblePath) ? File::get($biblePath) : '';
 
-        return "Honor this design bible (tone and themes only):\n\n".mb_substr($bible, 0, 4000);
+        // Tone, themes, and bounds only. Any place the bible names is an
+        // illustration of voice — the tale's actual land arrives in the
+        // prompt, campaign by campaign.
+        return "Honor this design bible for tone, themes, and bounds only. Any specific place it names is an example of VOICE, never the setting of this tale — the campaign's own land is given in the prompt and outranks it:\n\n"
+            .mb_substr($bible, 0, 4000);
     }
 }

@@ -115,12 +115,17 @@ class WorldEvolver
         $itemCount = Item::count();
         $budgetJson = json_encode($budget);
         $maxPower = config('game.bounds.max_item_power');
+        $land = $campaign->worldBrief();
         $stage = $campaign->stageBrief() ?: '(none set)';
 
         return <<<PROMPT
 You are the world-evolution process of a living-world RPG, on a {$kind} run, tending ONE campaign's private world. Evolve it: new enemies, items, and affordance-bearing features in the zones this tale walks. You may introduce NEW AFFORDANCE TYPES (e.g. wind currents rideable via glide, flooded passages requiring swim) — the capability grammar stays constant, its vocabulary of scene features grows. Do NOT rewrite core mechanics, and do not invent new zones — the frontier does that.
 
-## Design bible (read-only; honor it absolutely)
+## The land this world is made of (FIXED — everything you add belongs here)
+{$land}
+If the design bible below illustrates a different kind of place or genre, that is an example of voice only; this world overrides it. Everything you add must fit this world's genre and its stated level of magic and machinery.
+
+## Design bible (read-only; honor its voice, guardrails, and bounds absolutely — but NOT its examples of place or genre)
 {$bible}
 
 ## The stage this campaign's player set (color evolution toward it)

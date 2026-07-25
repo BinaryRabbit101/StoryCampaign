@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { Head, router } from '@inertiajs/vue3';
-import { ref } from 'vue';
+import { computed, ref } from 'vue';
 import AmbientBackdrop from '@/components/game/AmbientBackdrop.vue';
 
 interface CampaignRow {
@@ -13,9 +13,18 @@ interface CampaignRow {
     ended_at: string | null;
 }
 
-defineProps<{
+interface AspectOption {
+    key: string;
+    label: string;
+    brief: string;
+}
+
+const props = defineProps<{
     campaigns: CampaignRow[];
     characters: { id: number; name: string; from: string }[];
+    genres: AspectOption[];
+    drives: AspectOption[];
+    techLevels: AspectOption[];
 }>();
 
 const newName = ref('');
@@ -23,6 +32,31 @@ const characterId = ref<number | ''>('');
 const premise = ref('');
 const tone = ref('');
 const creating = ref(false);
+
+// Each story axis is a picked option OR the player's own words. Empty means
+// the engine decides — the default, and the reason two tales are never the
+// same. OTHER switches the control to a free-text box.
+const OTHER = '__other';
+
+const genre = ref('');
+const genreText = ref('');
+const drive = ref('');
+const driveText = ref('');
+const tech = ref('');
+const techText = ref('');
+
+function aspectValue(picked: string, typed: string): string | null {
+    if (picked === OTHER) return typed.trim() || null;
+    return picked || null;
+}
+
+function briefFor(options: AspectOption[], picked: string): string | null {
+    return options.find((o) => o.key === picked)?.brief ?? null;
+}
+
+const genreBrief = computed(() => briefFor(props.genres, genre.value));
+const driveBrief = computed(() => briefFor(props.drives, drive.value));
+const techBrief = computed(() => briefFor(props.techLevels, tech.value));
 
 function create() {
     if (!newName.value.trim()) return;
@@ -34,6 +68,9 @@ function create() {
             character_id: characterId.value === '' ? null : characterId.value,
             premise: premise.value.trim() || null,
             tone: tone.value.trim() || null,
+            genre: aspectValue(genre.value, genreText.value),
+            drive: aspectValue(drive.value, driveText.value),
+            tech_level: aspectValue(tech.value, techText.value),
         },
         { onFinish: () => (creating.value = false) },
     );
@@ -159,9 +196,127 @@ function statusLabel(status: string): string {
                     />
                 </div>
 
+                <div class="grid gap-3 sm:grid-cols-2">
+                    <div>
+                        <label
+                            class="mb-1 block text-xs font-medium text-muted-foreground"
+                        >
+                            Genre of the world
+                            <span class="font-normal">(optional)</span>
+                        </label>
+                        <select
+                            v-model="genre"
+                            class="w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+                        >
+                            <option value="">Surprise me</option>
+                            <option
+                                v-for="g in genres"
+                                :key="g.key"
+                                :value="g.key"
+                            >
+                                {{ g.label }}
+                            </option>
+                            <option :value="OTHER">Something else…</option>
+                        </select>
+                        <input
+                            v-if="genre === OTHER"
+                            v-model="genreText"
+                            type="text"
+                            :maxlength="120"
+                            placeholder="Steampunk noir, weird west, deep-sea…"
+                            class="mt-1.5 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+                        />
+                        <p
+                            v-else-if="genreBrief"
+                            class="mt-1.5 text-xs text-muted-foreground"
+                        >
+                            {{ genreBrief }}
+                        </p>
+                    </div>
+
+                    <div>
+                        <label
+                            class="mb-1 block text-xs font-medium text-muted-foreground"
+                        >
+                            What drives the tale
+                            <span class="font-normal">(optional)</span>
+                        </label>
+                        <select
+                            v-model="drive"
+                            class="w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+                        >
+                            <option value="">Let it find its own shape</option>
+                            <option
+                                v-for="d in drives"
+                                :key="d.key"
+                                :value="d.key"
+                            >
+                                {{ d.label }}
+                            </option>
+                            <option :value="OTHER">Something else…</option>
+                        </select>
+                        <input
+                            v-if="drive === OTHER"
+                            v-model="driveText"
+                            type="text"
+                            :maxlength="120"
+                            placeholder="Clear my name, find who did it, get paid…"
+                            class="mt-1.5 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+                        />
+                        <p
+                            v-else-if="driveBrief"
+                            class="mt-1.5 text-xs text-muted-foreground"
+                        >
+                            {{ driveBrief }}
+                        </p>
+                    </div>
+                </div>
+
+                <div>
+                    <label
+                        class="mb-1 block text-xs font-medium text-muted-foreground"
+                    >
+                        Magic &amp; machinery
+                        <span class="font-normal"
+                            >(optional — colors the world, never your
+                            abilities)</span
+                        >
+                    </label>
+                    <select
+                        v-model="tech"
+                        class="w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+                    >
+                        <option value="">Surprise me</option>
+                        <option
+                            v-for="t in techLevels"
+                            :key="t.key"
+                            :value="t.key"
+                        >
+                            {{ t.label }}
+                        </option>
+                        <option :value="OTHER">Something else…</option>
+                    </select>
+                    <input
+                        v-if="tech === OTHER"
+                        v-model="techText"
+                        type="text"
+                        :maxlength="120"
+                        placeholder="Bio-tech, dream logic, old gods only…"
+                        class="mt-1.5 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+                    />
+                    <p
+                        v-else-if="techBrief"
+                        class="mt-1.5 text-xs text-muted-foreground"
+                    >
+                        {{ techBrief }}
+                    </p>
+                </div>
+
                 <p class="text-xs text-muted-foreground italic">
-                    A world will be forged for this tale — shaped by your
-                    premise and tone, and grown outward as you walk it.
+                    A world will be forged for this tale — its own land, its own
+                    people — from whatever you set here, and grown outward as
+                    you walk it. Anything you leave alone, the world decides.
+                    None of it changes the rules of play.
                 </p>
 
                 <button

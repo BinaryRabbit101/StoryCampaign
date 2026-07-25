@@ -98,13 +98,18 @@ class StageBuilder
         $zoneFeatures = $zone->features()->whereNull('scene_id')->get()
             ->map(fn ($f) => "- {$f->name}: ".json_encode($f->affordances))
             ->join("\n") ?: '(none)';
-        $stage = $campaign->stageBrief() ?: '(none set — build from the zone and the character alone)';
+        $land = $campaign->worldBrief();
+        $stage = $campaign->stageBrief() ?: '(none set — build from the land, the zone, and the character alone)';
         $budget = config('game.bounds.stage_budget');
 
         return <<<PROMPT
-You are dressing the opening scene of a new campaign in a living-world RPG. Every tale must open differently: build this one outward from the player's stage and the character below, not from stock content. Propose a handful of scene features (affordance-bearing set pieces) and actors present as the tale opens.
+You are dressing the opening scene of a new campaign in a living-world RPG. Every tale must open differently: build this one outward from the land, the player's stage, and the character below, never from stock content. Propose a handful of scene features (affordance-bearing set pieces) and actors present as the tale opens.
 
-## Design bible (honor tone and themes absolutely)
+## The world this campaign is set in (FIXED — everything you name belongs here)
+{$land}
+If the design bible below illustrates a different kind of place or genre, that is an example of VOICE only; this world overrides it.
+
+## Design bible (honor its voice, guardrails, and bounds — but NOT its examples of place or genre)
 {$bible}
 
 ## Where the tale opens (fixed — do not invent a different place)

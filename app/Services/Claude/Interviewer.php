@@ -118,12 +118,16 @@ class Interviewer
         $previous = $original->campaign;
         $lastChapter = $previous?->chapters()->reorder('number', 'desc')->first();
         $closing = $lastChapter === null ? '(their earlier tale is unrecorded)' : mb_substr($lastChapter->plainBody(), -800);
+        $land = $campaign->worldBrief();
         $stage = $campaign->stageBrief();
         $stageSection = $stage === '' ? '' : "\n## The player set the stage for this new tale\n{$stage}\n";
 
         try {
             return $this->claude->prompt(<<<PROMPT
 A hero returns for a new tale in a living-world RPG. Write a 200-400 word prologue in third-person past tense: {$original->name} steps out of an earlier story and into this new one, "{$campaign->name}". Carry the weight of where their last tale left off, but open cleanly — a new book, not a recap. No mechanics language.
+
+## The land this new tale is set in (fixed — they arrive HERE, and it is not where they came from)
+{$land}
 {$stageSection}
 
 ## The character
@@ -391,12 +395,16 @@ PROMPT);
     {
         $gifts = implode(', ', $build['gifts']) ?: '(none)';
         $burdens = implode(', ', $build['burdens']) ?: '(none)';
+        $land = $campaign->worldBrief();
         $stage = $campaign->stageBrief();
         $stageSection = $stage === '' ? '' : "\n## The player set the stage\n{$stage}\n";
 
         try {
             $response = $this->claude->promptForJson(<<<PROMPT
 A player built their character for a living-world RPG by choosing traits from a catalog. The sheet is FIXED — do not add, remove, or reinterpret any ability. Write only the words around it.
+
+## The land this tale is set in (fixed — the prologue happens HERE)
+{$land}
 {$stageSection}
 
 ## The finished sheet
@@ -502,6 +510,7 @@ PROMPT);
             ->map(fn ($c) => $c->value.($c->parameterized() ? '(n)' : ''))
             ->join(', ');
 
+        $land = $campaign->worldBrief();
         $stage = $campaign->stageBrief();
         $stageSection = $stage === '' ? '' : "\n## The player set the stage (speak and shape the prologue in its spirit)\n{$stage}\n";
         $points = TraitCatalog::startingPoints();
@@ -509,6 +518,9 @@ PROMPT);
 
         return <<<PROMPT
 You are conducting an in-world character creation interview for a living-world RPG. The player describes their character narratively; you translate it under the hood into a clean structured loadout. Ask at most a few short, evocative questions (one per reply). After the player has given enough (usually 2-4 exchanges), complete the interview.
+
+## The land this tale is set in (fixed — your questions and the prologue belong here)
+{$land}
 {$stageSection}
 
 Rules:
