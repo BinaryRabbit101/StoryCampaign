@@ -187,22 +187,14 @@ function escapeRegExp(value: string): string {
     return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
-/**
- * The forms the narrator is likely to have used: the name the world stores,
- * and the same name without its leading article — prose writes "the wall of
- * stacked crates" where the world calls it "a wall of stacked crates".
- */
-function nameVariants(name: string): string[] {
-    const bare = name.replace(/^(the|a|an)\s+/i, '');
-    return bare === name ? [name] : [name, bare];
-}
-
-// One alternation over every entity name, longest first so a long name always
-// wins over a shorter one nested inside it.
+// One alternation over every form the engine says these things answer to,
+// longest first so a long name always wins over a shorter one nested inside
+// it. The engine decides which short forms are safe to claim; the page only
+// looks for them.
 const entityMatcher = computed(() => {
     const variants: { pattern: string; entity: ChapterEntity }[] = [];
     for (const entity of props.latestChapter?.entities ?? []) {
-        for (const pattern of nameVariants(entity.name)) {
+        for (const pattern of entity.aliases) {
             if (pattern.trim()) variants.push({ pattern, entity });
         }
     }

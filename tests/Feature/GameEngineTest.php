@@ -1332,7 +1332,7 @@ class GameEngineTest extends TestCase
         $lurker = $this->placeActor($scene, 'a dockside tough');
         $lurker->update(['tags' => ($lurker->tags ?? []) + ['lurking' => true, 'lurking_since' => 1]]);
 
-        $names = collect(ChapterEntities::for($turn->fresh()))->pluck('name');
+        $names = collect(ChapterEntities::for($campaign->fresh(), $turn->fresh()))->pluck('name');
 
         $this->assertTrue($names->contains('the warehouse roof'));
         $this->assertTrue($names->contains('the lantern watchman'));
@@ -1344,9 +1344,66 @@ class GameEngineTest extends TestCase
         $lengths = $names->map(fn ($n) => mb_strlen($n))->all();
         $this->assertSame($lengths, collect($lengths)->sortDesc()->values()->all());
 
-        $roof = collect(ChapterEntities::for($turn->fresh()))->firstWhere('name', 'the warehouse roof');
+        $roof = collect(ChapterEntities::for($campaign->fresh(), $turn->fresh()))
+            ->firstWhere('name', 'the warehouse roof');
         $this->assertSame('feature', $roof['kind']);
         $this->assertStringContainsString('climbed', implode(' ', $roof['lines']));
+    }
+
+    /**
+     * The world names a thing "Stacked Cargo Crates"; the chapter says "the
+     * crates". Without the short forms the prose highlighting catches almost
+     * nothing, which is the whole point of it.
+     */
+    public function test_entities_answer_to_the_short_names_narration_actually_writes()
+    {
+        $campaign = $this->createCatCampaign();
+        $turn = app(TurnStarter::class)->openFirstTurn($campaign);
+        $scene = $campaign->activeScene;
+
+        foreach ([
+            'Stacked Cargo Crates',   // head noun is distinctive: claims "Crates"
+            'Fish-Hoist Winch Arm',   // head noun is anatomy: must claim only "Winch Arm"
+            'Slack Mooring Line',     // head noun is a prose word: only "Mooring Line"
+            'Rope-Bound Crates',      // contests "Crates" with the first feature
+        ] as $name) {
+            SceneFeature::create([
+                'scene_id' => $scene->id,
+                'zone_id' => $scene->zone_id,
+                'name' => $name,
+                'feature_type' => 'cover',
+                'affordances' => ['hideable' => true],
+                'state' => [],
+                'source' => 'seed',
+            ]);
+        }
+
+        $byName = collect(ChapterEntities::for($campaign->fresh(), $turn->fresh()))->keyBy('name');
+
+        // A distinctive head noun is claimed…
+        $this->assertContains('Winch Arm', $byName['Fish-Hoist Winch Arm']['aliases']);
+        $this->assertContains('Mooring Line', $byName['Slack Mooring Line']['aliases']);
+        // …but never one the prose owns for other purposes.
+        $this->assertNotContains('Arm', $byName['Fish-Hoist Winch Arm']['aliases']);
+        $this->assertNotContains('Line', $byName['Slack Mooring Line']['aliases']);
+        // …and never one two things in the scene would both answer to.
+        $this->assertNotContains('Crates', $byName['Stacked Cargo Crates']['aliases']);
+        $this->assertNotContains('Crates', $byName['Rope-Bound Crates']['aliases']);
+        // The full name always survives, however contested its parts.
+        $this->assertContains('Stacked Cargo Crates', $byName['Stacked Cargo Crates']['aliases']);
+    }
+
+    public function test_a_chapter_without_a_turn_still_names_the_ground_it_stands_on()
+    {
+        $campaign = $this->createCatCampaign();
+        app(TurnStarter::class)->openFirstTurn($campaign);
+        $this->placeFeature($campaign->activeScene, 'the warehouse roof');
+
+        // A prologue or chronicle has no turn behind it; the campaign's own
+        // scene answers for it rather than the page losing every anchor.
+        $names = collect(ChapterEntities::for($campaign->fresh(), null))->pluck('name');
+
+        $this->assertTrue($names->contains('the warehouse roof'));
     }
 
     public function test_widget_endpoint_requires_a_valid_token()

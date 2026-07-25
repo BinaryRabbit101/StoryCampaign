@@ -66,7 +66,9 @@ class PlayController extends Controller
                 'events' => $chapterTurn === null ? [] : ChapterEvents::for($chapterTurn),
                 // The people and ground the prose can name — matched inside
                 // the chapter text so the reader can touch them for detail.
-                'entities' => $chapterTurn === null ? [] : ChapterEntities::for($chapterTurn),
+                // A prologue or chronicle has no turn; it still stands
+                // somewhere, so the active scene answers for it.
+                'entities' => ChapterEntities::for($campaign, $chapterTurn),
             ],
         ]);
     }

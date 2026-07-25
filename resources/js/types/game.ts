@@ -83,6 +83,13 @@ export interface ChapterEntity {
     icon: string;
     name: string;
     title: string;
+    /**
+     * Every form the prose might use for this thing — the full name plus the
+     * short ones narration actually writes ("the crates" for "Stacked Cargo
+     * Crates"). The engine filters out words too ordinary, or too contested,
+     * to belong to anything.
+     */
+    aliases: string[];
     lines: string[];
 }
 

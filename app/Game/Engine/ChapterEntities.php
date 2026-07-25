@@ -3,6 +3,7 @@
 namespace App\Game\Engine;
 
 use App\Models\Actor;
+use App\Models\Campaign;
 use App\Models\Scene;
 use App\Models\SceneFeature;
 use App\Models\Turn;
@@ -20,17 +21,37 @@ use App\Models\Turn;
  * Hidden is hidden here too — a concealed feature and a lurking ambusher are
  * absent from this list until the engine reveals them.
  *
- * @phpstan-type Entity array{key:string,kind:string,icon:string,name:string,title:string,lines:list<string>}
+ * @phpstan-type Entity array{key:string,kind:string,icon:string,name:string,title:string,aliases:list<string>,lines:list<string>}
  */
 class ChapterEntities
 {
-    /** @return list<Entity> */
-    public static function for(Turn $turn): array
+    /**
+     * Head nouns too ordinary to claim on sight. "Fish-Hoist Winch Arm" must
+     * never light up someone's arm, nor "Slack Mooring Line" a line of prose;
+     * both still match on their two-word form, which is what narration
+     * actually writes.
+     */
+    private const COMMON_NOUNS = [
+        'air', 'arm', 'back', 'body', 'boy', 'breath', 'chest', 'child', 'dark', 'door',
+        'edge', 'end', 'eye', 'eyes', 'face', 'foot', 'girl', 'ground', 'hand', 'hands',
+        'head', 'heart', 'leg', 'light', 'line', 'man', 'moment', 'mouth', 'neck', 'night',
+        'one', 'place', 'shoulder', 'side', 'skin', 'sound', 'space', 'tail', 'thing',
+        'throat', 'time', 'top', 'voice', 'wall', 'water', 'way', 'weight', 'wing', 'woman',
+        'word', 'words', 'world',
+    ];
+
+    /**
+     * @param  Turn|null  $turn  The turn the chapter narrated, when it had one —
+     *                           a prologue or a chronicle has none, and falls
+     *                           back to wherever the campaign now stands.
+     * @return list<Entity>
+     */
+    public static function for(Campaign $campaign, ?Turn $turn = null): array
     {
         // The scene the turn was played in carries most of the prose; the
         // campaign's active scene carries the ground the chapter closes on
         // when the turn moved. Usually the same scene, sometimes both.
-        $scenes = collect([$turn->scene, $turn->campaign?->activeScene])
+        $scenes = collect([$turn?->scene, $campaign->activeScene])
             ->filter()
             ->unique('id');
 
@@ -46,12 +67,83 @@ class ChapterEntities
             }
         }
 
-        // Longest names first: "a wall of stacked crates" must win over any
-        // shorter name nested inside it when the page scans the prose.
-        $list = array_values($entities);
+        $list = self::withAliases(array_values($entities));
+
+        // Longest name first, so a long name always wins over a shorter one
+        // nested inside it when the page scans the prose.
         usort($list, fn (array $a, array $b) => mb_strlen($b['name']) <=> mb_strlen($a['name']));
 
         return $list;
+    }
+
+    /**
+     * The forms narration actually uses. The world calls it "Stacked Cargo
+     * Crates"; the chapter says "the crates". Without the short forms the
+     * highlighting catches almost nothing, which is the whole point of it.
+     *
+     * Each entity claims its full name, its article-stripped name, its last
+     * two words, and its last word — minus anything too ordinary to own, and
+     * minus any form two entities would both answer to.
+     *
+     * @param  list<Entity>  $entities
+     * @return list<Entity>
+     */
+    private static function withAliases(array $entities): array
+    {
+        $claims = [];
+
+        foreach ($entities as $entity) {
+            foreach (self::candidates($entity['name']) as $candidate) {
+                $claims[mb_strtolower($candidate)][] = $entity['key'];
+            }
+        }
+
+        return array_map(function (array $entity) use ($claims) {
+            $aliases = [];
+            foreach (self::candidates($entity['name']) as $candidate) {
+                // Contested forms belong to no one: if two things in the
+                // scene answer to "the crates", neither may claim it.
+                if (count(array_unique($claims[mb_strtolower($candidate)])) === 1) {
+                    $aliases[] = $candidate;
+                }
+            }
+
+            usort($aliases, fn (string $a, string $b) => mb_strlen($b) <=> mb_strlen($a));
+            $entity['aliases'] = array_values(array_unique($aliases));
+
+            return $entity;
+        }, $entities);
+    }
+
+    /**
+     * Every form of a name worth looking for, before contest-filtering.
+     *
+     * @return list<string>
+     */
+    private static function candidates(string $name): array
+    {
+        $forms = [$name];
+
+        $bare = preg_replace('/^(the|a|an)\s+/i', '', $name);
+        if ($bare !== $name && $bare !== '') {
+            $forms[] = $bare;
+        }
+
+        $words = preg_split('/\s+/', trim($bare), -1, PREG_SPLIT_NO_EMPTY) ?: [];
+
+        if (count($words) >= 3) {
+            $forms[] = implode(' ', array_slice($words, -2));
+        }
+
+        // A lone head noun only if it can carry the weight: long enough to be
+        // distinctive, and not a word the prose owns for other purposes.
+        $head = end($words) ?: '';
+        if (count($words) >= 2 && mb_strlen($head) >= 5
+            && ! in_array(mb_strtolower($head), self::COMMON_NOUNS, true)) {
+            $forms[] = $head;
+        }
+
+        return array_values(array_unique(array_filter($forms)));
     }
 
     /**
@@ -148,6 +240,7 @@ class ChapterEntities
             },
             'name' => $actor->name,
             'title' => $title,
+            'aliases' => [],
             'lines' => array_values(array_filter($lines)),
         ];
     }
@@ -162,6 +255,7 @@ class ChapterEntities
             'kind' => 'feature',
             'icon' => 'ground',
             'name' => $feature->name,
+            'aliases' => [],
             'title' => $destroyed
                 ? 'Wrecked '.str_replace('_', ' ', $feature->feature_type ?? 'ground')
                 : ucfirst(str_replace('_', ' ', $feature->feature_type ?? 'part of the ground')),
