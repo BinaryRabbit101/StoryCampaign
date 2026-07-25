@@ -60,6 +60,23 @@ return [
 
     'evolution_schedule' => env('GAME_EVOLVE_SCHEDULE', 'daily'),
 
+    /*
+    |--------------------------------------------------------------------------
+    | When the world evolves — and therefore when the player's phone buzzes
+    |--------------------------------------------------------------------------
+    | The evolution run ends by pushing a chronicle ("The world changed
+    | overnight"), so this hour is not really a compute window: it is the hour
+    | the notification lands. Pick a time the player would want to read it.
+    |
+    | The timezone MUST be stated. Laravel schedules in `app.timezone`, which
+    | is normally UTC — an unanchored '07:30' silently becomes the small hours
+    | somewhere, which is exactly how this once fired at 11:30 PM local.
+    */
+
+    'evolution_at' => env('GAME_EVOLVE_AT', '07:30'),
+
+    'schedule_timezone' => env('GAME_SCHEDULE_TIMEZONE', env('APP_TIMEZONE', 'UTC')),
+
     'bounds' => [
         // Absolute magnitude clamps per parameterized capability.
         'capability_magnitudes' => [
