@@ -320,11 +320,20 @@ class TurnResolver
             default => BeatOutcome::FAILURE,
         };
 
-        // The two faces that overrule the arithmetic. A natural 20 is the
-        // best the beat could have gone no matter how steep the difficulty;
-        // a natural 1 is the worst no matter how generous the bonuses. The
-        // margin still decides everything in between.
-        $crit = BeatOutcome::critFor($roll);
+        // The stance economy — every stance a live choice, none dominant.
+        // Caution already bought a surer roll above; the price is paid here:
+        // it never yields more than a plain success. Boldness paid a harder
+        // roll for a wilder die (see critFor); balanced holds the middle.
+        if ($approach === 'cautious' && $degree === BeatOutcome::STRONG) {
+            $degree = BeatOutcome::SUCCESS;
+        }
+
+        // The faces that overrule the arithmetic. A crit success is the best
+        // the beat could have gone no matter how steep the difficulty; a
+        // crit failure the worst no matter how generous the bonuses. The
+        // margin still decides everything in between — and the stance decides
+        // which faces speak at all.
+        $crit = BeatOutcome::critFor($roll, $approach);
         if ($crit === BeatOutcome::CRIT_SUCCESS) {
             $degree = BeatOutcome::STRONG;
         } elseif ($crit === BeatOutcome::CRIT_FAILURE) {
@@ -346,6 +355,19 @@ class TurnResolver
         $method = $choice['modifiers']['method'] ?? null;
         if ($verb === 'strike' && is_string($method) && $method !== '' && $method !== 'unspecified') {
             array_unshift($facts, "The attack came as {$method}.");
+        }
+
+        // The stance is already spent — it moved the difficulty and the die's
+        // faces above. What rides along here is only its telling, authored on
+        // the card beside the label, so the narrator learns HOW they carried
+        // the beat. Appended, never unshifted: the first fact is the dice
+        // table's outcome line and must stay the thing that actually changed.
+        if ($approach !== 'balanced') {
+            $stance = collect($card['modifiers'] ?? [])->firstWhere('key', 'approach');
+            $telling = collect($stance['options'] ?? [])->firstWhere('value', $approach)['fact'] ?? null;
+            if (is_string($telling) && $telling !== '') {
+                $facts[] = $telling;
+            }
         }
 
         return new BeatOutcome($card['slot'], $verb, $card['target'] ?? null, $degree, $roll, $total, $difficulty, $facts,

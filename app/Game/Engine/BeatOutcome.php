@@ -70,12 +70,19 @@ class BeatOutcome
         ];
     }
 
-    /** The face of the die, if it was one of the two that speak for themselves. */
-    public static function critFor(int $roll): ?string
+    /**
+     * The face of the die, if it was one that speaks for itself. The stance
+     * moves which faces those are: caution silences both extremes (no
+     * triumph, no catastrophe — that certainty is what the care bought),
+     * boldness widens both to two faces each — 19–20 rewrites the ground,
+     * but 1–2 fumbles too. Balanced keeps the classic single face each way.
+     */
+    public static function critFor(int $roll, string $approach = 'balanced'): ?string
     {
-        return match ($roll) {
-            20 => self::CRIT_SUCCESS,
-            1 => self::CRIT_FAILURE,
+        return match (true) {
+            $approach === 'cautious' => null,
+            $roll >= ($approach === 'bold' ? 19 : 20) => self::CRIT_SUCCESS,
+            $roll <= ($approach === 'bold' ? 2 : 1) => self::CRIT_FAILURE,
             default => null,
         };
     }

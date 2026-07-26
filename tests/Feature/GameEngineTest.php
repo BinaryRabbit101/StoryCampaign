@@ -1743,6 +1743,116 @@ class GameEngineTest extends TestCase
     }
 
     /**
+     * The stance economy, cautious side: the surer roll is real (difficulty
+     * drops by 2), but the die's wild faces go silent and no margin ever
+     * yields more than a plain success. Certainty is what the care bought —
+     * and the stance's telling rides to the narrator as a fact.
+     */
+    public function test_caution_buys_certainty_and_pays_in_wonder()
+    {
+        $campaign = $this->createCatCampaign();
+        app(TurnStarter::class)->openFirstTurn($campaign);
+        $full = $campaign->character->meters;
+
+        $capped = 0;
+        $tellings = 0;
+
+        for ($i = 0; $i < 140; $i++) {
+            $campaign = $campaign->fresh();
+            $campaign->activeScene->actors()->delete();
+            $campaign->character->update(['meters' => $full]);
+
+            $turn = $this->refreshCards($campaign->currentTurn);
+            $card = collect($turn->cards['main'])->firstWhere('verb', 'improvise');
+            $this->assertNotNull($card);
+            // The stance row wears the improvise family's own words, not a
+            // one-size triad.
+            $labels = collect($card['modifiers'][0]['options'])->pluck('label');
+            $this->assertTrue($labels->contains('Careful — feel your way, take the sure thing'));
+
+            $turn->update([
+                'status' => Turn::STATUS_LOCKED,
+                'submission' => ['main' => ['card_id' => $card['id'], 'modifiers' => ['approach' => 'cautious']]],
+                'submitted_at' => now(),
+            ]);
+            app(TurnResolver::class)->resolve($turn->fresh());
+
+            $beat = collect($turn->fresh()->resolution['beats'])->firstWhere('verb', 'improvise');
+            if ($beat === null) {
+                continue;
+            }
+
+            // risky (+3) taken cautiously (-2) with no degraded conditions.
+            $this->assertSame(11, $beat['difficulty']);
+            $this->assertNull($beat['crit'], "a cautious beat crit on a {$beat['roll']}");
+            $this->assertNotSame('strong', $beat['degree']);
+            if ($beat['total'] >= $beat['difficulty'] + 5) {
+                $capped++;
+                $this->assertSame('success', $beat['degree']);
+            }
+            if (in_array('They felt their way through it, taking only what was sure.', $beat['facts'], true)) {
+                $tellings++;
+            }
+        }
+
+        $this->assertGreaterThan(0, $capped, 'no margin ever reached strong in 140 throws');
+        $this->assertGreaterThan(0, $tellings, 'the cautious telling never reached the facts');
+    }
+
+    /**
+     * The stance economy, bold side: the harder roll is real (difficulty
+     * climbs by 2), and in exchange the die runs wilder — a 19 rewrites the
+     * ground like a 20, and a 2 fumbles like a 1.
+     */
+    public function test_boldness_pays_for_a_wilder_die()
+    {
+        $campaign = $this->createCatCampaign();
+        app(TurnStarter::class)->openFirstTurn($campaign);
+        $full = $campaign->character->meters;
+
+        $widened = ['success' => 0, 'failure' => 0];
+
+        for ($i = 0; $i < 140; $i++) {
+            $campaign = $campaign->fresh();
+            $campaign->activeScene->actors()->delete();
+            $campaign->character->update(['meters' => $full]);
+
+            $turn = $this->refreshCards($campaign->currentTurn);
+            $card = collect($turn->cards['main'])->firstWhere('verb', 'improvise');
+            $this->assertNotNull($card);
+
+            $turn->update([
+                'status' => Turn::STATUS_LOCKED,
+                'submission' => ['main' => ['card_id' => $card['id'], 'modifiers' => ['approach' => 'bold']]],
+                'submitted_at' => now(),
+            ]);
+            app(TurnResolver::class)->resolve($turn->fresh());
+
+            $beat = collect($turn->fresh()->resolution['beats'])->firstWhere('verb', 'improvise');
+            if ($beat === null) {
+                continue;
+            }
+
+            // risky (+3) taken boldly (+2) with no degraded conditions.
+            $this->assertSame(15, $beat['difficulty']);
+            if ($beat['roll'] >= 19) {
+                $widened['success']++;
+                $this->assertSame('success', $beat['crit']);
+                $this->assertSame('strong', $beat['degree']);
+            } elseif ($beat['roll'] <= 2) {
+                $widened['failure']++;
+                $this->assertSame('failure', $beat['crit']);
+                $this->assertSame('failure', $beat['degree']);
+            } else {
+                $this->assertNull($beat['crit']);
+            }
+        }
+
+        $this->assertGreaterThan(0, $widened['success'], 'no 19–20 in 140 throws');
+        $this->assertGreaterThan(0, $widened['failure'], 'no 1–2 in 140 throws');
+    }
+
+    /**
      * A crit is real in the state, not only loud in the prose: the fumble
      * spends the ground the character was standing on and turns the effort
      * back on them.

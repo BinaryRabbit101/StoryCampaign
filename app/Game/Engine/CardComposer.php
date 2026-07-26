@@ -61,7 +61,7 @@ class CardComposer
                 label: 'Take the scouted way out',
                 description: 'Slip out through the route your companion found. It holds until the scene turns.',
                 target: ['type' => 'exit', 'id' => null, 'name' => 'the scouted way out'],
-                modifiers: [$this->approachModifier()],
+                modifiers: [$this->approachModifier('flee')],
             );
         }
 
@@ -94,7 +94,7 @@ class CardComposer
                 label: "Press on toward {$frontier->name}",
                 description: "Leave {$scene->zone->name} behind for good. {$frontier->description}",
                 target: ['type' => 'zone', 'id' => $frontier->id, 'name' => $frontier->name],
-                modifiers: [$this->approachModifier()],
+                modifiers: [$this->approachModifier('venture')],
             );
         }
 
@@ -165,7 +165,7 @@ class CardComposer
                 target: $target,
                 capability: $capability->value,
                 risk: $risk,
-                modifiers: [$this->approachModifier()],
+                modifiers: [$this->approachModifier('cross')],
             );
         }
 
@@ -185,7 +185,7 @@ class CardComposer
                     target: $target,
                     capability: 'squeeze',
                     risk: $tight ? 'degraded' : 'safe',
-                    modifiers: [$this->approachModifier()],
+                    modifiers: [$this->approachModifier('flee')],
                 );
             }
         }
@@ -218,7 +218,7 @@ class CardComposer
                 description: "Go back for {$item['name']} and get it in your hands again. Everything it was giving you comes back with it.",
                 target: $target,
                 risk: 'safe',
-                modifiers: [$this->approachModifier()],
+                modifiers: [$this->approachModifier('recover')],
             );
         }
 
@@ -232,7 +232,7 @@ class CardComposer
                 target: $target,
                 capability: 'break',
                 risk: 'risky',
-                modifiers: [$this->approachModifier()],
+                modifiers: [$this->approachModifier('break')],
             );
         }
 
@@ -344,7 +344,7 @@ class CardComposer
                 description: $description,
                 target: $target,
                 risk: 'risky',
-                modifiers: [$this->approachModifier(), $this->methodModifier($character)],
+                modifiers: [$this->approachModifier('strike'), $this->methodModifier($character)],
             );
 
             if ($intent === 'windup') {
@@ -355,7 +355,7 @@ class CardComposer
                     description: "{$actor->name} is gathering something heavy. Get inside it before it lands.",
                     target: $target,
                     risk: 'risky',
-                    modifiers: [$this->approachModifier()],
+                    modifiers: [$this->approachModifier('interrupt')],
                 );
                 $cards[] = new ActionCard(
                     slot: TurnSlot::Pre,
@@ -379,7 +379,7 @@ class CardComposer
                     description: "Let your presence do the work — drive {$actor->name} back without a blow.",
                     target: $target,
                     capability: 'intimidate',
-                    modifiers: [$this->approachModifier()],
+                    modifiers: [$this->approachModifier('intimidate')],
                 );
             }
         }
@@ -434,7 +434,7 @@ class CardComposer
                 target: $target,
                 capability: 'restrain',
                 risk: 'risky',
-                modifiers: [$this->approachModifier()],
+                modifiers: [$this->approachModifier('restrain')],
             );
 
             // Composition, not enumeration: restrain + swing + carry_extra
@@ -453,7 +453,7 @@ class CardComposer
                             capability: 'restrain',
                             risk: 'risky',
                             composed: true,
-                            modifiers: [$this->approachModifier()],
+                            modifiers: [$this->approachModifier('haul')],
                         );
                         break;
                     }
@@ -501,7 +501,7 @@ class CardComposer
                 capability: isset($capabilities['lift']) ? 'lift' : 'carry_extra',
                 risk: 'risky',
                 composed: true,
-                modifiers: [$this->approachModifier()],
+                modifiers: [$this->approachModifier('hurl')],
             );
         }
 
@@ -520,7 +520,7 @@ class CardComposer
                         capability: 'carry_extra',
                         risk: 'risky',
                         composed: true,
-                        modifiers: [$this->approachModifier()],
+                        modifiers: [$this->approachModifier('haul')],
                     );
                     break;
                 }
@@ -576,7 +576,7 @@ class CardComposer
                     description: "{$quarry->name} ran. Their trail is still warm — follow it out of this place.",
                     target: ['type' => 'actor', 'id' => $quarry->id, 'name' => $quarry->name],
                     capability: 'track',
-                    modifiers: [$this->approachModifier()],
+                    modifiers: [$this->approachModifier('track')],
                 );
             }
         }
@@ -820,15 +820,73 @@ class CardComposer
         return $cards;
     }
 
-    private function approachModifier(): array
+    /**
+     * The stance row every consequential card carries. Mechanically it is a
+     * fixed triad the resolver alone interprets — cautious buys a surer roll
+     * at the price of the die's wild faces and any result past a plain
+     * success; bold pays a harder roll for a wilder die and a heavier blow —
+     * and that economy never varies by verb, land, or genre (story flexible,
+     * rules fixed). What varies is the WORDING: each verb family speaks its
+     * own stances, so fleeing offers a creep or a dash where a strike offers
+     * a guard or an all-in, and each option's `fact` is the telling the
+     * resolver hands the narrator when that stance was chosen. Values stay
+     * `balanced|cautious|bold` so validation and the resolver never care
+     * which family dressed the row.
+     */
+    private function approachModifier(string $verb = 'improvise'): array
     {
+        [$balanced, $cautious, $bold, $cautiousFact, $boldFact] = match ($verb) {
+            'flee', 'venture', 'cross', 'track', 'recover' => [
+                'Steady on',
+                'Creep — slow, certain, nothing given away',
+                'Dash — flat out, and damn the noise',
+                'They crept, testing every step and giving nothing away.',
+                'They went flat out, trading care for speed and letting the noise fall where it would.',
+            ],
+            'strike', 'interrupt', 'hurl' => [
+                'Measured',
+                'Guarded — risk nothing, win nothing grand',
+                'All-in — everything behind it, nothing held back',
+                'They fought guarded, offering no opening and reaching for no glory.',
+                'They threw everything behind it, all commitment and no guard.',
+            ],
+            'restrain', 'haul' => [
+                'Firm',
+                'Patient — let the grip come to you',
+                'Overwhelming — take them before they can think',
+                'They worked patiently, waiting for the hold to offer itself.',
+                'They rushed the hold, all weight and violence at once.',
+            ],
+            'break' => [
+                'Firm',
+                'Pry — work it loose a piece at a time',
+                'Smash — through in one blow or not at all',
+                'They pried at it patiently, working it loose piece by piece.',
+                'They put everything into one breaking blow.',
+            ],
+            'intimidate' => [
+                'Level',
+                'Cold — a quiet menace, slow and certain',
+                'Eruptive — fill the room all at once',
+                'They let the menace come on slow and cold.',
+                'They erupted, filling the space between one breath and the next.',
+            ],
+            default => [
+                'Balanced',
+                'Careful — feel your way, take the sure thing',
+                'Reckless — trust the leap, live with the landing',
+                'They felt their way through it, taking only what was sure.',
+                'They trusted the leap entirely, nerve over sense.',
+            ],
+        };
+
         return [
             'key' => 'approach',
             'label' => 'Approach',
             'options' => [
-                ['value' => 'balanced', 'label' => 'Balanced'],
-                ['value' => 'cautious', 'label' => 'Cautious — surer, gentler'],
-                ['value' => 'bold', 'label' => 'Bold — harder, riskier'],
+                ['value' => 'balanced', 'label' => $balanced],
+                ['value' => 'cautious', 'label' => $cautious, 'fact' => $cautiousFact],
+                ['value' => 'bold', 'label' => $bold, 'fact' => $boldFact],
             ],
         ];
     }
