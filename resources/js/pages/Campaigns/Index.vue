@@ -33,6 +33,11 @@ const premise = ref('');
 const tone = ref('');
 const creating = ref(false);
 
+// The composer is a tall form, and most visits are here to continue a tale,
+// not start one — so it folds to its header whenever campaigns already
+// exist. v-show, not v-if: folding never loses what was typed.
+const composerOpen = ref(props.campaigns.length === 0);
+
 // Each story axis is a picked option OR the player's own words. Empty means
 // the engine decides — the default, and the reason two tales are never the
 // same. OTHER switches the control to a free-text box.
@@ -115,13 +120,37 @@ function statusLabel(status: string): string {
         <div
             class="sc-rise rounded-xl border border-sidebar-border/70 bg-background/60 p-5 backdrop-blur-sm dark:border-sidebar-border"
         >
-            <h2 class="mb-1 text-lg font-semibold">Begin a new tale</h2>
-            <p class="mb-4 text-sm text-muted-foreground">
+            <button
+                type="button"
+                class="flex w-full items-center justify-between gap-2 text-left"
+                :aria-expanded="composerOpen"
+                @click="composerOpen = !composerOpen"
+            >
+                <h2 class="text-lg font-semibold">Begin a new tale</h2>
+                <svg
+                    class="h-4 w-4 shrink-0 text-muted-foreground transition-transform duration-200"
+                    :class="composerOpen ? 'rotate-180' : ''"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    stroke-width="2"
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                    aria-hidden="true"
+                >
+                    <path d="m6 9 6 6 6-6" />
+                </svg>
+            </button>
+            <p v-show="composerOpen" class="mt-1 mb-4 text-sm text-muted-foreground">
                 Only the name is required. Everything else colors the telling —
                 the interview, every chapter, the book's close — and never
                 changes what the engine allows.
             </p>
-            <form class="flex flex-col gap-3" @submit.prevent="create">
+            <form
+                v-show="composerOpen"
+                class="flex flex-col gap-3"
+                @submit.prevent="create"
+            >
                 <div>
                     <label
                         class="mb-1 block text-xs font-medium text-muted-foreground"
