@@ -154,6 +154,8 @@ const detail = ref<Detail | null>(null);
 const chapterEl = ref<HTMLElement | null>(null);
 const detailTop = ref(0);
 
+const detailEl = ref<HTMLElement | null>(null);
+
 function openDetail(next: Detail, e: MouseEvent) {
     if (detail.value?.key === next.key) {
         detail.value = null;
@@ -166,6 +168,24 @@ function openDetail(next: Detail, e: MouseEvent) {
         detailTop.value =
             anchor.getBoundingClientRect().bottom - article.top + 6;
     }
+}
+
+// Anywhere outside dismisses it. The card sits over the prose the reader is
+// trying to read, so hunting for the ✕ is the wrong amount of work — but the
+// anchors have to be exempt, or their own toggle would fight this: pointerdown
+// closes the card a beat before the anchor's click would reopen it, and
+// tapping the open anchor a second time would never close anything.
+function dismissDetail(e: Event) {
+    if (!detail.value) return;
+    const target = e.target as HTMLElement | null;
+    if (target?.closest('[data-anchor]') || detailEl.value?.contains(target)) {
+        return;
+    }
+    detail.value = null;
+}
+
+function dismissOnEscape(e: KeyboardEvent) {
+    if (e.key === 'Escape') detail.value = null;
 }
 
 const degreeClass = (event: ChapterEvent) =>
@@ -338,9 +358,13 @@ onMounted(() => {
             });
     }, 2500);
     void enablePush();
+    document.addEventListener('pointerdown', dismissDetail);
+    document.addEventListener('keydown', dismissOnEscape);
 });
 onUnmounted(() => {
     if (timer) clearInterval(timer);
+    document.removeEventListener('pointerdown', dismissDetail);
+    document.removeEventListener('keydown', dismissOnEscape);
 });
 
 // The table is shown once. Stamping it server-side means the same dice never
@@ -675,6 +699,7 @@ const healthPct = computed(
                                 : 'bg-muted'
                         "
                         :title="seg.event.label"
+                        data-anchor
                         @click="openEvent(seg.event, $event)"
                     >
                         {{ icon(seg.event.icon) }}</button
@@ -690,6 +715,7 @@ const healthPct = computed(
                                   : 'border-sky-600/50 hover:text-sky-700 dark:border-sky-400/40 dark:hover:text-sky-400'
                         "
                         :title="`${seg.entity.name} — tap for detail`"
+                        data-anchor
                         @click="openEntity(seg.entity, $event)"
                     >
                         {{ seg.text }}</button
@@ -723,6 +749,7 @@ const healthPct = computed(
                             : 'bg-muted'
                     "
                     :title="event.label"
+                    data-anchor
                     @click="openEvent(event, $event)"
                 >
                     {{ icon(event.icon) }}
@@ -735,6 +762,8 @@ const healthPct = computed(
                 <div
                     v-if="detail"
                     :key="detail.key"
+                    ref="detailEl"
+                    data-detail
                     class="absolute right-3 left-3 z-10 rounded-lg border border-violet-500/40 bg-popover p-3 text-sm shadow-lg shadow-violet-500/10"
                     :style="{ top: `${detailTop}px` }"
                 >
