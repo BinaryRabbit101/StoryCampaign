@@ -1636,6 +1636,45 @@ class GameEngineTest extends TestCase
         $this->assertContains('Stacked Cargo Crates', $byName['Stacked Cargo Crates']['aliases']);
     }
 
+    /**
+     * Colour is how the reader tells a foe from a friend from a wall before
+     * tapping anything — the dotted underline alone is too quiet to notice
+     * inside a paragraph of serif prose.
+     */
+    public function test_entities_carry_the_tone_the_page_colours_them_by()
+    {
+        $campaign = $this->createCatCampaign();
+        $turn = app(TurnStarter::class)->openFirstTurn($campaign);
+        $scene = $campaign->activeScene;
+
+        foreach ([
+            'Harbor Cutthroat' => 'enemy',
+            'Wharf-Dog Bardolph' => 'companion',
+            'Net-Mender Alys' => 'npc',
+        ] as $name => $kind) {
+            Actor::create([
+                'scene_id' => $scene->id,
+                'zone_id' => $scene->zone_id,
+                'name' => $name,
+                'kind' => $kind,
+                'tier' => 'regular',
+                'stats' => ['health' => ['current' => 6, 'max' => 6]],
+                'tags' => [],
+                'status' => 'active',
+                'source' => 'seed',
+            ]);
+        }
+
+        $this->placeFeature($scene, 'the warehouse roof');
+
+        $byName = collect(ChapterEntities::for($campaign->fresh(), $turn->fresh()))->keyBy('name');
+
+        $this->assertSame('foe', $byName['Harbor Cutthroat']['tone']);
+        $this->assertSame('ally', $byName['Wharf-Dog Bardolph']['tone']);
+        $this->assertSame('person', $byName['Net-Mender Alys']['tone']);
+        $this->assertSame('ground', $byName['the warehouse roof']['tone']);
+    }
+
     public function test_a_chapter_without_a_turn_still_names_the_ground_it_stands_on()
     {
         $campaign = $this->createCatCampaign();

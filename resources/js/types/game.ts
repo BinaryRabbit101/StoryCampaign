@@ -118,6 +118,11 @@ export interface RollTable {
 export interface ChapterEntity {
     key: string;
     kind: 'actor' | 'feature';
+    /**
+     * What the anchor is, for colour: a dotted underline on its own is too
+     * quiet to spot mid-paragraph, so each nature wears its own hue.
+     */
+    tone: 'foe' | 'ally' | 'person' | 'ground';
     icon: string;
     name: string;
     title: string;

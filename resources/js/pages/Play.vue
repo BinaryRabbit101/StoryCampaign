@@ -134,6 +134,34 @@ const ICONS: Record<string, string> = {
 
 const icon = (name: string) => ICONS[name] ?? ICONS.beat;
 
+// A dotted underline alone was too quiet to notice inside a paragraph of
+// serif prose, so every anchored noun also carries a slight colour for what
+// it is: a foe reads red, a companion gold, a stranger cool, and the ground
+// brown. Kept low-saturation on purpose — this has to read as ink the story
+// was written in, not as a set of links pasted over it. Brown is an arbitrary
+// value because Tailwind has no brown; the light and dark pairs are picked to
+// hold contrast against parchment and night both.
+const TONES: Record<ChapterEntity['tone'], { text: string; line: string }> = {
+    foe: {
+        text: 'text-red-800 dark:text-red-400',
+        line: 'decoration-red-700/60 dark:decoration-red-400/60',
+    },
+    ally: {
+        text: 'text-amber-700 dark:text-amber-300',
+        line: 'decoration-amber-600/60 dark:decoration-amber-300/60',
+    },
+    person: {
+        text: 'text-teal-800 dark:text-teal-300',
+        line: 'decoration-teal-700/60 dark:decoration-teal-300/60',
+    },
+    ground: {
+        text: 'text-[#8a5a33] dark:text-[#c9a276]',
+        line: 'decoration-[#8a5a33]/60 dark:decoration-[#c9a276]/60',
+    },
+};
+
+const tone = (entity: ChapterEntity) => TONES[entity.tone] ?? TONES.ground;
+
 /** Whatever the tapped anchor has to say, in one shape. */
 interface Detail {
     key: string;
@@ -212,7 +240,7 @@ const entityDetail = (entity: ChapterEntity): Detail => ({
     key: `entity:${entity.key}`,
     icon: icon(entity.icon),
     title: entity.name,
-    titleClass: 'text-foreground',
+    titleClass: tone(entity).text,
     badge: entity.title,
     lines: entity.lines,
     note: null,
@@ -706,13 +734,14 @@ const healthPct = computed(
                     ><button
                         v-else-if="seg.entity"
                         type="button"
-                        class="inline cursor-pointer border-b border-dotted text-left transition-colors"
+                        class="inline cursor-pointer text-left underline decoration-dotted decoration-2 underline-offset-4 transition-colors hover:decoration-solid"
                         :class="
                             detail?.key === `entity:${seg.entity.key}`
-                                ? 'border-violet-500 text-violet-600 dark:text-violet-400'
-                                : seg.entity.kind === 'actor'
-                                  ? 'border-amber-600/50 hover:text-amber-700 dark:border-amber-400/40 dark:hover:text-amber-400'
-                                  : 'border-sky-600/50 hover:text-sky-700 dark:border-sky-400/40 dark:hover:text-sky-400'
+                                ? 'text-violet-600 decoration-violet-500 dark:text-violet-400 dark:decoration-violet-400'
+                                : [
+                                      tone(seg.entity).text,
+                                      tone(seg.entity).line,
+                                  ]
                         "
                         :title="`${seg.entity.name} — tap for detail`"
                         data-anchor

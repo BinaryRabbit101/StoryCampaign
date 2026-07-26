@@ -21,7 +21,12 @@ use App\Models\Turn;
  * Hidden is hidden here too — a concealed feature and a lurking ambusher are
  * absent from this list until the engine reveals them.
  *
- * @phpstan-type Entity array{key:string,kind:string,icon:string,name:string,title:string,aliases:list<string>,lines:list<string>}
+ * The `tone` is what the page colors by: a dotted underline alone is too
+ * quiet to notice mid-paragraph, so a foe reads red, a companion gold, a
+ * stranger cool, and plain ground brown. Narration colour only — it is
+ * derived from the actor's kind and never touches mechanics.
+ *
+ * @phpstan-type Entity array{key:string,kind:string,tone:string,icon:string,name:string,title:string,aliases:list<string>,lines:list<string>}
  */
 class ChapterEntities
 {
@@ -233,6 +238,11 @@ class ChapterEntities
         return [
             'key' => 'actor-'.$actor->id,
             'kind' => 'actor',
+            'tone' => match ($actor->kind) {
+                'enemy' => 'foe',
+                'companion' => 'ally',
+                default => 'person',
+            },
             'icon' => match ($actor->kind) {
                 'enemy' => 'enemy',
                 'companion' => 'ally',
@@ -253,6 +263,7 @@ class ChapterEntities
         return [
             'key' => 'feature-'.$feature->id,
             'kind' => 'feature',
+            'tone' => 'ground',
             'icon' => 'ground',
             'name' => $feature->name,
             'aliases' => [],
