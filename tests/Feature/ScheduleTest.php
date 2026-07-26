@@ -41,13 +41,18 @@ class ScheduleTest extends TestCase
         $this->assertSame('30 7 * * *', $this->evolveEvent()->expression);
     }
 
-    public function test_turn_resolution_still_sweeps_on_its_own_short_cycle()
+    /**
+     * Turns resolve inline, so this sweep is a recovery path — but recovery
+     * in a realtime game has to be quick, and it costs nothing when there is
+     * nothing waiting.
+     */
+    public function test_the_recovery_sweep_runs_every_minute()
     {
         $sweep = collect(app(Schedule::class)->events())
             ->first(fn (Event $e) => str_contains($e->command ?? '', 'game:resolve-due'));
 
         $this->assertNotNull($sweep);
-        $this->assertSame('*/5 * * * *', $sweep->expression);
+        $this->assertSame('* * * * *', $sweep->expression);
     }
 
     /** Re-register the console routes so config changes reach the schedule. */

@@ -347,6 +347,39 @@
     transform: translateY(-6px);
 }
 
+/* The dice table: an untouched die asks to be picked up. */
+@keyframes sc-waiting {
+    0%,
+    100% {
+        box-shadow: 0 0 0 0 color-mix(in srgb, currentColor 32%, transparent);
+    }
+    50% {
+        box-shadow: 0 0 0 7px color-mix(in srgb, currentColor 0%, transparent);
+    }
+}
+.sc-waiting {
+    animation: sc-waiting 2s ease-out infinite;
+}
+
+/* A natural 20 or a natural 1 announces itself before the prose does. */
+@keyframes sc-flare {
+    0% {
+        opacity: 0;
+        transform: scale(0.7);
+    }
+    35% {
+        opacity: 1;
+        transform: scale(1.04);
+    }
+    100% {
+        opacity: 1;
+        transform: scale(1);
+    }
+}
+.sc-flare {
+    animation: sc-flare 0.5s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
 @media (prefers-reduced-motion: reduce) {
     .sc-rise,
     .sc-ink,
@@ -354,7 +387,9 @@
     .sc-breathe,
     .sc-twinkle,
     .sc-drift,
-    .sc-mote {
+    .sc-mote,
+    .sc-waiting,
+    .sc-flare {
         animation: none;
     }
     .sc-mote {

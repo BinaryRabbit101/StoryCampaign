@@ -86,6 +86,15 @@ class Narrator
         $wordLow = min(120, 60 + 20 * $eventCount);
         $wordHigh = min(520, 130 + 90 * $eventCount);
 
+        // A crit is the chapter's spine, and a spine needs room. Telling the
+        // narrator to make a moment enormous inside a budget that has no
+        // space left for it just produces a crowded page.
+        $criticals = $this->criticalMoments($turn);
+        if ($criticals !== '') {
+            $wordLow += 60;
+            $wordHigh = min(640, $wordHigh + 140);
+        }
+
         // The next turn already exists (the engine opened it during resolution).
         // Its situation is resolved fact, so the chapter may close inside it —
         // minus the meter readout, which is mechanics and never reaches prose.
@@ -126,7 +135,7 @@ Some beats carry the player's own words for that moment. Those words are voice a
 
 ## How the scene answered
 {$reaction}
-
+{$criticals}
 ## Where the vignette stops
 {$turn->branch_trigger}: the chapter must end on this note, at a clean decision point, leaving the situation open for the player's next choice. {$wordLow}-{$wordHigh} words.
 
@@ -138,6 +147,53 @@ The reader makes their next choice from the page itself: close the chapter insid
 Respond with ONLY a JSON object:
 {"intent_line": "<optional short italicized bridge line in the style of 'She chose to take the rooftops.' or null>", "chapter": "<the chapter prose>"}
 PROMPT;
+    }
+
+    /**
+     * The crit block.
+     *
+     * A natural 20 or a natural 1 is not a beat with a better adjective on it
+     * — it is the thing the chapter is about. The engine has already made the
+     * moment extraordinary in the world (ground torn open, a weapon gone out
+     * of reach, a whole room turned); this tells the narrator to write it at
+     * that scale, and fixes the boundary where scale stops and invention
+     * would start. Returns '' when nothing critical happened, so an ordinary
+     * turn never carries instructions to be enormous.
+     */
+    private function criticalMoments(Turn $turn): string
+    {
+        $resolution = $turn->resolution ?? [];
+
+        $lines = collect($resolution['beats'] ?? [])
+            ->reject(fn (array $beat) => ($beat['crit'] ?? null) === null || ($beat['skipped'] ?? false))
+            ->map(fn (array $beat) => '- '.($beat['crit'] === 'success' ? 'CRITICAL SUCCESS' : 'CRITICAL FAILURE')
+                .' on '.str_replace('_', ' ', $beat['verb'])
+                .(($beat['target']['name'] ?? null) !== null ? " ({$beat['target']['name']})" : ''))
+            ->merge(collect($resolution['reaction_rolls'] ?? [])
+                ->reject(fn (array $roll) => ($roll['crit'] ?? null) === null)
+                ->map(fn (array $roll) => '- '.($roll['crit'] === 'success' ? 'CRITICAL HIT' : 'CRITICAL MISS')
+                    ." by {$roll['actor']}"))
+            ->values();
+
+        if ($lines->isEmpty()) {
+            return '';
+        }
+
+        $listed = $lines->join("\n");
+
+        return <<<CRIT
+
+        ## The moment this chapter turns on
+        {$listed}
+
+        This vignette hit the extreme end of what could happen. That moment is the chapter's spine: give it the most room, the sharpest images and the strongest verbs on the page, and arrange everything else around it — what led into it, and what this place looks like once it has happened.
+
+        - On a critical success, do not write a good version of an ordinary act. Write the version people still talk about afterwards. Where the facts say the ground was torn open, something enormous happened to the ground: decide what lies UNDER the ground in THIS land, and let it out. Where the facts say everyone heard it, turn the whole room.
+        - On a critical failure, do not write a near miss. Write the version that goes wrong in a way nobody can take back in the same breath. Where the facts say a weapon left their hands, it does not clatter down at their feet — it is gone somewhere that will cost them to reach, and their hands should stay empty for the rest of the chapter.
+        - Reach for the biggest image this land can actually carry, in this land's own materials. A torn floor is a different thing in a canopy town, a derelict station and an ash steppe — write the one this tale is standing in.
+        - The facts remain fixed and complete. Scale is yours; outcomes are not. Do not kill, destroy, wound, gain, or lose anything the facts above do not state — you are deciding the SHAPE and SIZE of what is listed, never adding to the list.
+
+        CRIT;
     }
 
     private function tone(): string

@@ -206,6 +206,22 @@ class CardComposer
             }
         }
 
+        // Something of the character's own, lying where a fumble sent it. No
+        // capability gates picking your own gear back up — but it costs a
+        // whole main beat, which is the real price of having dropped it.
+        if (isset($affordances['dropped_item'])) {
+            $item = $affordances['dropped_item'];
+            $cards[] = new ActionCard(
+                slot: TurnSlot::Main,
+                verb: 'recover',
+                label: "Take up {$item['name']}",
+                description: "Go back for {$item['name']} and get it in your hands again. Everything it was giving you comes back with it.",
+                target: $target,
+                risk: 'safe',
+                modifiers: [$this->approachModifier()],
+            );
+        }
+
         // breakable / liftable — brute manipulation
         if (isset($affordances['breakable']) && isset($capabilities['break'])) {
             $cards[] = new ActionCard(

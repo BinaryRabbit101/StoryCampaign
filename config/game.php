@@ -4,15 +4,16 @@ return [
 
     /*
     |--------------------------------------------------------------------------
-    | Turn cadence
+    | Abandoned-turn recovery
     |--------------------------------------------------------------------------
-    | Minimum minutes between a player's submission and its resolution. The
-    | scheduler sweeps for due turns every few minutes; a turn resolves once
-    | it has been locked for at least this long. Set to 0 for instant
-    | resolution during development.
+    | Turns resolve inline the moment they are submitted — there is no waiting
+    | window. A turn can only be left sitting in `locked` if the request that
+    | was resolving it died mid-flight, so the sweep picks up anything locked
+    | for longer than this. Keep it comfortably above the worst honest
+    | resolution time, or the sweep will race a request that is still working.
     */
 
-    'turn_cadence_minutes' => env('GAME_TURN_CADENCE_MINUTES', 30),
+    'abandoned_turn_minutes' => env('GAME_ABANDONED_TURN_MINUTES', 2),
 
     /*
     |--------------------------------------------------------------------------

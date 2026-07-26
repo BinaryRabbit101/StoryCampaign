@@ -24,10 +24,14 @@ same as sibling projects). Fortify auth, Wayfinder, PHPUnit 12, SQLite, PWA
 
 - Dev: `npm run dev` + `php artisan serve` (or Herd). Build: `npm run build`.
 - Tests: `php artisan test`. Format: `vendor/bin/pint --dirty`.
+- Turns are REALTIME: submitting resolves the turn inline (engine work only,
+  milliseconds), and narration is dispatched `afterResponse()` so the player
+  watches the dice table while Claude writes. There is no cadence window.
 - Scheduler (prod): `php artisan schedule:work` — runs `game:resolve-due`
-  every 5 min and the activity-gated `game:evolve` (see above).
-- `GAME_TURN_CADENCE_MINUTES=0` in `.env` resolves turns inline on submit
-  (dev convenience). Production default is 30.
+  every minute and the activity-gated `game:evolve` (see above).
+  `game:resolve-due` is a SAFETY NET, not the main path: it recovers turns
+  still locked past `GAME_ABANDONED_TURN_MINUTES` (a request that died
+  mid-resolution) and narrates any resolved turn whose Claude call fell over.
 - Claude CLI config: `CLAUDE_BINARY` / `CLAUDE_MODEL` in `.env`; VAPID keys
   already generated (`php artisan webpush:vapid` — needs `OPENSSL_CONF` set
   to a real openssl.cnf on Windows, e.g. Git's).

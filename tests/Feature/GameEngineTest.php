@@ -5,6 +5,7 @@ namespace Tests\Feature;
 use App\Game\Engine\CardComposer;
 use App\Game\Engine\ChapterEntities;
 use App\Game\Engine\ChapterEvents;
+use App\Game\Engine\RollTable;
 use App\Game\Engine\TurnResolver;
 use App\Game\Meters;
 use App\Game\StoryAspects;
@@ -12,6 +13,7 @@ use App\Game\WorldFlavor;
 use App\Models\Actor;
 use App\Models\Campaign;
 use App\Models\Character;
+use App\Models\Item;
 use App\Models\Scene;
 use App\Models\SceneFeature;
 use App\Models\Turn;
@@ -250,22 +252,40 @@ class GameEngineTest extends TestCase
         $this->assertSame(Turn::STATUS_COMPLETE, $turn->status);
     }
 
-    public function test_the_form_locks_after_submission()
+    public function test_submitting_resolves_the_turn_immediately()
     {
         $campaign = $this->createCatCampaign();
         $turn = app(TurnStarter::class)->openFirstTurn($campaign);
         $main = collect($turn->cards['main'])->first(fn ($c) => $c['verb'] === 'wait');
 
-        config(['game.turn_cadence_minutes' => 30]);
         $this->actingAs($campaign->user);
+        $this->mock(Narrator::class)->shouldReceive('narrate');
 
         $this->post("/play/{$campaign->id}", ['main' => ['card_id' => $main['id']]])
             ->assertRedirect("/play/{$campaign->id}");
 
-        $this->assertSame(Turn::STATUS_LOCKED, $turn->fresh()->status);
+        // No waiting window: the turn is resolved by the time the redirect
+        // lands, and the next one is already open.
+        $this->assertSame(Turn::STATUS_COMPLETE, $turn->fresh()->status);
+        $this->assertNotNull($turn->fresh()->resolved_at);
+        $this->assertSame(Turn::STATUS_AWAITING, $campaign->fresh()->currentTurn->status);
+    }
 
-        // one form per turn: a second submission is refused until resolution
-        $this->post("/play/{$campaign->id}", ['main' => ['card_id' => $main['id']]])
+    /**
+     * Resolution is inline, so the window in which a second submission could
+     * arrive for the same turn is now milliseconds wide — but it is not zero,
+     * and a turn caught mid-resolution must still refuse one.
+     */
+    public function test_a_turn_already_in_flight_refuses_a_second_submission()
+    {
+        $campaign = $this->createCatCampaign();
+        $turn = app(TurnStarter::class)->openFirstTurn($campaign);
+        $main = collect($turn->cards['main'])->first(fn ($c) => $c['verb'] === 'wait');
+
+        $turn->update(['status' => Turn::STATUS_LOCKED, 'submitted_at' => now()]);
+
+        $this->actingAs($campaign->user)
+            ->post("/play/{$campaign->id}", ['main' => ['card_id' => $main['id']]])
             ->assertStatus(409);
     }
 
@@ -274,7 +294,6 @@ class GameEngineTest extends TestCase
         $campaign = $this->createCatCampaign();
         app(TurnStarter::class)->openFirstTurn($campaign);
 
-        config(['game.turn_cadence_minutes' => 30]);
         $this->actingAs($campaign->user);
 
         $this->from("/play/{$campaign->id}")
@@ -283,28 +302,32 @@ class GameEngineTest extends TestCase
             ->assertSessionHasErrors('main');
     }
 
-    public function test_a_committed_turn_can_be_resolved_on_demand()
+    /**
+     * The sweep is a recovery path now, not the main one. A turn that has
+     * only just been locked belongs to the request still resolving it — the
+     * sweep must not race in and resolve it a second time.
+     */
+    public function test_the_sweep_leaves_a_freshly_locked_turn_to_the_request_resolving_it()
     {
         $campaign = $this->createCatCampaign();
         $turn = app(TurnStarter::class)->openFirstTurn($campaign);
         $main = collect($turn->cards['main'])->first(fn ($c) => $c['verb'] === 'wait');
+        $turn->update([
+            'status' => Turn::STATUS_LOCKED,
+            'submission' => ['main' => ['card_id' => $main['id'], 'modifiers' => []]],
+            'submitted_at' => now(),
+        ]);
 
-        config(['game.turn_cadence_minutes' => 30]);
-        $this->actingAs($campaign->user);
-        $this->mock(Narrator::class)->shouldReceive('narrate');
-
-        // Nothing committed yet: resolve-now must refuse (no Claude run
-        // can ever fire without a player choice behind it).
-        $this->post("/play/{$campaign->id}/resolve-now")->assertStatus(409);
-
-        $this->post("/play/{$campaign->id}", ['main' => ['card_id' => $main['id']]]);
+        $this->assertFalse($turn->fresh()->isAbandoned());
+        $this->artisan('game:resolve-due')->assertSuccessful();
         $this->assertSame(Turn::STATUS_LOCKED, $turn->fresh()->status);
 
-        $this->post("/play/{$campaign->id}/resolve-now")
-            ->assertRedirect("/play/{$campaign->id}");
-
+        // Once the window has passed, the request that held it is gone and
+        // the sweep takes over.
+        $turn->update(['submitted_at' => now()->subMinutes(5)]);
+        $this->assertTrue($turn->fresh()->isAbandoned());
+        $this->artisan('game:resolve-due')->assertSuccessful();
         $this->assertSame(Turn::STATUS_COMPLETE, $turn->fresh()->status);
-        $this->assertSame(Turn::STATUS_AWAITING, $campaign->fresh()->currentTurn->status);
     }
 
     public function test_play_page_shows_the_latest_chapter_not_the_prologue()
@@ -369,7 +392,7 @@ class GameEngineTest extends TestCase
         $this->assertSame(['e1', 'e2', 'e3'], array_column($events, 'id'));
         $this->assertSame(['highground', 'attack', 'injury'], array_column($events, 'icon'));
         $this->assertSame('Wounded — 2 damage taken', $events[2]['label']);
-        $this->assertSame(['roll' => 18, 'total' => 20, 'difficulty' => 10], $events[1]['roll']);
+        $this->assertSame(['roll' => 18, 'total' => 20, 'difficulty' => 10, 'crit' => null], $events[1]['roll']);
 
         // The anchors live only in the play page's edition; every other
         // consumer (book, push, prompts) reads the plain body.
@@ -1569,6 +1592,371 @@ class GameEngineTest extends TestCase
         $names = collect(ChapterEntities::for($campaign->fresh(), null))->pluck('name');
 
         $this->assertTrue($names->contains('the warehouse roof'));
+    }
+
+    /**
+     * The two faces that overrule the arithmetic. The dice are seeded from the
+     * turn id, so rather than fight the seed for a chosen face this walks a
+     * long run of turns and asserts the rule holds every time it comes up —
+     * and that over that many throws, both faces do come up.
+     */
+    public function test_natural_twenty_and_natural_one_overrule_the_margin()
+    {
+        $campaign = $this->createCatCampaign();
+        app(TurnStarter::class)->openFirstTurn($campaign);
+        $full = $campaign->character->meters;
+
+        $crits = ['success' => 0, 'failure' => 0];
+
+        for ($i = 0; $i < 140; $i++) {
+            $campaign = $campaign->fresh();
+            // Keep the run clean: nothing wanders in to wound the character
+            // and end the loop early on a death.
+            $campaign->activeScene->actors()->delete();
+            $campaign->character->update(['meters' => $full]);
+
+            $turn = $this->refreshCards($campaign->currentTurn);
+            $card = collect($turn->cards['main'])->firstWhere('verb', 'improvise');
+            $this->assertNotNull($card);
+
+            $turn->update([
+                'status' => Turn::STATUS_LOCKED,
+                'submission' => ['main' => ['card_id' => $card['id'], 'modifiers' => []]],
+                'submitted_at' => now(),
+            ]);
+            app(TurnResolver::class)->resolve($turn->fresh());
+
+            $beat = collect($turn->fresh()->resolution['beats'])->firstWhere('verb', 'improvise');
+            if ($beat === null) {
+                continue;
+            }
+
+            if ($beat['roll'] === 20) {
+                $crits['success']++;
+                $this->assertSame('success', $beat['crit']);
+                $this->assertSame('strong', $beat['degree']);
+            } elseif ($beat['roll'] === 1) {
+                $crits['failure']++;
+                $this->assertSame('failure', $beat['crit']);
+                $this->assertSame('failure', $beat['degree']);
+            } else {
+                $this->assertNull($beat['crit']);
+            }
+        }
+
+        $this->assertGreaterThan(0, $crits['success'], 'no natural 20 in 140 throws');
+        $this->assertGreaterThan(0, $crits['failure'], 'no natural 1 in 140 throws');
+    }
+
+    /**
+     * A crit is real in the state, not only loud in the prose: the fumble
+     * spends the ground the character was standing on and turns the effort
+     * back on them.
+     */
+    public function test_a_critical_failure_costs_the_ground_it_was_standing_on()
+    {
+        $campaign = $this->createCatCampaign();
+        app(TurnStarter::class)->openFirstTurn($campaign);
+        $full = $campaign->character->meters;
+
+        for ($i = 0; $i < 140; $i++) {
+            $campaign = $campaign->fresh();
+            $campaign->activeScene->actors()->delete();
+            $campaign->character->update(['meters' => $full]);
+            // Standing on the high ground is what the fumble has to cost.
+            $scene = $campaign->activeScene;
+            $scene->update(['state' => array_merge($scene->state ?? [], ['elevated' => true])]);
+
+            $turn = $this->refreshCards($campaign->currentTurn);
+            $card = collect($turn->cards['main'])->firstWhere('verb', 'improvise');
+            $turn->update([
+                'status' => Turn::STATUS_LOCKED,
+                'submission' => ['main' => ['card_id' => $card['id'], 'modifiers' => []]],
+                'submitted_at' => now(),
+            ]);
+            app(TurnResolver::class)->resolve($turn->fresh());
+
+            $beat = collect($turn->fresh()->resolution['beats'])->firstWhere('verb', 'improvise');
+            if (($beat['crit'] ?? null) !== 'failure') {
+                continue;
+            }
+
+            $facts = implode(' ', $beat['facts']);
+            $this->assertStringContainsString('CRITICAL FAILURE', $facts);
+            $this->assertStringContainsString('the high ground', $facts);
+            // The height is scene state, not just a condition flag.
+            $this->assertFalse((bool) ($campaign->fresh()->activeScene->state['elevated'] ?? false));
+
+            return;
+        }
+
+        $this->fail('no natural 1 in 140 throws');
+    }
+
+    /**
+     * A crit that only changes an adjective is not a crit. The triumph has to
+     * leave something behind that outlives the beat — and it has to be named
+     * neutrally, so the land the campaign was forged in decides what a hole
+     * in the ground actually is.
+     */
+    public function test_a_critical_success_on_force_tears_the_ground_open()
+    {
+        $campaign = $this->createCatCampaign();
+        app(TurnStarter::class)->openFirstTurn($campaign);
+        $full = $campaign->character->meters;
+
+        for ($i = 0; $i < 200; $i++) {
+            $campaign = $campaign->fresh();
+            $scene = $campaign->activeScene;
+            $scene->actors()->delete();
+            $scene->features()->where('source', 'crit')->delete();
+            $campaign->character->update(['meters' => $full]);
+            $this->placeActor($scene, 'a dockside tough');
+
+            $turn = $this->refreshCards($campaign->currentTurn);
+            $strike = collect($turn->cards['main'])->firstWhere('verb', 'strike');
+            if ($strike === null) {
+                continue;
+            }
+            $turn->update([
+                'status' => Turn::STATUS_LOCKED,
+                'submission' => ['main' => ['card_id' => $strike['id'], 'modifiers' => []]],
+                'submitted_at' => now(),
+            ]);
+            app(TurnResolver::class)->resolve($turn->fresh());
+
+            $beat = collect($turn->fresh()->resolution['beats'])->firstWhere('verb', 'strike');
+            if (($beat['crit'] ?? null) !== 'success') {
+                continue;
+            }
+
+            $breach = $scene->fresh()->features()->where('feature_type', 'crit_breach')->first();
+            $this->assertNotNull($breach, 'a critical blow left no mark on the scene');
+            $this->assertSame('crit', $breach->source);
+            // Neutral ground: the engine says torn open, never what is under
+            // it. Naming the fire in the crevasse is the narrator's job, in
+            // the land this campaign was forged in.
+            $this->assertStringNotContainsStringIgnoringCase('fire', $breach->name);
+            $this->assertStringContainsString('torn open', implode(' ', $beat['facts']));
+
+            return;
+        }
+
+        $this->fail('no critical success on a strike in 200 throws');
+    }
+
+    /**
+     * The signature fumble: the weapon leaves their hands, and the loss is
+     * real in the form, not only in the prose — an item's granted powers go
+     * with it, and getting it back costs a whole beat.
+     */
+    public function test_a_critical_failure_sends_the_weapon_somewhere_they_must_go_and_get_it()
+    {
+        $campaign = $this->createCatCampaign();
+        app(TurnStarter::class)->openFirstTurn($campaign);
+        $full = $campaign->character->meters;
+
+        $item = Item::create([
+            'slug' => 'harbor-iron-hook',
+            'name' => 'the harbor-iron hook',
+            'description' => 'A boarding hook worn smooth by other hands.',
+            'power' => 2,
+            'grants' => [['capability' => 'break', 'magnitude' => 3]],
+        ]);
+        $campaign->character->items()->attach($item->id, ['equipped' => true, 'charges' => null]);
+
+        for ($i = 0; $i < 200; $i++) {
+            $campaign = $campaign->fresh();
+            $scene = $campaign->activeScene;
+            $scene->actors()->delete();
+            $scene->features()->where('source', 'crit')->delete();
+            $campaign->character->update(['meters' => $full]);
+            $campaign->character->items()->updateExistingPivot($item->id, ['equipped' => true]);
+            $this->placeActor($scene, 'a dockside tough');
+
+            $turn = $this->refreshCards($campaign->currentTurn);
+            $strike = collect($turn->cards['main'])->firstWhere('verb', 'strike');
+            if ($strike === null) {
+                continue;
+            }
+            $turn->update([
+                'status' => Turn::STATUS_LOCKED,
+                'submission' => ['main' => ['card_id' => $strike['id'], 'modifiers' => []]],
+                'submitted_at' => now(),
+            ]);
+            app(TurnResolver::class)->resolve($turn->fresh());
+
+            $beat = collect($turn->fresh()->resolution['beats'])->firstWhere('verb', 'strike');
+            if (($beat['crit'] ?? null) !== 'failure') {
+                continue;
+            }
+
+            $character = $campaign->character->fresh()->load('items');
+            $this->assertFalse((bool) $character->items->firstWhere('id', $item->id)->pivot->equipped);
+            // Unequipped is not cosmetic: the granted capability goes too.
+            $this->assertArrayNotHasKey('break', $character->effectiveCapabilities());
+
+            $dropped = $scene->fresh()->features()->where('feature_type', 'dropped_item')->first();
+            $this->assertNotNull($dropped);
+
+            // And it is recoverable — no capability gates picking your own
+            // gear back up, but it costs a whole main beat.
+            $next = $this->refreshCards($campaign->fresh()->currentTurn);
+            $recover = collect($next->cards['main'])->firstWhere('verb', 'recover');
+            $this->assertNotNull($recover, 'the dropped weapon was unreachable');
+            $this->assertSame($dropped->id, $recover['target']['id']);
+
+            return;
+        }
+
+        $this->fail('no critical failure on a strike in 200 throws');
+    }
+
+    public function test_the_narration_prompt_makes_a_crit_the_chapter_spine()
+    {
+        $campaign = $this->createCatCampaign();
+        $turn = app(TurnStarter::class)->openFirstTurn($campaign);
+        $turn->update([
+            'status' => Turn::STATUS_COMPLETE,
+            'branch_trigger' => 'decision_point',
+            'resolution' => [
+                'beats' => [[
+                    'slot' => 'main', 'verb' => 'strike',
+                    'target' => ['type' => 'actor', 'id' => 1, 'name' => 'a dockside tough'],
+                    'degree' => 'strong', 'roll' => 20, 'total' => 22, 'difficulty' => 15,
+                    'facts' => ['The ground is torn open where the blow struck.'],
+                    'skipped' => false, 'crit' => 'success',
+                ]],
+                'scene_reaction' => [],
+                'reaction_rolls' => [],
+                'new_threat' => null,
+            ],
+        ]);
+
+        $prompt = (new \ReflectionMethod(Narrator::class, 'buildPrompt'))
+            ->invoke(app(Narrator::class), $turn->fresh());
+
+        $this->assertStringContainsString('The moment this chapter turns on', $prompt);
+        $this->assertStringContainsString('CRITICAL SUCCESS on strike (a dockside tough)', $prompt);
+        $this->assertStringContainsString('what lies UNDER the ground in THIS land', $prompt);
+        // Scale is the narrator's; outcomes are not. Without that bound a
+        // "make it enormous" instruction invents deaths the engine never rolled.
+        $this->assertStringContainsString('Scale is yours; outcomes are not', $prompt);
+
+        // An ordinary turn must not carry instructions to be enormous.
+        $turn->update(['resolution' => array_merge($turn->resolution, [
+            'beats' => [[
+                'slot' => 'main', 'verb' => 'strike', 'target' => null,
+                'degree' => 'success', 'roll' => 12, 'total' => 14, 'difficulty' => 12,
+                'facts' => ['The strike wounded the tough.'], 'skipped' => false, 'crit' => null,
+            ]],
+        ])]);
+        $plain = (new \ReflectionMethod(Narrator::class, 'buildPrompt'))
+            ->invoke(app(Narrator::class), $turn->fresh());
+        $this->assertStringNotContainsString('The moment this chapter turns on', $plain);
+    }
+
+    public function test_the_scene_records_its_own_dice_not_only_its_prose()
+    {
+        $campaign = $this->createCatCampaign();
+        app(TurnStarter::class)->openFirstTurn($campaign);
+        $scene = $campaign->activeScene;
+        $scene->actors()->delete();
+        $this->placeActor($scene, 'a dockside tough');
+
+        $turn = $this->refreshCards($campaign->fresh()->currentTurn);
+        $wait = collect($turn->cards['main'])->firstWhere('verb', 'wait');
+        $turn->update([
+            'status' => Turn::STATUS_LOCKED,
+            'submission' => ['main' => ['card_id' => $wait['id'], 'modifiers' => []]],
+            'submitted_at' => now(),
+        ]);
+        app(TurnResolver::class)->resolve($turn->fresh());
+
+        $rolls = $turn->fresh()->resolution['reaction_rolls'];
+        $this->assertCount(1, $rolls);
+        $this->assertSame('a dockside tough', $rolls[0]['actor']);
+        $this->assertSame('enemy', $rolls[0]['kind']);
+        // The die the player never got to see is now data, not a sentence to
+        // be regex'd back out of the narration.
+        $this->assertGreaterThanOrEqual(1, $rolls[0]['roll']);
+        $this->assertLessThanOrEqual(20, $rolls[0]['roll']);
+        $this->assertGreaterThan(0, $rolls[0]['difficulty']);
+        $this->assertNotNull($rolls[0]['outcome']);
+    }
+
+    public function test_the_dice_table_derives_from_the_resolution_and_bands_the_difficulty()
+    {
+        $campaign = $this->createCatCampaign();
+        $turn = app(TurnStarter::class)->openFirstTurn($campaign);
+        $turn->update(['resolution' => [
+            'beats' => [
+                ['slot' => 'pre', 'verb' => 'ready', 'target' => null, 'degree' => 'success', 'roll' => 0, 'total' => 0, 'difficulty' => 0, 'facts' => ['They set themselves.'], 'skipped' => false, 'crit' => null],
+                ['slot' => 'main', 'verb' => 'strike', 'target' => ['type' => 'actor', 'id' => 1, 'name' => 'a dockside tough'], 'degree' => 'strong', 'roll' => 20, 'total' => 22, 'difficulty' => 15, 'facts' => ['CRITICAL SUCCESS: it went perfectly.', 'The blow felled the tough.'], 'skipped' => false, 'crit' => 'success'],
+                ['slot' => 'post', 'verb' => 'loot', 'target' => null, 'degree' => 'failure', 'roll' => 3, 'total' => 3, 'difficulty' => 8, 'facts' => ['Nothing worth taking.'], 'skipped' => true, 'crit' => null],
+            ],
+            'scene_reaction' => [],
+            'reaction_rolls' => [[
+                'actor' => 'a dockside tough', 'kind' => 'enemy', 'verb' => 'attack',
+                'label' => 'Presses the attack', 'roll' => 1, 'total' => 3, 'difficulty' => 12,
+                'crit' => 'failure', 'degree' => 'failure', 'outcome' => 'Overreached and left themselves open',
+            ]],
+            'new_threat' => null,
+        ]]);
+
+        $rows = RollTable::for($turn->fresh());
+
+        // Quiet beats cast no die and skipped beats never happened; a table
+        // of blank cards would teach the player to distrust it.
+        $this->assertSame(['r1', 'r2'], array_column($rows, 'id'));
+        $this->assertSame(['player', 'foe'], array_column($rows, 'side'));
+
+        $this->assertSame('The Cat', $rows[0]['actor']);
+        $this->assertSame('Strike — a dockside tough', $rows[0]['action']);
+        $this->assertSame('Hard', $rows[0]['band']);
+        $this->assertSame(2, $rows[0]['modifier']);
+        $this->assertSame('success', $rows[0]['crit']);
+        // The crit banner is a badge on the card; the line beneath it says
+        // what actually changed.
+        $this->assertSame('The blow felled the tough.', $rows[0]['outcome']);
+
+        $this->assertSame('a dockside tough', $rows[1]['actor']);
+        $this->assertSame('Medium', $rows[1]['band']);
+        $this->assertSame('failure', $rows[1]['crit']);
+    }
+
+    public function test_the_dice_table_gates_the_chapter_exactly_once()
+    {
+        $campaign = $this->createCatCampaign();
+        app(TurnStarter::class)->openFirstTurn($campaign);
+        $scene = $campaign->activeScene;
+        $scene->actors()->delete();
+
+        $turn = $this->refreshCards($campaign->fresh()->currentTurn);
+        $card = collect($turn->cards['main'])->firstWhere('verb', 'improvise');
+        $turn->update([
+            'status' => Turn::STATUS_LOCKED,
+            'submission' => ['main' => ['card_id' => $card['id'], 'modifiers' => []]],
+            'submitted_at' => now(),
+        ]);
+        app(TurnResolver::class)->resolve($turn->fresh());
+
+        $this->actingAs($campaign->user)
+            ->get(route('play.show', $campaign))
+            ->assertOk()
+            ->assertInertia(fn ($page) => $page
+                ->where('rollTable.turn_id', $turn->id)
+                ->has('rollTable.rows', 1));
+
+        $this->actingAs($campaign->user)
+            ->post(route('play.rolls-seen', $campaign), ['turn_id' => $turn->id])
+            ->assertRedirect();
+
+        // Watched once is watched for good — on this device and every other.
+        $this->assertNotNull($turn->fresh()->rolls_seen_at);
+        $this->actingAs($campaign->user)
+            ->get(route('play.show', $campaign))
+            ->assertInertia(fn ($page) => $page->where('rollTable', null));
     }
 
     public function test_widget_endpoint_requires_a_valid_token()

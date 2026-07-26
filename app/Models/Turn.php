@@ -10,7 +10,7 @@ use Illuminate\Database\Eloquent\Relations\HasOne;
 #[Fillable([
     'campaign_id', 'scene_id', 'number', 'status', 'situation', 'cards',
     'submission', 'resolution', 'branch_trigger', 'meters_snapshot',
-    'submitted_at', 'resolved_at', 'narrated_at',
+    'submitted_at', 'resolved_at', 'narrated_at', 'rolls_seen_at',
 ])]
 class Turn extends Model
 {
@@ -34,6 +34,7 @@ class Turn extends Model
             'submitted_at' => 'datetime',
             'resolved_at' => 'datetime',
             'narrated_at' => 'datetime',
+            'rolls_seen_at' => 'datetime',
         ];
     }
 
@@ -57,14 +58,20 @@ class Turn extends Model
         return $this->status === self::STATUS_AWAITING;
     }
 
-    public function isDueForResolution(): bool
+    /**
+     * A turn nobody is resolving any more. Submission resolves inline, so a
+     * turn still locked minutes later means the request carrying it died —
+     * the sweep is a recovery path, not the normal one, and the window keeps
+     * it from racing a request that is merely slow.
+     */
+    public function isAbandoned(): bool
     {
         if ($this->status !== self::STATUS_LOCKED || $this->submitted_at === null) {
             return false;
         }
 
         return $this->submitted_at
-            ->addMinutes((int) config('game.turn_cadence_minutes'))
+            ->addMinutes((int) config('game.abandoned_turn_minutes'))
             ->isPast();
     }
 }

@@ -1,6 +1,12 @@
 <script setup lang="ts">
 import { Head, router } from '@inertiajs/vue3';
-import { computed, onMounted, onUnmounted, ref } from 'vue';
+import {
+    computed,
+    defineAsyncComponent,
+    onMounted,
+    onUnmounted,
+    ref,
+} from 'vue';
 import AmbientBackdrop from '@/components/game/AmbientBackdrop.vue';
 import SlotPicker from '@/components/game/SlotPicker.vue';
 import { enablePush } from '@/lib/push';
@@ -9,6 +15,7 @@ import type {
     ChapterEvent,
     CharacterItem,
     CharacterMeters,
+    RollTable,
     SlotChoice,
     TurnCards,
 } from '@/types/game';
@@ -40,8 +47,12 @@ const props = defineProps<{
         status: string;
         situation: string;
         cards: TurnCards | null;
-        resolves_at: string | null;
     } | null;
+    /**
+     * A turn is resolved but Claude has not written its chapter yet. Turns
+     * resolve inline now, so this is the only wait left in the game.
+     */
+    narrating: boolean;
     latestChapter: {
         number: number;
         kind: string;
@@ -50,7 +61,19 @@ const props = defineProps<{
         events: ChapterEvent[];
         entities: ChapterEntity[];
     } | null;
+    /**
+     * The dice a resolved turn cast, when the player has not watched them
+     * fall yet. It stands between them and the chapter exactly once — the
+     * engine and the narrator ran on their own schedule regardless.
+     */
+    rollTable: RollTable | null;
 }>();
+
+// The 3D renderer is most of a megabyte and is wanted on maybe one page load
+// in three. It arrives with the table, not with the play page.
+const DiceTable = defineAsyncComponent(
+    () => import('@/components/game/DiceTable.vue'),
+);
 
 const pre = ref<SlotChoice | null>(null);
 const main = ref<SlotChoice | null>(null);
@@ -64,9 +87,14 @@ const showGrowth = ref(false);
 const showEnd = ref(false);
 const growthText = ref('');
 
+// Two different waits, and only the second one still exists in normal play.
+// `locked` is a turn caught mid-resolution — milliseconds, or a crashed
+// request the sweep is about to recover. `narrating` is Claude writing the
+// chapter the player's dice have already decided.
 const locked = computed(
     () => props.turn !== null && props.turn.status !== 'awaiting_player',
 );
+const waiting = computed(() => locked.value || props.narrating);
 
 // The story drives the situation: when the latest page is a real chapter it
 // already ends inside the current moment, so the engine's scene inventory
@@ -297,49 +325,38 @@ const runningCost = computed(() => {
     return Object.entries(totals);
 });
 
-const countdown = ref('');
 let timer: ReturnType<typeof setInterval> | null = null;
 
-function tick() {
-    if (!props.turn?.resolves_at) {
-        countdown.value = '';
-        return;
-    }
-    const remaining = new Date(props.turn.resolves_at).getTime() - Date.now();
-    if (remaining <= 0) {
-        countdown.value = 'any moment now';
-        return;
-    }
-    const minutes = Math.floor(remaining / 60000);
-    const seconds = Math.floor((remaining % 60000) / 1000);
-    countdown.value = `${minutes}:${String(seconds).padStart(2, '0')}`;
-}
-
 onMounted(() => {
-    tick();
+    // The only wait left is Claude writing, and it is short enough to poll
+    // properly rather than sample: every couple of seconds until the chapter
+    // lands, then nothing.
     timer = setInterval(() => {
-        tick();
-        // While locked, poll for the resolved chapter.
-        if (locked.value && Math.random() < 0.2)
-            router.reload({ only: ['turn', 'latestChapter', 'character'] });
-    }, 5000);
+        if (waiting.value)
+            router.reload({
+                only: ['turn', 'latestChapter', 'character', 'narrating'],
+            });
+    }, 2500);
     void enablePush();
 });
 onUnmounted(() => {
     if (timer) clearInterval(timer);
 });
 
-const resolvingNow = ref(false);
+// The table is shown once. Stamping it server-side means the same dice never
+// fall twice — not on a reload, and not on the other device.
+const clearingRolls = ref(false);
 
-// The impatience valve: skip the rest of the idle wait. The engine still
-// resolves only the committed submission — this changes when, never what.
-function resolveNow() {
-    if (resolvingNow.value) return;
-    resolvingNow.value = true;
+function rollsSeen() {
+    if (!props.rollTable || clearingRolls.value) return;
+    clearingRolls.value = true;
     router.post(
-        `/play/${props.campaign.id}/resolve-now`,
-        {},
-        { onFinish: () => (resolvingNow.value = false) },
+        `/play/${props.campaign.id}/rolls-seen`,
+        { turn_id: props.rollTable.turn_id },
+        {
+            preserveScroll: true,
+            onFinish: () => (clearingRolls.value = false),
+        },
     );
 }
 
@@ -403,6 +420,16 @@ const healthPct = computed(
 
 <template>
     <Head :title="campaign.name" />
+
+    <!-- The beat between choosing and reading: what the engine already rolled,
+         shown before the chapter that was written from it. -->
+    <DiceTable
+        v-if="rollTable"
+        :key="rollTable.turn_id"
+        :turn-number="rollTable.turn_number"
+        :rows="rollTable.rows"
+        @continue="rollsSeen"
+    />
 
     <div
         class="relative isolate mx-auto flex w-full max-w-2xl flex-1 flex-col gap-5 p-4 pb-16"
@@ -605,11 +632,12 @@ const healthPct = computed(
             </Transition>
         </div>
 
-        <!-- Latest chapter — hidden while the world turns: once a choice is
-             committed, the page shows only that the chapter is being updated,
-             not the previous chapter and its actions. -->
+        <!-- Latest chapter — hidden while the world turns. Once a choice is
+             committed the page must not re-show the PREVIOUS chapter: until
+             the new one is written, the only honest thing on screen is that
+             it is being written. -->
         <article
-            v-if="latestChapter && !locked"
+            v-if="latestChapter && !waiting"
             ref="chapterEl"
             :key="`${latestChapter.kind}-${latestChapter.number}`"
             class="sc-rise relative rounded-xl border border-sidebar-border/70 bg-background/60 p-5 backdrop-blur-sm dark:border-sidebar-border"
@@ -752,6 +780,22 @@ const healthPct = computed(
                             {{ detail.roll.total }}</template
                         >
                         vs {{ detail.roll.difficulty }}
+                        <span
+                            v-if="detail.roll.crit"
+                            class="font-sans font-bold"
+                            :class="
+                                detail.roll.crit === 'success'
+                                    ? 'text-amber-600 dark:text-amber-300'
+                                    : 'text-rose-600 dark:text-rose-400'
+                            "
+                        >
+                            ·
+                            {{
+                                detail.roll.crit === 'success'
+                                    ? '★ NAT 20'
+                                    : '☠ NAT 1'
+                            }}
+                        </span>
                     </p>
                 </div>
             </Transition>
@@ -763,7 +807,7 @@ const healthPct = computed(
             class="sc-rise rounded-xl border border-sidebar-border/70 bg-background/60 p-5 backdrop-blur-sm dark:border-sidebar-border"
             style="animation-delay: 160ms"
         >
-            <template v-if="showSituation && !locked">
+            <template v-if="showSituation && !waiting">
                 <p
                     class="mb-1 text-xs tracking-widest text-muted-foreground uppercase"
                 >
@@ -772,14 +816,14 @@ const healthPct = computed(
                 <p class="mb-4 text-sm">{{ turn.situation }}</p>
             </template>
             <p
-                v-else-if="!locked"
+                v-else-if="!waiting"
                 class="mb-4 text-xs tracking-widest text-muted-foreground uppercase"
             >
                 The story waits on you
             </p>
 
             <div
-                v-if="locked"
+                v-if="waiting"
                 class="sc-breathe rounded-xl border border-violet-500/25 bg-muted/50 p-6 text-center text-sm text-muted-foreground"
             >
                 <div
@@ -799,35 +843,23 @@ const healthPct = computed(
                     />
                 </div>
                 <p class="font-medium text-foreground">
-                    Your choice is made. The chapter is being updated.
-                </p>
-                <p v-if="resolvingNow" class="mt-1">
-                    The chapter is being written…
-                </p>
-                <p v-else-if="countdown" class="mt-1">
-                    The next chapter arrives in
-                    <span
-                        :class="
-                            countdown === 'any moment now'
-                                ? 'animate-pulse italic'
-                                : 'font-mono'
-                        "
-                        >{{ countdown }}</span
+                    <template v-if="locked"
+                        >Your choice is made. The dice are falling.</template
+                    >
+                    <template v-else
+                        >The dice have fallen. The chapter is being
+                        written…</template
                     >
                 </p>
-                <p v-else class="mt-1">The next chapter is being written…</p>
-                <button
-                    v-if="turn.status === 'locked'"
-                    :disabled="resolvingNow"
-                    class="mt-3 rounded-md border border-input px-4 py-2 text-sm font-medium text-foreground transition hover:border-violet-500/60 hover:text-violet-600 active:scale-95 disabled:opacity-50 dark:hover:text-violet-400"
-                    @click="resolveNow"
-                >
-                    {{
-                        resolvingNow
-                            ? 'Turning the page…'
-                            : "Don't make me wait — turn the page now"
-                    }}
-                </button>
+                <p class="mt-1">
+                    <template v-if="locked"
+                        >This takes a moment, no longer.</template
+                    >
+                    <template v-else
+                        >It arrives on this page the moment it is
+                        finished.</template
+                    >
+                </p>
             </div>
 
             <form

@@ -3,7 +3,6 @@
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
-use App\Models\Turn;
 use App\Models\User;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -33,9 +32,12 @@ class WidgetController extends Controller
         $health = $character?->meters['health'];
         $scene = $campaign->activeScene;
 
-        $resolvesAt = $turn?->status === Turn::STATUS_LOCKED && $turn->submitted_at !== null
-            ? $turn->submitted_at->addMinutes((int) config('game.turn_cadence_minutes'))->toIso8601String()
-            : null;
+        // Turns resolve the instant they are submitted, so the only thing the
+        // widget can ever be waiting on is Claude finishing the chapter.
+        $narrating = $campaign->turns()
+            ->whereNotNull('resolved_at')
+            ->whereNull('narrated_at')
+            ->exists();
 
         return response()->json([
             'active' => true,
@@ -46,7 +48,7 @@ class WidgetController extends Controller
             // The widget draws a real health bar; the meter sentence is noise.
             'situation' => Str::limit(trim(preg_replace('/\s*Health \d+\/\d+\./', '', $turn?->situation ?? '')), 220),
             'awaiting_player' => $turn?->isOpen() ?? false,
-            'resolves_at' => $resolvesAt,
+            'narrating' => $narrating,
             'turn_number' => $turn?->number,
             'chapter_count' => $campaign->chapters()->count(),
             'companions' => $scene?->actors()

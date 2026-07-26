@@ -31,7 +31,7 @@ Route::middleware(['auth', 'verified'])->group(function () {
 
     Route::get('play/{campaign}', [PlayController::class, 'show'])->name('play.show');
     Route::post('play/{campaign}', [PlayController::class, 'submit'])->name('play.submit');
-    Route::post('play/{campaign}/resolve-now', [PlayController::class, 'resolveNow'])->name('play.resolve-now');
+    Route::post('play/{campaign}/rolls-seen', [PlayController::class, 'rollsSeen'])->name('play.rolls-seen');
 
     Route::get('campaigns/{campaign}/book', [BookController::class, 'show'])->name('book.show');
     Route::get('campaigns/{campaign}/book/download', [BookController::class, 'download'])->name('book.download');

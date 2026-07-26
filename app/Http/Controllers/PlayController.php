@@ -4,6 +4,7 @@ namespace App\Http\Controllers;
 
 use App\Game\Engine\ChapterEntities;
 use App\Game\Engine\ChapterEvents;
+use App\Game\Engine\RollTable;
 use App\Game\Engine\TurnResolver;
 use App\Game\TurnSlot;
 use App\Models\Campaign;
@@ -31,11 +32,18 @@ class PlayController extends Controller
         $latestChapter = $campaign->chapters()->reorder('number', 'desc')->first();
         $chapterTurn = $latestChapter?->turn;
 
-        $resolvesAt = $turn?->status === Turn::STATUS_LOCKED && $turn->submitted_at !== null
-            ? $turn->submitted_at->addMinutes((int) config('game.turn_cadence_minutes'))->toIso8601String()
-            : null;
+        // Resolution is inline, so the only wait left is Claude writing the
+        // chapter. That wait has to be visible: the turn behind it is already
+        // complete, and without this the page would quietly re-show the
+        // PREVIOUS chapter as though it were the new one.
+        $narrating = $campaign->turns()
+            ->whereNotNull('resolved_at')
+            ->whereNull('narrated_at')
+            ->exists();
 
         return Inertia::render('Play', [
+            'narrating' => $narrating,
+            'rollTable' => $this->pendingRollTable($campaign),
             'campaign' => $campaign->only(['id', 'name', 'status']),
             'character' => [
                 'name' => $character->name,
@@ -59,7 +67,6 @@ class PlayController extends Controller
                 'status' => $turn->status,
                 'situation' => $turn->situation,
                 'cards' => $turn->isOpen() ? $turn->cards : null,
-                'resolves_at' => $resolvesAt,
             ],
             'latestChapter' => $latestChapter === null ? null : [
                 ...$latestChapter->only(['number', 'kind', 'intent_line', 'body']),
@@ -74,9 +81,64 @@ class PlayController extends Controller
     }
 
     /**
+     * The dice a resolved turn cast, if the player has not watched them fall
+     * yet. Resolution and narration are untouched by this: the engine rolled
+     * on its own schedule and Claude wrote on its own, so an idle player
+     * still wakes to a finished chapter. The table only holds that chapter
+     * back for as long as it takes to show the numbers behind it.
+     */
+    private function pendingRollTable(Campaign $campaign): ?array
+    {
+        $turn = $campaign->turns()
+            ->whereNotNull('resolved_at')
+            ->whereNull('rolls_seen_at')
+            ->reorder('number', 'desc')
+            ->first();
+
+        if ($turn === null) {
+            return null;
+        }
+
+        $rows = RollTable::for($turn);
+        if ($rows === []) {
+            // A turn of nothing but quiet beats casts no dice; there is no
+            // table to show, so it never stands between player and chapter.
+            $turn->update(['rolls_seen_at' => now()]);
+
+            return null;
+        }
+
+        return [
+            'turn_id' => $turn->id,
+            'turn_number' => $turn->number,
+            'rows' => $rows,
+        ];
+    }
+
+    /**
+     * The player has watched the dice fall. Stamping the turn clears the
+     * table for good — on this device and every other one.
+     */
+    public function rollsSeen(Request $request, Campaign $campaign): RedirectResponse
+    {
+        abort_unless($campaign->user_id === $request->user()->id, 403);
+
+        $validated = $request->validate([
+            'turn_id' => ['required', 'integer'],
+        ]);
+
+        $campaign->turns()
+            ->whereKey($validated['turn_id'])
+            ->whereNull('rolls_seen_at')
+            ->update(['rolls_seen_at' => now()]);
+
+        return back();
+    }
+
+    /**
      * The one structured form: pre/main/post card ids + modifiers, each with
-     * an optional line in the player's own words. Locks on submit — no second
-     * action until resolution.
+     * an optional line in the player's own words. Resolves the moment it is
+     * submitted — there is no waiting window between choosing and knowing.
      */
     public function submit(Request $request, Campaign $campaign): RedirectResponse
     {
@@ -132,32 +194,6 @@ class PlayController extends Controller
             'submission' => $submission,
             'submitted_at' => now(),
         ]);
-
-        // Development convenience: with cadence 0 the turn resolves inline.
-        if ((int) config('game.turn_cadence_minutes') === 0) {
-            $this->resolveInline($turn);
-        }
-
-        return redirect()->route('play.show', $campaign);
-    }
-
-    /**
-     * The impatience valve: resolve a committed turn on demand instead of
-     * waiting out the cadence window. Only a locked turn with a stored
-     * submission qualifies — an open form has nothing to resolve, so no
-     * Claude run can ever fire without a player choice behind it.
-     */
-    public function resolveNow(Request $request, Campaign $campaign): RedirectResponse
-    {
-        abort_unless($campaign->user_id === $request->user()->id, 403);
-        abort_unless($campaign->status === 'active', 400);
-
-        $turn = $campaign->currentTurn;
-        abort_unless(
-            $turn !== null && $turn->status === Turn::STATUS_LOCKED && $turn->submitted_at !== null,
-            409,
-            'There is no committed turn waiting to resolve.',
-        );
 
         $this->resolveInline($turn);
 
@@ -235,13 +271,40 @@ class PlayController extends Controller
         return $note === '' ? null : $note;
     }
 
+    /**
+     * Resolve now, write shortly.
+     *
+     * The engine's half is pure database work and finishes in milliseconds,
+     * so it runs inside the request: by the time the player lands back on the
+     * page their dice are already cast and waiting on the table. Claude's half
+     * is the slow one, and it is deferred until after the response has been
+     * flushed — which means the player spends that time rolling dice instead
+     * of watching a spinner. Neither failure is fatal: a resolution that
+     * throws leaves the turn locked for the sweep to recover, and a narration
+     * that throws leaves a resolved turn the sweep will write within the
+     * minute.
+     */
     private function resolveInline(Turn $turn): void
     {
         try {
             app(TurnResolver::class)->resolve($turn);
-            app(Narrator::class)->narrate($turn->fresh());
         } catch (Throwable $e) {
-            report($e); // the sweep will retry narration; resolution state is safe
+            report($e);
+
+            return;
         }
+
+        $turnId = $turn->id;
+        dispatch(function () use ($turnId) {
+            $fresh = Turn::find($turnId);
+            if ($fresh === null || $fresh->narrated_at !== null) {
+                return; // the sweep got there first
+            }
+            try {
+                app(Narrator::class)->narrate($fresh);
+            } catch (Throwable $e) {
+                report($e);
+            }
+        })->afterResponse();
     }
 }

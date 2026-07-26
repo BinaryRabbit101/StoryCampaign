@@ -59,6 +59,9 @@ export interface CharacterMeters {
     tempo: Record<string, { current: number; max: number }>;
 }
 
+/** A natural 20 or a natural 1, read off the die face before any modifier. */
+export type Crit = 'success' | 'failure' | null;
+
 export interface ChapterEvent {
     id: string;
     icon: string;
@@ -69,7 +72,42 @@ export interface ChapterEvent {
     skipped: boolean;
     facts: string[];
     note: string | null;
-    roll: { roll: number; total: number; difficulty: number } | null;
+    crit: Crit;
+    roll: {
+        roll: number;
+        total: number;
+        difficulty: number;
+        crit: Crit;
+    } | null;
+}
+
+/**
+ * One die on the dice table, derived from a resolved turn. Every number here
+ * was cast by the engine before the screen existed — the table replays them,
+ * it never produces them.
+ */
+export interface RollRow {
+    id: string;
+    side: 'player' | 'ally' | 'foe';
+    actor: string;
+    action: string;
+    verb: string;
+    icon: string;
+    difficulty: number;
+    /** Easy / Medium / Hard / Brutal, banded from the difficulty. */
+    band: string;
+    roll: number;
+    modifier: number;
+    total: number;
+    degree: string;
+    crit: Crit;
+    outcome: string | null;
+}
+
+export interface RollTable {
+    turn_id: number;
+    turn_number: number;
+    rows: RollRow[];
 }
 
 /**

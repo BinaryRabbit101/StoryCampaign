@@ -130,8 +130,12 @@ class TurnResolver
 
             // The scene answers: active enemies react to the player's beats,
             // and long-held captives strain against the grip.
-            $enemyFacts = array_merge($springFacts, $this->enemyReaction($character, $scene, $dice, $conditions, $moved));
-            $enemyFacts = array_merge($enemyFacts, $this->captiveStruggle($scene, $dice, $heldBefore));
+            // The scene's dice are kept as data as well as prose: the dice
+            // table shows the player what the world rolled against them, and
+            // a die nobody can see is a die the player has to take on faith.
+            $reactionRolls = [];
+            $enemyFacts = array_merge($springFacts, $this->enemyReaction($character, $scene, $dice, $conditions, $moved, $reactionRolls));
+            $enemyFacts = array_merge($enemyFacts, $this->captiveStruggle($scene, $dice, $heldBefore, $reactionRolls));
 
             // The alarm clock: every turn spent toe-to-toe in the same place
             // raises the odds the district answers. At three, it does.
@@ -170,6 +174,7 @@ class TurnResolver
                 'resolution' => [
                     'beats' => array_map(fn (BeatOutcome $o) => $o->toArray(), $outcomes),
                     'scene_reaction' => $enemyFacts,
+                    'reaction_rolls' => $reactionRolls,
                     'new_threat' => $newThreat?->only(['id', 'name', 'kind', 'tier']),
                     'conditions' => $conditions,
                 ],
@@ -315,7 +320,25 @@ class TurnResolver
             default => BeatOutcome::FAILURE,
         };
 
-        $facts = $this->applyBeatEffects($verb, $card, $degree, $approach, $character, $scene, $conditions, $dice);
+        // The two faces that overrule the arithmetic. A natural 20 is the
+        // best the beat could have gone no matter how steep the difficulty;
+        // a natural 1 is the worst no matter how generous the bonuses. The
+        // margin still decides everything in between.
+        $crit = BeatOutcome::critFor($roll);
+        if ($crit === BeatOutcome::CRIT_SUCCESS) {
+            $degree = BeatOutcome::STRONG;
+        } elseif ($crit === BeatOutcome::CRIT_FAILURE) {
+            $degree = BeatOutcome::FAILURE;
+        }
+
+        $facts = $this->applyBeatEffects($verb, $card, $degree, $approach, $character, $scene, $conditions, $dice, $crit);
+
+        if ($crit !== null) {
+            $facts = array_merge(
+                CritConsequence::apply($crit, $verb, $card, $character, $scene, $conditions),
+                $facts,
+            );
+        }
 
         // The chosen attack form is narration color only: it never touched
         // the roll above. It rides along as a resolved fact so the narrator
@@ -326,7 +349,7 @@ class TurnResolver
         }
 
         return new BeatOutcome($card['slot'], $verb, $card['target'] ?? null, $degree, $roll, $total, $difficulty, $facts,
-            note: $this->note($choice));
+            note: $this->note($choice), crit: $crit);
     }
 
     /**
@@ -429,8 +452,14 @@ class TurnResolver
             BeatOutcome::SUCCESS, 0, 0, 0, $facts, note: $note);
     }
 
-    /** @return list<string> */
-    private function applyBeatEffects(string $verb, array $card, string $degree, string $approach, Character $character, Scene $scene, array &$conditions, Dice $dice): array
+    /**
+     * @param  string|null  $crit  The natural face, when it was 20 or 1. The
+     *                             degree above already carries the crit's
+     *                             verdict; this only sharpens how hard the
+     *                             verb's own effect lands.
+     * @return list<string>
+     */
+    private function applyBeatEffects(string $verb, array $card, string $degree, string $approach, Character $character, Scene $scene, array &$conditions, Dice $dice, ?string $crit = null): array
     {
         $facts = [];
         $targetName = $card['target']['name'] ?? 'the scene';
@@ -461,6 +490,10 @@ class TurnResolver
                 };
                 if ($approach === 'bold' && $damage > 0) {
                     $damage++;
+                }
+                // A natural 20 doesn't wound — it opens something up.
+                if ($crit === BeatOutcome::CRIT_SUCCESS) {
+                    $damage *= 2;
                 }
                 if ($damage > 0 && $actor !== null) {
                     $stats = $actor->stats;
@@ -711,6 +744,27 @@ class TurnResolver
                     : 'There was no one left worth searching.';
                 break;
 
+            case 'recover':
+                // Going back for what a fumble tore out of their hands. The
+                // item's granted capabilities come back with it, so the form
+                // itself widens again the moment they have it.
+                $feature = $scene->allFeatures()->firstWhere('id', $card['target']['id'] ?? 0);
+                $dropped = $feature?->affordances['dropped_item'] ?? null;
+                if ($dropped === null) {
+                    $facts[] = 'There was nothing of theirs there to take up.';
+                    break;
+                }
+                if ($succeeded) {
+                    $character->items()->updateExistingPivot($dropped['id'], ['equipped' => true]);
+                    $feature->update(['state' => array_merge($feature->state ?? [], ['destroyed' => true])]);
+                    $facts[] = "They got {$dropped['name']} back in hand — everything it gives them is theirs again.";
+                } elseif ($degree === BeatOutcome::PARTIAL) {
+                    $facts[] = "Their fingers found {$dropped['name']} and lost it again — it is still out there, still not theirs.";
+                } else {
+                    $facts[] = "{$dropped['name']} stayed exactly where it fell, out of reach.";
+                }
+                break;
+
             case 'recruit':
                 $actor = Actor::find($card['target']['id']);
                 if ($succeeded && $actor !== null) {
@@ -863,8 +917,14 @@ class TurnResolver
         return $facts;
     }
 
-    /** @return list<string> */
-    private function enemyReaction(Character $character, Scene $scene, Dice $dice, array $conditions, bool $playerEscaped): array
+    /**
+     * @param  list<array>  $rolls  Out: one structured record per die the
+     *                              scene actually cast, so the dice table can
+     *                              show the enemy's roll instead of leaving
+     *                              the player to infer it from the prose.
+     * @return list<string>
+     */
+    private function enemyReaction(Character $character, Scene $scene, Dice $dice, array $conditions, bool $playerEscaped, array &$rolls): array
     {
         if ($playerEscaped || $character->fresh()->status !== 'alive') {
             return [];
@@ -916,9 +976,15 @@ class TurnResolver
             if ($conditions['time_slowed']) {
                 $roll = min($roll, $dice->d20()); // the slowed world blunts them
             }
-            $attack = $roll + (int) ($enemy->stats['attack'] ?? 1)
+            $bonus = (int) ($enemy->stats['attack'] ?? 1)
                 + (($tags['angle'] ?? false) ? 2 : 0)
                 + (($tags['ambush'] ?? false) ? 4 : 0);
+            $attack = $roll + $bonus;
+
+            // The scene rolls under the same two rules the player does: the
+            // natural extremes overrule the arithmetic in both directions.
+            $crit = BeatOutcome::critFor($roll);
+            $hit = $crit !== null ? $crit === BeatOutcome::CRIT_SUCCESS : $attack >= $dodge;
 
             // The angle and the ambush spring are spent in the using.
             if (($tags['angle'] ?? false) || ($tags['ambush'] ?? false)) {
@@ -926,7 +992,21 @@ class TurnResolver
                 $enemy->update(['tags' => $tags]);
             }
 
-            if ($attack >= $dodge) {
+            $record = [
+                'actor' => $enemy->name,
+                'kind' => 'enemy',
+                'verb' => 'attack',
+                'label' => match ($intent) {
+                    'windup' => 'The heavy blow',
+                    default => 'Presses the attack',
+                },
+                'roll' => $roll,
+                'total' => $attack,
+                'difficulty' => $dodge,
+                'crit' => $crit,
+            ];
+
+            if ($hit) {
                 $damage = max(1, (int) ($enemy->stats['attack'] ?? 1));
                 if ($intent === 'windup') {
                     $damage += 2; // the heavy blow the telegraph promised
@@ -934,11 +1014,18 @@ class TurnResolver
                 if ($conditions['braced']) {
                     $damage = max(0, $damage - 2);
                 }
+                if ($crit === BeatOutcome::CRIT_SUCCESS) {
+                    // Nothing brushes off a natural 20 — the brace bends but
+                    // it does not stop this one.
+                    $damage = max(2, $damage * 2);
+                }
                 if ($damage === 0) {
                     $facts[] = "{$enemy->name}'s blow landed on braced guard — nothing got through.";
+                    $rolls[] = $record + ['degree' => BeatOutcome::PARTIAL, 'outcome' => 'Braced — nothing got through'];
 
                     continue;
                 }
+                $crown = $crit === BeatOutcome::CRIT_SUCCESS ? 'CRITICAL HIT: ' : '';
                 $shield = $conditions['shielded'] ? Actor::find($conditions['shield_actor_id'] ?? 0) : null;
                 if ($shield !== null && $shield->status === 'restrained') {
                     // The captive absorbs the blow meant for the player.
@@ -947,16 +1034,27 @@ class TurnResolver
                     $shield->update(['stats' => $stats]);
                     if ($stats['health']['current'] === 0) {
                         $shield->update(['status' => 'defeated']);
-                        $facts[] = "{$enemy->name} struck — but the blow found {$shield->name}, held in the way, and the captive crumpled.";
+                        $facts[] = "{$crown}{$enemy->name} struck — but the blow found {$shield->name}, held in the way, and the captive crumpled.";
                     } else {
-                        $facts[] = "{$enemy->name} struck — {$shield->name}, held in the way, took the blow meant for them.";
+                        $facts[] = "{$crown}{$enemy->name} struck — {$shield->name}, held in the way, took the blow meant for them.";
                     }
+                    $rolls[] = $record + ['degree' => BeatOutcome::SUCCESS, 'outcome' => "{$shield->name} took the blow — {$damage} damage"];
                 } else {
                     Meters::damage($character, $damage);
-                    $facts[] = "{$enemy->name} answered and drew blood ({$damage} damage).";
+                    $facts[] = "{$crown}{$enemy->name} answered and drew blood ({$damage} damage).";
+                    $rolls[] = $record + ['degree' => BeatOutcome::STRONG, 'outcome' => "Drew blood — {$damage} damage"];
                 }
+            } elseif ($crit === BeatOutcome::CRIT_FAILURE) {
+                $facts[] = "CRITICAL MISS: {$enemy->name} committed everything to the blow, missed by a mile, and left themselves wide open.";
+                // The overreach is the player's opening: the enemy spends the
+                // next turn recovering, and the cards will read that windup.
+                $tags['intent'] = 'windup';
+                $tags['overreached'] = true;
+                $enemy->update(['tags' => $tags]);
+                $rolls[] = $record + ['degree' => BeatOutcome::FAILURE, 'outcome' => 'Overreached and left themselves open'];
             } else {
                 $facts[] = "{$enemy->name} pressed in but found nothing to hit.";
+                $rolls[] = $record + ['degree' => BeatOutcome::FAILURE, 'outcome' => 'Found nothing to hit'];
             }
         }
 
@@ -968,17 +1066,52 @@ class TurnResolver
      * the hold, and sometimes wrench loose. Elites escape more easily.
      *
      * @param  list<int>  $heldBefore
+     * @param  list<array>  $rolls  Out: the struggle's die, for the dice table.
      * @return list<string>
      */
-    private function captiveStruggle(Scene $scene, Dice $dice, array $heldBefore): array
+    private function captiveStruggle(Scene $scene, Dice $dice, array $heldBefore, array &$rolls): array
     {
         $facts = [];
 
         $captives = $scene->actors()->where('status', 'restrained')->whereIn('id', $heldBefore)->get();
         foreach ($captives as $captive) {
-            if ($dice->d20() + ($captive->tier === 'elite' ? 4 : 0) >= 16) {
+            // A hold won on a natural 20 is absolute. It spends itself here:
+            // they get one clean turn out of it, not a permanent grip.
+            if ($captive->tags['pinned'] ?? false) {
+                $tags = $captive->tags;
+                unset($tags['pinned']);
+                $captive->update(['tags' => $tags]);
+                $facts[] = "{$captive->name} strained against the hold and found no give in it at all.";
+
+                continue;
+            }
+
+            $roll = $dice->d20();
+            $total = $roll + ($captive->tier === 'elite' ? 4 : 0);
+            $crit = BeatOutcome::critFor($roll);
+            $free = $crit !== null ? $crit === BeatOutcome::CRIT_SUCCESS : $total >= 16;
+
+            $record = [
+                'actor' => $captive->name,
+                'kind' => 'captive',
+                'verb' => 'struggle',
+                'label' => 'Strains against the hold',
+                'roll' => $roll,
+                'total' => $total,
+                'difficulty' => 16,
+                'crit' => $crit,
+            ];
+
+            if ($free) {
                 $captive->update(['status' => 'active']);
-                $facts[] = "{$captive->name} wrenched free of the hold and is loose again.";
+                $crown = $crit === BeatOutcome::CRIT_SUCCESS ? 'CRITICAL BREAK: ' : '';
+                $facts[] = "{$crown}{$captive->name} wrenched free of the hold and is loose again.";
+                $rolls[] = $record + ['degree' => BeatOutcome::STRONG, 'outcome' => 'Wrenched free — loose again'];
+            } else {
+                if ($crit === BeatOutcome::CRIT_FAILURE) {
+                    $facts[] = "CRITICAL FUMBLE: {$captive->name} threw everything into breaking the hold, and the grip only closed tighter for it.";
+                }
+                $rolls[] = $record + ['degree' => BeatOutcome::FAILURE, 'outcome' => 'The hold held'];
             }
         }
 
@@ -1025,6 +1158,17 @@ class TurnResolver
         foreach ($enemies as $enemy) {
             $tags = $enemy->tags ?? [];
             if ($tags['lurking'] ?? false) {
+                continue;
+            }
+
+            // An enemy who fumbled their swing spends the next beat hauling
+            // themselves back upright — the opening they left is real, and
+            // the cards will read it as the windup it is.
+            if ($tags['overreached'] ?? false) {
+                unset($tags['overreached']);
+                $tags['intent'] = 'windup';
+                $enemy->update(['tags' => $tags]);
+
                 continue;
             }
 

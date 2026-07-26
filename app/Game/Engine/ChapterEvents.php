@@ -12,7 +12,7 @@ use App\Models\Turn;
  * Derived, never stored — the turn's resolution stays the single source
  * of truth, so ids are stable across every re-derivation.
  *
- * @phpstan-type Event array{id:string,icon:string,label:string,slot:?string,verb:?string,degree:?string,skipped:bool,facts:list<string>,note:?string,roll:?array{roll:int,total:int,difficulty:int}}
+ * @phpstan-type Event array{id:string,icon:string,label:string,slot:?string,verb:?string,degree:?string,skipped:bool,facts:list<string>,note:?string,crit:?string,roll:?array{roll:int,total:int,difficulty:int,crit:?string}}
  */
 class ChapterEvents
 {
@@ -22,6 +22,7 @@ class ChapterEvents
         'haul' => 'highground',
         'bandage' => 'heal',
         'loot' => 'loot',
+        'recover' => 'loot',
         'hide' => 'stealth',
         'intimidate' => 'parley',
         'persuade' => 'parley',
@@ -55,7 +56,21 @@ class ChapterEvents
         'companion_flank' => 'ally',
         'companion_scout' => 'ally',
         'companion_strike' => 'ally',
+        // The scene's own verbs — they never appear on a card, but the dice
+        // table shows the enemy's roll beside the player's.
+        'attack' => 'enemy',
+        'struggle' => 'force',
     ];
+
+    /**
+     * The icon a verb wears, wherever it is shown. The dice table reads from
+     * the same map the chapter's anchors do, so one action never wears two
+     * faces across the two screens.
+     */
+    public static function iconFor(?string $verb): string
+    {
+        return self::VERB_ICONS[$verb] ?? 'beat';
+    }
 
     /** @return list<Event> */
     public static function for(Turn $turn): array
@@ -73,15 +88,21 @@ class ChapterEvents
             $events[] = [
                 'id' => 'e'.++$n,
                 'icon' => $skipped ? 'skipped' : (self::VERB_ICONS[$beat['verb']] ?? 'beat'),
-                'label' => ucfirst(str_replace('_', ' ', $beat['verb'])).' — '.self::degreeLabel($beat['degree'], $skipped),
+                'label' => ucfirst(str_replace('_', ' ', $beat['verb'])).' — '.self::degreeLabel($beat['degree'], $skipped, $beat['crit'] ?? null),
                 'slot' => $beat['slot'],
                 'verb' => $beat['verb'],
                 'degree' => $skipped ? null : $beat['degree'],
                 'skipped' => $skipped,
                 'facts' => array_values($beat['facts'] ?? []),
                 'note' => $beat['note'] ?? null,
+                'crit' => $skipped ? null : ($beat['crit'] ?? null),
                 'roll' => ($beat['roll'] ?? 0) > 0
-                    ? ['roll' => $beat['roll'], 'total' => $beat['total'], 'difficulty' => $beat['difficulty']]
+                    ? [
+                        'roll' => $beat['roll'],
+                        'total' => $beat['total'],
+                        'difficulty' => $beat['difficulty'],
+                        'crit' => $beat['crit'] ?? null,
+                    ]
                     : null,
             ];
         }
@@ -109,6 +130,7 @@ class ChapterEvents
                 'skipped' => false,
                 'facts' => [$fact],
                 'note' => null,
+                'crit' => null,
                 'roll' => null,
             ];
         }
@@ -125,6 +147,7 @@ class ChapterEvents
                 'skipped' => false,
                 'facts' => ["{$threat['name']} ({$threat['tier']} {$threat['kind']}) entered the scene mid-vignette."],
                 'note' => null,
+                'crit' => null,
                 'roll' => null,
             ];
         }
@@ -146,7 +169,15 @@ class ChapterEvents
             : '';
 
         if ($event['verb'] !== null) {
-            $status = $event['skipped'] ? 'DID NOT HAPPEN' : strtoupper($event['degree']);
+            // A crit is not a degree with extra adjectives — it is the beat
+            // the chapter should turn on. Say so plainly, and tell the
+            // narrator to give it the room it earned.
+            $status = match (true) {
+                $event['skipped'] => 'DID NOT HAPPEN',
+                ($event['crit'] ?? null) === BeatOutcome::CRIT_SUCCESS => 'CRITICAL SUCCESS — write this as the high point of the chapter, vivid and decisive',
+                ($event['crit'] ?? null) === BeatOutcome::CRIT_FAILURE => 'CRITICAL FAILURE — write this as the chapter\'s worst moment, costly and hard to watch',
+                default => strtoupper($event['degree']),
+            };
 
             return "- {$token} [{$event['slot']}] {$event['verb']} → {$status}. {$facts}{$note}";
         }
@@ -154,10 +185,17 @@ class ChapterEvents
         return "- {$token} {$facts}";
     }
 
-    private static function degreeLabel(?string $degree, bool $skipped): string
+    private static function degreeLabel(?string $degree, bool $skipped, ?string $crit = null): string
     {
         if ($skipped) {
             return 'never happened';
+        }
+
+        if ($crit === BeatOutcome::CRIT_SUCCESS) {
+            return 'CRITICAL SUCCESS';
+        }
+        if ($crit === BeatOutcome::CRIT_FAILURE) {
+            return 'CRITICAL FAILURE';
         }
 
         return match ($degree) {

@@ -9,20 +9,25 @@ use Illuminate\Console\Command;
 use Throwable;
 
 /**
- * The turn-resolution sweep: resolves locked turns whose cadence window has
- * passed, then narrates any resolved-but-unnarrated turns (narration is
- * retryable — a failed Claude call never loses the resolution).
+ * The safety net, not the main path.
+ *
+ * Turns resolve inline on submit and narrate immediately after the response
+ * is flushed, so in the ordinary course this sweep finds nothing. It exists
+ * for the two ways that can fail: a request that died between locking a turn
+ * and resolving it, and a Claude call that fell over after the resolution was
+ * already safe on disk. Narration is retryable by design — a failed call
+ * never costs the resolution behind it.
  */
 class ResolveDueTurns extends Command
 {
-    protected $signature = 'game:resolve-due {--force : Ignore the cadence window and resolve immediately}';
+    protected $signature = 'game:resolve-due {--force : Resolve every locked turn, ignoring the abandonment window}';
 
-    protected $description = 'Resolve due turns and narrate their chapters';
+    protected $description = 'Recover abandoned turns and narrate any chapter still unwritten';
 
     public function handle(TurnResolver $resolver, Narrator $narrator): int
     {
         $locked = Turn::where('status', Turn::STATUS_LOCKED)->get()
-            ->filter(fn (Turn $turn) => $this->option('force') || $turn->isDueForResolution());
+            ->filter(fn (Turn $turn) => $this->option('force') || $turn->isAbandoned());
 
         foreach ($locked as $turn) {
             try {

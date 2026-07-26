@@ -9,9 +9,12 @@ Artisan::command('inspire', function () {
     $this->comment(Inspiring::quote());
 })->purpose('Display an inspiring quote');
 
-// Turn resolution/narration. Each Claude CLI run is stateless — it reads
-// persistent world state + logs, does its work, writes back.
-Schedule::command('game:resolve-due')->everyFiveMinutes()->withoutOverlapping();
+// The recovery sweep. Turns resolve inline on submit and narrate right after
+// the response is flushed, so this normally finds nothing to do — it is here
+// to pick up a turn whose request died and a chapter whose Claude call fell
+// over. It runs every minute because "realtime" should also mean the recovery
+// is quick, and it is cheap when there is nothing waiting.
+Schedule::command('game:resolve-due')->everyMinute()->withoutOverlapping();
 
 // World evolution: the variety engine. Scheduled per config, but
 // activity-gated so an idle world never burns a Claude call — the run only
