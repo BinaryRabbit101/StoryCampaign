@@ -9,6 +9,8 @@ use App\Models\Campaign;
 use App\Models\Chapter;
 use App\Models\Character;
 use App\Models\InterviewMessage;
+use App\Notifications\InterviewReplyNotification;
+use App\Notifications\StoryBegunNotification;
 use App\Services\CapabilityClamp;
 use App\Services\TurnStarter;
 use Illuminate\Support\Facades\DB;
@@ -21,6 +23,13 @@ use Illuminate\Support\Facades\DB;
  */
 class Interviewer
 {
+    /**
+     * Past this, a narrator reply is assumed to have outlasted the player's
+     * attention and earns a push. Below it, the answer is already on screen
+     * by the time a notification could arrive.
+     */
+    private const SLOW_REPLY_SECONDS = 15;
+
     public function __construct(
         private readonly ClaudeCli $claude,
         private readonly CapabilityClamp $clamp,
@@ -111,6 +120,8 @@ class Interviewer
 
             $this->starter->openFirstTurn($campaign, $opening);
         });
+
+        $this->announceBegun($campaign);
     }
 
     private function returningPrologue(Campaign $campaign, Character $original): string
@@ -145,14 +156,28 @@ PROMPT);
         }
     }
 
-    /** Handle one player message; may complete the interview and start the campaign. */
+    /**
+     * Handle one player message.
+     *
+     * This never starts the campaign. The narrator's job is to keep drafting
+     * — every reply carries its best current sheet, the engine prices it, and
+     * the running balance goes on screen beside the conversation. The player
+     * decides when they are done by pressing Begin, and until they do they
+     * can keep tuning: add a burden, set a gift down, change their mind about
+     * the whole shape of themselves. Auto-starting the moment the narrator
+     * judged a character "complete" took that decision away, and did it in
+     * the middle of a call slow enough that the player could not see it
+     * happen.
+     */
     public function converse(Campaign $campaign, string $playerMessage): InterviewMessage
     {
         // The player's words are spoken to the narrator before they are
         // written down: a failed CLI run must leave the transcript exactly
         // as it was, so the words stay in the player's hands to send again
         // rather than sitting in the interview forever unanswered.
+        $started = microtime(true);
         $response = $this->claude->promptForJson($this->creationPrompt($campaign, $playerMessage));
+        $elapsed = microtime(true) - $started;
 
         InterviewMessage::create([
             'campaign_id' => $campaign->id,
@@ -161,26 +186,105 @@ PROMPT);
             'body' => $playerMessage,
         ]);
 
-        // Speaking again withdraws any refused sheet: the insist door only
-        // ever opens onto the sheet the world just weighed, never a stale one.
-        if ($campaign->pending_sheet !== null) {
-            $campaign->update(['pending_sheet' => null]);
-        }
+        // The draft always replaces the last one: the Begin door opens onto
+        // the sheet the player is looking at right now, never a stale one.
+        $campaign->update([
+            'pending_sheet' => isset($response['character']) && is_array($response['character'])
+                ? $response
+                : null,
+        ]);
 
         $reply = InterviewMessage::create([
             'campaign_id' => $campaign->id,
             'kind' => 'creation',
             'role' => 'narrator',
             'body' => $response['reply'] ?? '…',
-            'suggestions' => ($response['complete'] ?? false) ? null
-                : $this->sanitizeSuggestions($response['suggestions'] ?? []),
+            'suggestions' => $this->sanitizeSuggestions($response['suggestions'] ?? []),
         ]);
 
-        if (($response['complete'] ?? false) === true && isset($response['character'])) {
-            $this->finalize($campaign, $response);
+        // A slow answer is one the player may have stopped waiting for.
+        if ($elapsed >= self::SLOW_REPLY_SECONDS) {
+            $campaign->user->notify(new InterviewReplyNotification($campaign, $reply->body));
         }
 
         return $reply;
+    }
+
+    /**
+     * The ledger for the sheet as it currently stands, or null before the
+     * narrator has drafted one. The capabilities are clamped first, so the
+     * balance on screen is the balance the engine will actually charge —
+     * showing an unclamped price would teach the player a number that
+     * changes under them at the last moment.
+     *
+     * @return array{name: ?string, description: ?string, points: int, balance: int, gifts: list<array>, burdens: list<array>, ready: bool}|null
+     */
+    public function draftLedger(Campaign $campaign): ?array
+    {
+        $sheet = $campaign->pending_sheet['character'] ?? null;
+        if (! is_array($sheet)) {
+            return null;
+        }
+
+        $clamped = $this->clamp->clamp($sheet['capabilities'] ?? []);
+        $constraints = array_merge($sheet['constraints'] ?? [], $clamped['constraints']);
+        $ledger = TraitCatalog::sheetLedger($clamped['capabilities'], $constraints);
+
+        return $ledger + [
+            'name' => $sheet['name'] ?? null,
+            'description' => $sheet['description'] ?? null,
+            // Balanced and actually carrying something. A sheet with no
+            // gifts at all balances trivially and is nobody.
+            'ready' => $ledger['balance'] >= 0 && $clamped['capabilities'] !== [],
+        ];
+    }
+
+    /**
+     * The player pressed Begin. Finalizes whatever sheet is on the table —
+     * with `owing` when they chose to step through an overspent one.
+     */
+    public function begin(Campaign $campaign, bool $owing = false): void
+    {
+        $pending = $campaign->pending_sheet;
+        if ($pending === null || ! isset($pending['character'])) {
+            return;
+        }
+
+        // The prologue is written HERE, once, for the sheet they actually
+        // chose — not on every exchange. Asking for 300 words of prose
+        // alongside each question would have made every reply in a live
+        // conversation carry the cost of a chapter nobody had asked for yet.
+        $pending['prologue'] ??= $this->creationPrologue($campaign, $pending['character']);
+
+        $this->finalize($campaign, $pending, force: $owing);
+    }
+
+    /** The opening chapter for a finished creation sheet. */
+    private function creationPrologue(Campaign $campaign, array $sheet): string
+    {
+        $name = $sheet['name'] ?? 'The Nameless';
+        $description = $sheet['description'] ?? '';
+        $land = $campaign->worldBrief();
+        $stage = $campaign->stageBrief();
+        $stageSection = $stage === '' ? '' : "\n## The player set the stage\n{$stage}\n";
+
+        try {
+            return trim($this->claude->prompt(<<<PROMPT
+Write the opening prologue of a living-world RPG campaign: 200-400 words, third-person past tense, narrating this character's arrival into the world. No mechanics language of any kind.
+
+## The land this tale is set in (fixed — the prologue happens HERE)
+{$land}
+{$stageSection}
+## The character
+{$name}: {$description}
+
+Respond with ONLY the prologue prose.
+PROMPT)) ?: $this->stockPrologue($name);
+        } catch (\Throwable $e) {
+            report($e);
+
+            return $this->stockPrologue($name);
+        }
     }
 
     private function finalize(Campaign $campaign, array $response, bool $force = false): void
@@ -190,21 +294,19 @@ PROMPT);
         $allConstraints = array_merge($sheet['constraints'] ?? [], $clamped['constraints']);
         $balance = TraitCatalog::sheetBalance($clamped['capabilities'], $allConstraints);
 
-        // The same coin as the point-buy path: the interview's sheet must
-        // break even against the creation allowance. When the bargain runs
-        // short, the world refuses in-world and the interview continues —
-        // the player names a real price, sets a gift down, or insists and
-        // steps in owing (the refused sheet parks on the campaign for that).
+        // The same coin as the point-buy path: the sheet must break even
+        // against the creation allowance. The running balance is on screen
+        // throughout now, so reaching here overspent means someone pressed
+        // Begin without choosing to step through owing — refuse, say why
+        // in-world, and leave the conversation exactly where it was.
         if ($balance < 0 && ! $force) {
-            $campaign->update(['pending_sheet' => $response]);
-
             InterviewMessage::create([
                 'campaign_id' => $campaign->id,
                 'kind' => 'creation',
                 'role' => 'narrator',
-                'body' => 'The world weighs what you ask, and the scales refuse it — such gifts want a '
-                    .'heavier price than you have named. Tell me what they truly cost you: what fails, '
-                    .'what marks you, what follows you. Set one gift down — or step through regardless, '
+                'body' => 'Not yet — the scales still refuse this bargain. Such gifts want a heavier '
+                    .'price than you have named. Tell me what they truly cost you: what fails, what '
+                    .'marks you, what follows you. Set one gift down — or step through regardless, '
                     .'and owe the world the difference.',
                 'suggestions' => [
                     'My size betrays me — I cannot pass where smaller lives slip through, and I am remembered everywhere.',
@@ -276,28 +378,8 @@ PROMPT);
 
             $this->starter->openFirstTurn($campaign, $opening);
         });
-    }
 
-    /**
-     * The override: the player steps into the world with the sheet the
-     * scales refused, unbalanced and owing. The shortfall is recorded as a
-     * debt_to_the_world constraint by the forced finalize.
-     */
-    public function insist(Campaign $campaign): void
-    {
-        $pending = $campaign->pending_sheet;
-        if ($pending === null || ! isset($pending['character'])) {
-            return;
-        }
-
-        InterviewMessage::create([
-            'campaign_id' => $campaign->id,
-            'kind' => 'creation',
-            'role' => 'player',
-            'body' => 'I step through regardless. Whatever is owed, the world may come and collect.',
-        ]);
-
-        $this->finalize($campaign, $pending, force: true);
+        $this->announceBegun($campaign);
     }
 
     /**
@@ -383,6 +465,23 @@ PROMPT);
 
             $this->starter->openFirstTurn($campaign, $opening);
         });
+
+        $this->announceBegun($campaign);
+    }
+
+    /**
+     * Tell the player their tale opened. Beginning is the longest wait in the
+     * game — three Claude calls back to back — so the tab that started it may
+     * be closed, asleep, or given up on by the time it lands. A push failure
+     * must never be the thing that breaks a birth that already succeeded.
+     */
+    private function announceBegun(Campaign $campaign): void
+    {
+        try {
+            $campaign->refresh()->user->notify(new StoryBegunNotification($campaign));
+        } catch (\Throwable $e) {
+            report($e);
+        }
     }
 
     /**
@@ -517,7 +616,9 @@ PROMPT);
         $prices = TraitCatalog::priceSheetForPrompt();
 
         return <<<PROMPT
-You are conducting an in-world character creation interview for a living-world RPG. The player describes their character narratively; you translate it under the hood into a clean structured loadout. Ask at most a few short, evocative questions (one per reply). After the player has given enough (usually 2-4 exchanges), complete the interview.
+You are conducting an in-world character creation interview for a living-world RPG. The player describes their character narratively; you translate it under the hood into a clean structured loadout. Ask one short, evocative question per reply.
+
+You do NOT decide when the interview ends — the player does, by pressing Begin. Your job is to keep a good draft of the character on the table at ALL times, and to keep helping them tune it for as long as they want to talk. Even after they seem finished, answer any further message by refining the same character rather than starting a new one: they may be adjusting the bargain, and the engine shows them their running balance while they do.
 
 ## The land this tale is set in (fixed — your questions and the prologue belong here)
 {$land}
@@ -526,7 +627,7 @@ You are conducting an in-world character creation interview for a living-world R
 Rules:
 - Capabilities must come from this vocabulary: {$vocabulary}
 - Every strong capability should drag a constraint with it (power/constraint coupling). Example: large intimidating size → cannot squeeze through narrow gaps, stealth penalty, breaks fragile surfaces.
-- HARD BUDGET (engine-enforced; an overspent sheet is refused and the interview continues): the sheet starts with {$points} points. {$prices} Balance the finished sheet at zero or better — a gift-heavy character MUST carry real constraints to pay for it. Weave the accounting into your questions in-world ("every gift leaves a debt — where does yours come due?"), never as numbers.
+- HARD BUDGET (engine-enforced; the player can SEE this balance on screen while you talk): the sheet starts with {$points} points. {$prices} Balance the draft at zero or better — a gift-heavy character MUST carry real constraints to pay for it. Weave the accounting into your questions in-world ("every gift leaves a debt — where does yours come due?"), never as numbers. If the draft is currently overspent, your next question should be about the price, not about more gifts.
 - Magnitudes are clamped by the engine regardless of what you write; keep them modest (reach ≤ 15, lift ≤ 250 at creation).
 - Scoped social powers: e.g. intimidate should carry {"vs": "regular"} so it does not flatten elite encounters.
 - attack_styles: 3-6 short phrases for how this body attacks (e.g. "a bite", "a rake of claws", "a tail-whip", "a shoulder-slam"). Narration vocabulary only — they never change outcomes.
@@ -537,11 +638,11 @@ Rules:
 Respond with ONLY a JSON object:
 {
   "reply": "<your next in-world line to the player>",
-  "suggestions": <3-4 example answers to YOUR question, each in the PLAYER's voice and sendable exactly as written — one plain sentence, ≤ 160 characters. Pull them in genuinely different directions (different bodies, prices, temperaments), so a stuck player discovers what kinds of answers are possible. Empty array when complete is true.>,
-  "complete": <true only when the character is fully formed>,
-  "character": <null until complete, then: {"name": "...", "description": "<2-3 sentence distillation>", "attack_styles": ["a bite", "a rake of claws", ...], "capabilities": [{"capability": "reach", "magnitude": 12, "grade": null, "scope": null}, ...], "constraints": [{"name": "stealth_penalty", "params": {"size": "large"}, "coupled_capability": "intimidate"}, ...]}>,
-  "prologue": <null until complete, then a 200-400 word prologue chapter narrating this character's birth into the world, third-person past tense, no mechanics>
+  "suggestions": <3-4 example answers to YOUR question, each in the PLAYER's voice and sendable exactly as written — one plain sentence, ≤ 160 characters. Pull them in genuinely different directions (different bodies, prices, temperaments), so a stuck player discovers what kinds of answers are possible.>,
+  "character": <ALWAYS your best current draft, never null — even after one exchange, even if half-guessed. This is what the player sees priced on screen and what they step into the world as if they press Begin now, so it must always be a playable sheet: {"name": "...", "description": "<2-3 sentence distillation>", "attack_styles": ["a bite", "a rake of claws", ...], "capabilities": [{"capability": "reach", "magnitude": 12, "grade": null, "scope": null}, ...], "constraints": [{"name": "stealth_penalty", "params": {"size": "large"}, "coupled_capability": "intimidate"}, ...]}>
 }
+
+Keep this reply SHORT. The player is waiting on it in a live conversation, and there may be many exchanges before they are done — no prologue, no long prose, just the question and the draft behind it.
 PROMPT;
     }
 

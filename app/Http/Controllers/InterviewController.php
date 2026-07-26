@@ -6,6 +6,7 @@ use App\Game\TraitCatalog;
 use App\Models\Campaign;
 use App\Models\InterviewMessage;
 use App\Services\Claude\Interviewer;
+use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Validation\ValidationException;
@@ -14,17 +15,26 @@ use Inertia\Response;
 
 class InterviewController extends Controller
 {
-    public function show(Request $request, Campaign $campaign): Response|RedirectResponse
+    public function show(Request $request, Campaign $campaign, Interviewer $interviewer): Response|RedirectResponse
     {
         abort_unless($campaign->user_id === $request->user()->id, 403);
 
         if ($campaign->status !== 'interview') {
-            return redirect()->route('campaigns.show', $campaign);
+            // Straight to the story, not to the campaign index. Landing here
+            // on an already-started tale means the interview finished without
+            // the player seeing it — sending them one more click away from
+            // the thing they were waiting for is how they end up believing
+            // nothing happened.
+            return $campaign->status === 'active'
+                ? redirect()->route('play.show', $campaign)
+                : redirect()->route('campaigns.show', $campaign);
         }
 
         return Inertia::render('Interview', [
             'campaign' => $campaign->only(['id', 'name', 'status']),
-            'canInsist' => $campaign->pending_sheet !== null,
+            // The running sheet, priced. Visible from the narrator's first
+            // reply onward, so the bargain is never a surprise at the end.
+            'draft' => $interviewer->draftLedger($campaign),
             'messages' => $campaign->interviewMessages()->where('kind', 'creation')->orderBy('id')->get()
                 ->map(fn (InterviewMessage $m) => $m->only(['id', 'role', 'body', 'suggestions'])),
             'catalog' => [
@@ -69,18 +79,45 @@ class InterviewController extends Controller
     }
 
     /**
-     * The interview-side override: finalize the sheet the world refused,
-     * unbalanced and owing.
+     * Begin: the player is finished tuning and steps into the world with the
+     * sheet currently on the table. `owing` is the named choice to step
+     * through an overspent one and carry the shortfall as a debt.
      */
-    public function insist(Request $request, Campaign $campaign, Interviewer $interviewer): RedirectResponse
+    public function begin(Request $request, Campaign $campaign, Interviewer $interviewer): RedirectResponse
     {
         abort_unless($campaign->user_id === $request->user()->id, 403);
         abort_unless($campaign->status === 'interview', 400);
-        abort_unless($campaign->pending_sheet !== null, 409, 'There is no refused sheet to insist on.');
+        abort_unless($campaign->pending_sheet !== null, 409, 'There is no character yet to step into the world.');
 
-        $interviewer->insist($campaign);
+        $validated = $request->validate(['owing' => ['nullable', 'boolean']]);
 
-        return redirect()->route('play.show', $campaign);
+        $interviewer->begin($campaign, (bool) ($validated['owing'] ?? false));
+
+        // A refused bargain leaves the campaign in interview and the reason
+        // in the transcript; the player carries on tuning.
+        return $campaign->fresh()->status === 'active'
+            ? redirect()->route('play.show', $campaign)
+            : redirect()->route('interview.show', $campaign);
+    }
+
+    /**
+     * A cheap, Inertia-free heartbeat for the interview page.
+     *
+     * The page polls this WHILE a slow request is in flight, which is exactly
+     * why it cannot be an Inertia visit: a visit would cancel the very
+     * request it is watching. Plain JSON, no side effects — it exists so a
+     * player whose connection dropped mid-birth still gets told the world
+     * opened without them.
+     */
+    public function status(Request $request, Campaign $campaign): JsonResponse
+    {
+        abort_unless($campaign->user_id === $request->user()->id, 403);
+
+        return response()->json([
+            'status' => $campaign->status,
+            'messages' => $campaign->interviewMessages()->where('kind', 'creation')->count(),
+            'play_url' => route('play.show', $campaign),
+        ]);
     }
 
     public function message(Request $request, Campaign $campaign, Interviewer $interviewer): RedirectResponse
@@ -103,11 +140,9 @@ class InterviewController extends Controller
             ]);
         }
 
-        $campaign->refresh();
-
-        return $campaign->status === 'active'
-            ? redirect()->route('play.show', $campaign)
-            : redirect()->route('interview.show', $campaign);
+        // Speaking never starts the tale any more — only Begin does — so the
+        // conversation always continues here.
+        return redirect()->route('interview.show', $campaign);
     }
 
     /** Growth request: same narrated-request mechanic, from the play screen. */

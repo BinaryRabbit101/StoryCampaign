@@ -1,13 +1,25 @@
 <script setup lang="ts">
 import { Head, router } from '@inertiajs/vue3';
-import { computed, nextTick, onMounted, ref, watch } from 'vue';
+import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue';
 import AmbientBackdrop from '@/components/game/AmbientBackdrop.vue';
+import { enablePush } from '@/lib/push';
 
 interface Message {
     id: number;
     role: 'player' | 'narrator';
     body: string;
     suggestions: string[] | null;
+}
+
+/** The sheet as it currently stands, priced in the engine's own coin. */
+interface Draft {
+    name: string | null;
+    description: string | null;
+    points: number;
+    balance: number;
+    gifts: { label: string; cost: number }[];
+    burdens: { label: string; refund: number }[];
+    ready: boolean;
 }
 
 interface TraitOption {
@@ -21,7 +33,7 @@ interface TraitOption {
 
 const props = defineProps<{
     campaign: { id: number; name: string; status: string };
-    canInsist: boolean;
+    draft: Draft | null;
     messages: Message[];
     catalog: {
         points: number;
@@ -128,16 +140,63 @@ function confirmBuild() {
     );
 }
 
-const insisting = ref(false);
+// ---- Begin: the player's decision, never the narrator's ----
 
-function insist() {
-    if (insisting.value) return;
-    insisting.value = true;
+const beginning = ref(false);
+
+function begin(owing = false) {
+    if (beginning.value || !props.draft) return;
+    beginning.value = true;
     router.post(
-        `/campaigns/${props.campaign.id}/interview/insist`,
-        {},
-        { onFinish: () => (insisting.value = false) },
+        `/campaigns/${props.campaign.id}/interview/begin`,
+        { owing },
+        { onFinish: () => (beginning.value = false) },
     );
+}
+
+// ---- The watchdog ----
+//
+// Beginning runs three Claude calls back to back and can outlast a phone
+// falling asleep, a dropped connection, or a player's patience. When that
+// happens the server finishes anyway — and the page used to sit on "the
+// narrator considers…" forever while the story was already waiting.
+//
+// This must NOT be an Inertia visit: an Inertia request cancels the one in
+// flight, which is precisely the request being watched. Plain fetch, no side
+// effects, and it only runs while something is actually pending.
+
+let watchdog: ReturnType<typeof setInterval> | null = null;
+
+const pending = computed(
+    () => sending.value || beginning.value || building.value,
+);
+
+async function checkAhead() {
+    if (!pending.value) return;
+
+    try {
+        const res = await fetch(
+            `/campaigns/${props.campaign.id}/interview/status`,
+            { headers: { Accept: 'application/json' } },
+        );
+        if (!res.ok) return;
+        const state = await res.json();
+
+        // The tale opened without us. Go there — a hard navigation, because
+        // whatever request we were waiting on is no longer worth resuming.
+        if (state.status === 'active') {
+            window.location.href = state.play_url;
+            return;
+        }
+
+        // The narrator answered but the reply never reached us (the request
+        // died on the way back). Pick it up rather than sitting on a spinner.
+        if (state.messages > props.messages.length) {
+            router.reload({ only: ['messages', 'draft'] });
+        }
+    } catch {
+        // Offline or mid-navigation: the next tick tries again.
+    }
 }
 
 // A narrator who could not answer says so here. Nothing was written to the
@@ -167,7 +226,16 @@ async function scrollDown() {
     scroller.value?.scrollTo({ top: scroller.value.scrollHeight });
 }
 
-onMounted(scrollDown);
+onMounted(() => {
+    scrollDown();
+    // The narrator can be slow enough that the player puts the phone down.
+    // Subscribing here means the push that says otherwise can actually land.
+    void enablePush();
+    watchdog = setInterval(checkAhead, 5000);
+});
+onUnmounted(() => {
+    if (watchdog) clearInterval(watchdog);
+});
 watch(() => props.messages.length, scrollDown);
 </script>
 
@@ -184,6 +252,92 @@ watch(() => props.messages.length, scrollDown);
         >
             Before the world takes shape
         </p>
+
+        <!-- The bargain, always on the table. The engine prices the sheet the
+             narrator is drafting and shows the running total, so the balance
+             is never a verdict delivered at the end. -->
+        <div
+            v-if="draft && !showBuilder"
+            class="sc-rise rounded-xl border bg-background/60 px-4 py-3 backdrop-blur-sm"
+            :class="
+                draft.balance < 0
+                    ? 'border-amber-500/50'
+                    : 'border-sidebar-border/70 dark:border-sidebar-border'
+            "
+        >
+            <div class="flex items-baseline justify-between gap-3">
+                <p class="truncate text-sm font-medium">
+                    {{ draft.name || 'Still taking shape' }}
+                </p>
+                <p
+                    class="shrink-0 text-sm font-semibold tabular-nums"
+                    :class="
+                        draft.balance < 0
+                            ? 'text-amber-500'
+                            : 'text-violet-400'
+                    "
+                >
+                    Balance: {{ draft.balance }}
+                    <span class="text-xs font-normal text-muted-foreground"
+                        >/ {{ draft.points }}</span
+                    >
+                </p>
+            </div>
+
+            <div
+                v-if="draft.gifts.length || draft.burdens.length"
+                class="mt-2 flex flex-wrap gap-1.5"
+            >
+                <span
+                    v-for="gift in draft.gifts"
+                    :key="`g-${gift.label}`"
+                    class="rounded-lg border border-violet-500/40 bg-violet-500/10 px-2 py-0.5 text-xs text-muted-foreground"
+                >
+                    {{ gift.label }}
+                    <span class="opacity-70">−{{ gift.cost }}</span>
+                </span>
+                <span
+                    v-for="burden in draft.burdens"
+                    :key="`b-${burden.label}`"
+                    class="rounded-lg border border-amber-500/40 bg-amber-500/10 px-2 py-0.5 text-xs text-muted-foreground"
+                >
+                    {{ burden.label }}
+                    <span class="opacity-70">+{{ burden.refund }}</span>
+                </span>
+            </div>
+
+            <p
+                v-if="draft.balance < 0"
+                class="mt-2 text-xs text-amber-500 italic"
+            >
+                Overspent by {{ -draft.balance }}. Name a real price, set a gift
+                down, or step through owing.
+            </p>
+
+            <div class="mt-3 flex flex-wrap items-center gap-2">
+                <button
+                    type="button"
+                    :disabled="beginning || !draft.ready"
+                    class="rounded-md bg-gradient-to-br from-violet-600 to-violet-800 px-4 py-2 text-sm font-medium text-white shadow-lg shadow-violet-900/20 transition hover:from-violet-500 hover:to-violet-700 active:scale-[0.98] disabled:opacity-40"
+                    @click="begin(false)"
+                >
+                    {{ beginning ? 'Stepping into the world…' : 'Begin →' }}
+                </button>
+                <button
+                    v-if="draft.balance < 0"
+                    type="button"
+                    :disabled="beginning"
+                    class="rounded-md border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-xs text-amber-500 italic transition hover:border-amber-500/70 active:scale-[0.98] disabled:opacity-50"
+                    @click="begin(true)"
+                >
+                    Begin anyway — owing the difference
+                </button>
+                <p class="text-xs text-muted-foreground italic">
+                    Or keep talking below — nothing is fixed until you press
+                    Begin.
+                </p>
+            </div>
+        </div>
 
         <div
             ref="scroller"
@@ -210,7 +364,7 @@ watch(() => props.messages.length, scrollDown);
                 </div>
             </div>
             <p
-                v-if="sending"
+                v-if="pending"
                 class="sc-rise mr-8 flex items-center gap-2 text-sm text-muted-foreground italic"
             >
                 <span class="flex items-end gap-1" aria-hidden="true">
@@ -226,11 +380,16 @@ watch(() => props.messages.length, scrollDown);
                         style="animation-delay: 0.4s"
                     />
                 </span>
-                The narrator considers…
+                <span v-if="beginning || building">
+                    The world is making room for you — this one takes a
+                    moment. You can close this; you will be told when it is
+                    ready.
+                </span>
+                <span v-else>The narrator considers…</span>
             </p>
         </div>
 
-        <div v-if="showBuilder && !sending" class="sc-rise space-y-3">
+        <div v-if="showBuilder && !pending" class="sc-rise space-y-3">
             <div
                 class="rounded-xl border border-sidebar-border/70 bg-background/60 p-4 backdrop-blur-sm dark:border-sidebar-border"
             >
@@ -348,7 +507,7 @@ watch(() => props.messages.length, scrollDown);
         </div>
 
         <div
-            v-if="suggestions.length && !sending && !showBuilder"
+            v-if="suggestions.length && !pending && !showBuilder"
             class="sc-rise flex flex-wrap gap-2"
         >
             <button
@@ -366,20 +525,6 @@ watch(() => props.messages.length, scrollDown);
                 {{ suggestion }}
             </button>
         </div>
-
-        <button
-            v-if="canInsist && !sending && !showBuilder"
-            type="button"
-            :disabled="insisting"
-            class="sc-rise self-start rounded-lg border border-amber-500/40 bg-amber-500/10 px-3 py-1.5 text-left text-xs text-amber-500 italic transition hover:border-amber-500/70 active:scale-[0.98] disabled:opacity-50"
-            @click="insist"
-        >
-            {{
-                insisting
-                    ? 'Stepping through…'
-                    : 'Step through regardless — unbalanced, and owing the world the difference →'
-            }}
-        </button>
 
         <button
             type="button"
@@ -413,7 +558,7 @@ watch(() => props.messages.length, scrollDown);
             />
             <button
                 type="submit"
-                :disabled="sending || !body.trim()"
+                :disabled="pending || !body.trim()"
                 class="self-end rounded-md bg-gradient-to-br from-violet-600 to-violet-800 px-4 py-2 text-sm font-medium text-white shadow-lg shadow-violet-900/20 transition hover:from-violet-500 hover:to-violet-700 active:scale-[0.98] disabled:opacity-50"
             >
                 Speak

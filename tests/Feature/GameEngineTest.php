@@ -1283,17 +1283,22 @@ class GameEngineTest extends TestCase
         $this->assertSame(6, $debt->params['shortfall']);
     }
 
-    public function test_the_player_may_step_through_the_refused_interview_sheet_owing()
+    /**
+     * The bargain is visible while it is being struck, not weighed in secret
+     * and announced at the end — and the narrator never decides the interview
+     * is over. Speaking always continues the conversation; only Begin starts
+     * the tale.
+     */
+    public function test_the_running_balance_is_visible_and_only_begin_starts_the_tale()
     {
         $this->seed(WorldSeeder::class);
         $user = User::factory()->create();
 
-        // Every completion attempt is all gift, no debt: cost 7 against 3.
+        // Every draft is all gift, no debt: cost 7 against an allowance of 3.
         $this->mock(ClaudeCli::class, function ($mock) {
             $mock->shouldReceive('promptForJson')->andReturn([
-                'reply' => 'It is done.',
-                'suggestions' => [],
-                'complete' => true,
+                'reply' => 'And what does it cost you?',
+                'suggestions' => ['My size betrays me everywhere.'],
                 'character' => [
                     'name' => 'The Unpaid',
                     'description' => 'All gift, no debt.',
@@ -1310,30 +1315,70 @@ class GameEngineTest extends TestCase
         $this->actingAs($user)->post('/campaigns', ['name' => 'Owing Tale']);
         $campaign = $user->campaigns()->first();
 
-        // No refused sheet parked yet: nothing to insist on.
-        $this->actingAs($user)->post("/campaigns/{$campaign->id}/interview/insist")->assertStatus(409);
+        // Nothing drafted yet: there is no character to step into the world.
+        $this->actingAs($user)->post("/campaigns/{$campaign->id}/interview/begin")->assertStatus(409);
 
-        $this->actingAs($user)->post("/campaigns/{$campaign->id}/interview", ['body' => 'I am mighty.']);
+        $this->actingAs($user)
+            ->post("/campaigns/{$campaign->id}/interview", ['body' => 'I am mighty.'])
+            ->assertRedirect("/campaigns/{$campaign->id}/interview");
+
+        // The narrator drafting a whole character does NOT start the tale.
         $campaign->refresh();
         $this->assertSame('interview', $campaign->status);
         $this->assertNotNull($campaign->pending_sheet);
-        $this->actingAs($user)->get("/campaigns/{$campaign->id}/interview")
-            ->assertInertia(fn ($page) => $page->where('canInsist', true));
 
-        // Insisting births the refused sheet, shortfall on the record.
-        $this->actingAs($user)->post("/campaigns/{$campaign->id}/interview/insist")
+        // The ledger reaches the page itemised: reach(12) 4 + intimidate 3
+        // against an allowance of 3 leaves −4, and it is not begin-able.
+        $this->actingAs($user)->get("/campaigns/{$campaign->id}/interview")
+            ->assertInertia(fn ($page) => $page
+                ->where('draft.balance', -4)
+                ->where('draft.ready', false)
+                ->where('draft.name', 'The Unpaid')
+                ->has('draft.gifts', 2));
+
+        // Begin without owning the shortfall is refused, in-world, and the
+        // conversation carries on exactly where it was.
+        $this->actingAs($user)->post("/campaigns/{$campaign->id}/interview/begin")
+            ->assertRedirect("/campaigns/{$campaign->id}/interview");
+        $this->assertSame('interview', $campaign->fresh()->status);
+        $this->assertStringContainsString(
+            'the scales still refuse',
+            $campaign->interviewMessages()->orderByDesc('id')->first()->body,
+        );
+
+        // Owning it births the sheet, shortfall on the record.
+        $this->actingAs($user)->post("/campaigns/{$campaign->id}/interview/begin", ['owing' => true])
             ->assertRedirect("/play/{$campaign->id}");
 
         $campaign->refresh();
         $this->assertSame('active', $campaign->status);
         $this->assertNull($campaign->pending_sheet);
         $this->assertSame(12, $campaign->character->capabilities->firstWhere('capability', 'reach')->magnitude);
-        $debt = $campaign->character->constraints->firstWhere('name', 'debt_to_the_world');
-        $this->assertSame(4, $debt->params['shortfall']);
-        $this->assertTrue(
-            $campaign->interviewMessages()->where('role', 'player')->get()
-                ->contains(fn ($m) => str_contains($m->body, 'step through regardless')),
-        );
+        $this->assertSame(4, $campaign->character->constraints->firstWhere('name', 'debt_to_the_world')->params['shortfall']);
+    }
+
+    /**
+     * The reported bug: the interview finished, the story started, and the
+     * page sat there. Anyone landing back on the interview of a tale that has
+     * already begun goes straight to it.
+     */
+    public function test_the_interview_of_a_started_tale_leads_to_the_story()
+    {
+        $campaign = $this->createCatCampaign();
+        app(TurnStarter::class)->openFirstTurn($campaign);
+
+        $this->actingAs($campaign->user)
+            ->get("/campaigns/{$campaign->id}/interview")
+            ->assertRedirect("/play/{$campaign->id}");
+
+        // And the watchdog's own endpoint says so without an Inertia visit —
+        // it is polled while a request is still in flight, so it must never
+        // be one itself.
+        $this->actingAs($campaign->user)
+            ->getJson("/campaigns/{$campaign->id}/interview/status")
+            ->assertOk()
+            ->assertJsonPath('status', 'active')
+            ->assertJsonPath('play_url', route('play.show', $campaign));
     }
 
     public function test_the_interview_sheet_pays_the_same_coin_as_the_point_buy()
@@ -1372,21 +1417,31 @@ class GameEngineTest extends TestCase
         $this->actingAs($user)->post('/campaigns', ['name' => 'Weighed Tale']);
         $campaign = $user->campaigns()->first();
 
-        // All gift, no debt: the world refuses in-world and the interview
-        // continues, with burden suggestions on the refusal.
+        // All gift, no debt: cost 7 against an allowance of 3. The tale does
+        // not open, and the player can see exactly how short they are.
         $this->actingAs($user)->post("/campaigns/{$campaign->id}/interview", ['body' => 'I am mighty.']);
-        $campaign->refresh();
-        $this->assertSame('interview', $campaign->status);
-        $refusal = $campaign->interviewMessages()->orderByDesc('id')->first();
-        $this->assertStringContainsString('the scales refuse it', $refusal->body);
-        $this->assertNotEmpty($refusal->suggestions);
+        $this->assertSame('interview', $campaign->fresh()->status);
+        $this->actingAs($user)->get("/campaigns/{$campaign->id}/interview")
+            ->assertInertia(fn ($page) => $page->where('draft.balance', -4)->where('draft.ready', false));
 
-        // A price named: the same gifts now break even, and the tale opens.
+        // A price named: ponderous and stealth_penalty pay back 2 each, and
+        // the same gifts now break even. Still nothing has begun — the sheet
+        // is merely begin-able, which is the whole point.
         $this->actingAs($user)->post("/campaigns/{$campaign->id}/interview", ['body' => 'I am slow, and remembered everywhere.']);
+        $this->assertSame('interview', $campaign->fresh()->status);
+        $this->actingAs($user)->get("/campaigns/{$campaign->id}/interview")
+            ->assertInertia(fn ($page) => $page->where('draft.balance', 0)->where('draft.ready', true));
+
+        // The player decides.
+        $this->actingAs($user)->post("/campaigns/{$campaign->id}/interview/begin")
+            ->assertRedirect("/play/{$campaign->id}");
+
         $campaign->refresh();
         $this->assertSame('active', $campaign->status);
         $this->assertSame(12, $campaign->character->capabilities->firstWhere('capability', 'reach')->magnitude);
         $this->assertTrue($campaign->character->constraints->pluck('name')->contains('ponderous'));
+        // Breaking even means no debt walks in with them.
+        $this->assertFalse($campaign->character->constraints->pluck('name')->contains('debt_to_the_world'));
     }
 
     /**

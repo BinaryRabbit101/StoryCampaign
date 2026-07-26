@@ -249,6 +249,63 @@ class TraitCatalog
         return $points;
     }
 
+    /**
+     * The same arithmetic as sheetBalance, itemised so the player can SEE it.
+     *
+     * The interview used to price a sheet silently and only speak up when the
+     * scales refused — which left the player guessing what a gift had cost
+     * them and what a burden had bought back. This is that ledger, in the
+     * engine's own numbers, ready to put on screen beside the conversation.
+     *
+     * @param  list<array>  $capabilities
+     * @param  list<array>  $constraints
+     * @return array{points: int, balance: int, gifts: list<array{label: string, cost: int}>, burdens: list<array{label: string, refund: int}>}
+     */
+    public static function sheetLedger(array $capabilities, array $constraints): array
+    {
+        $gifts = [];
+        $burdens = [];
+
+        foreach ($capabilities as $entry) {
+            $cost = self::capabilityCost($entry);
+            $label = self::capabilityLabel($entry);
+
+            // A large frame prices negative — it reads as a burden on the
+            // ledger too, or the sum on screen will not match the parts.
+            $cost < 0
+                ? $burdens[] = ['label' => $label, 'refund' => -$cost]
+                : $gifts[] = ['label' => $label, 'cost' => $cost];
+        }
+
+        foreach ($constraints as $constraint) {
+            $burdens[] = [
+                'label' => str_replace('_', ' ', (string) ($constraint['name'] ?? 'a price')),
+                'refund' => self::constraintRefund($constraint),
+            ];
+        }
+
+        return [
+            'points' => self::startingPoints(),
+            'balance' => self::sheetBalance($capabilities, $constraints),
+            'gifts' => $gifts,
+            'burdens' => $burdens,
+        ];
+    }
+
+    /** One capability said the way the sheet says it: "reach(12)", "squeeze(large)". */
+    private static function capabilityLabel(array $entry): string
+    {
+        $name = str_replace('_', ' ', (string) ($entry['capability'] ?? 'something'));
+        $magnitude = $entry['magnitude'] ?? null;
+        $grade = $entry['grade'] ?? null;
+
+        if ($magnitude !== null) {
+            return "{$name}({$magnitude})";
+        }
+
+        return $grade !== null ? "{$name}({$grade})" : $name;
+    }
+
     /** A compact price list for the interviewer's prompt. */
     public static function priceSheetForPrompt(): string
     {
