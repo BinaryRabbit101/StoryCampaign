@@ -17,6 +17,19 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Late narration
+    |--------------------------------------------------------------------------
+    | A resolved turn whose chapter has not been written this long is no
+    | longer "being written" — something is broken, and the play page says so
+    | instead of breathing at the player forever. The sweep keeps retrying
+    | regardless; this only governs when the wait stops being presented as
+    | normal.
+    */
+
+    'narration_late_minutes' => env('GAME_NARRATION_LATE_MINUTES', 5),
+
+    /*
+    |--------------------------------------------------------------------------
     | Claude CLI
     |--------------------------------------------------------------------------
     | The narration and evolution jobs shell out to the Claude CLI. Each run
@@ -36,6 +49,20 @@ return [
         // the CLI as CLAUDE_CODE_OAUTH_TOKEN. Alternative to on-disk
         // ~/.claude credentials; null omits it.
         'oauth_token' => env('CLAUDE_OAUTH_TOKEN'),
+        // Preferred over the literal above: a path to a file holding nothing
+        // but the token, READ FRESH ON EVERY RUN.
+        //
+        // Two failures this exists to end. A token pasted into .env is baked
+        // into the config cache, so the value the app actually uses drifts
+        // away from the value in .env the moment one is edited without the
+        // other — narration once ran for hours on a cached token that .env
+        // had already replaced, and nothing on the box agreed about which
+        // credential was live. And a token per site means rotating it is a
+        // sweep across every .env on the machine, where the one you forget
+        // fails silently. One file, shared, re-read per call: rotation is a
+        // single edit that takes effect immediately and cannot leave a site
+        // behind.
+        'oauth_token_file' => env('CLAUDE_OAUTH_TOKEN_FILE'),
     ],
 
     /*

@@ -35,18 +35,97 @@ class ClaudeCli
         // oauth token covers boxes authenticated via `claude setup-token`.
         $env = array_filter([
             'HOME' => config('game.claude.home'),
-            'CLAUDE_CODE_OAUTH_TOKEN' => config('game.claude.oauth_token'),
+            'CLAUDE_CODE_OAUTH_TOKEN' => $this->oauthToken(),
         ]) ?: null;
 
         $process = new Process($command, base_path(), $env, $prompt, (int) config('game.claude.timeout'));
         $process->run();
 
         if (! $process->isSuccessful()) {
-            Log::error('Claude CLI failed', ['exit' => $process->getExitCode(), 'stderr' => $process->getErrorOutput()]);
-            throw new RuntimeException('Claude CLI failed: '.$process->getErrorOutput());
+            // BOTH streams. The CLI reports auth failures on stdout, so a log
+            // line carrying only stderr says `"stderr":""` and explains
+            // nothing — which is how "Invalid bearer token" hid behind 151
+            // identical, contentless errors while the game sat dead.
+            $stdout = trim($process->getOutput());
+            $stderr = trim($process->getErrorOutput());
+            $detail = trim($stderr."\n".$stdout) ?: '(no output on either stream)';
+
+            if ($this->isAuthFailure($detail)) {
+                Log::error('Claude CLI rejected the credential — narration and evolution are down until it is replaced', [
+                    'exit' => $process->getExitCode(),
+                    'detail' => $detail,
+                    'token_source' => $this->tokenSource(),
+                ]);
+
+                throw new ClaudeAuthException('Claude CLI authentication failed: '.$detail);
+            }
+
+            Log::error('Claude CLI failed', [
+                'exit' => $process->getExitCode(),
+                'stderr' => $stderr,
+                'stdout' => $stdout,
+            ]);
+
+            throw new RuntimeException('Claude CLI failed: '.$detail);
         }
 
         return trim($process->getOutput());
+    }
+
+    /**
+     * The credential, preferring the shared file over the baked-in literal.
+     *
+     * Read at call time, never cached: `config:cache` freezes whatever .env
+     * held at build time, and a token that stopped matching the one on disk
+     * is indistinguishable from a token that expired. A file read costs
+     * nothing next to the CLI run it precedes.
+     */
+    private function oauthToken(): ?string
+    {
+        $path = config('game.claude.oauth_token_file');
+
+        if (is_string($path) && $path !== '' && is_readable($path)) {
+            // First line only: an editor's trailing newline must not become
+            // part of the bearer token.
+            $token = trim((string) strtok((string) file_get_contents($path), "\r\n"));
+
+            if ($token !== '') {
+                return $token;
+            }
+
+            Log::warning('Claude token file is present but empty', ['path' => $path]);
+        }
+
+        return config('game.claude.oauth_token');
+    }
+
+    /** Which credential the last run used — the first question when auth breaks. */
+    private function tokenSource(): string
+    {
+        $path = config('game.claude.oauth_token_file');
+
+        if (is_string($path) && $path !== '' && is_readable($path)) {
+            return "file:{$path}";
+        }
+
+        if ($path) {
+            return "file:{$path} (UNREADABLE — fell back to CLAUDE_OAUTH_TOKEN)";
+        }
+
+        return config('game.claude.oauth_token') ? 'env:CLAUDE_OAUTH_TOKEN' : 'none (relying on ~/.claude credentials)';
+    }
+
+    /** A refused credential, as opposed to a run that merely went wrong. */
+    private function isAuthFailure(string $output): bool
+    {
+        foreach (['invalid bearer token', 'not logged in', 'please run /login', 'failed to authenticate',
+            'authentication_error', 'oauth token has expired', 'api error: 401', 'api error: 403'] as $needle) {
+            if (str_contains(mb_strtolower($output), $needle)) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     /**

@@ -10,6 +10,7 @@ use App\Game\TurnSlot;
 use App\Models\Campaign;
 use App\Models\Turn;
 use App\Services\Claude\Narrator;
+use App\Services\PlayerPresence;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Validation\ValidationException;
@@ -32,17 +33,32 @@ class PlayController extends Controller
         $latestChapter = $campaign->chapters()->reorder('number', 'desc')->first();
         $chapterTurn = $latestChapter?->turn;
 
+        // The player is here, on this page, right now — so the turn-ready push
+        // has nothing to tell them. Marked before anything slow happens, since
+        // the polling reload IS this request.
+        PlayerPresence::mark($campaign);
+
         // Resolution is inline, so the only wait left is Claude writing the
         // chapter. That wait has to be visible: the turn behind it is already
         // complete, and without this the page would quietly re-show the
         // PREVIOUS chapter as though it were the new one.
-        $narrating = $campaign->turns()
+        $unnarrated = $campaign->turns()
             ->whereNotNull('resolved_at')
             ->whereNull('narrated_at')
-            ->exists();
+            ->orderByDesc('number')
+            ->first();
+
+        // ...but only while it is still plausibly happening. Past the window
+        // the wait is a failure, and presenting a failure as progress cost a
+        // player an entire evening staring at a breathing panel that was
+        // never going to resolve — with the chapters they DID have hidden
+        // behind it.
+        $narrating = $unnarrated !== null && ! $unnarrated->narrationIsLate();
+        $narrationStalled = $unnarrated !== null && $unnarrated->narrationIsLate();
 
         return Inertia::render('Play', [
             'narrating' => $narrating,
+            'narrationStalled' => $narrationStalled,
             'rollTable' => $this->pendingRollTable($campaign),
             'campaign' => $campaign->only(['id', 'name', 'status']),
             'character' => [

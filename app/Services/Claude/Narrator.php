@@ -6,6 +6,7 @@ use App\Game\Engine\ChapterEvents;
 use App\Models\Chapter;
 use App\Models\Turn;
 use App\Notifications\TurnReadyNotification;
+use App\Services\PlayerPresence;
 use Illuminate\Support\Facades\File;
 
 /**
@@ -48,8 +49,14 @@ class Narrator
             report($e);
         }
 
-        $next = $campaign->turns()->where('status', Turn::STATUS_AWAITING)->orderByDesc('number')->first();
-        $campaign->user->notify(new TurnReadyNotification($campaign, $chapter, $next));
+        // The push is for the player who left, not the one still here. A
+        // chapter that lands on a page they are already watching arrives on
+        // that page by itself a beat later; buzzing as well just teaches them
+        // that the notification means nothing.
+        if (! PlayerPresence::isWatching($campaign)) {
+            $next = $campaign->turns()->where('status', Turn::STATUS_AWAITING)->orderByDesc('number')->first();
+            $campaign->user->notify(new TurnReadyNotification($campaign, $chapter, $next));
+        }
 
         return $chapter;
     }

@@ -53,6 +53,12 @@ const props = defineProps<{
      * resolve inline now, so this is the only wait left in the game.
      */
     narrating: boolean;
+    /**
+     * That same wait, gone on too long to still be a wait. The chapter is not
+     * being written — the narrator is failing and the sweep is retrying it
+     * every minute. The page says so, and gives the story back.
+     */
+    narrationStalled: boolean;
     latestChapter: {
         number: number;
         kind: string;
@@ -95,6 +101,12 @@ const locked = computed(
     () => props.turn !== null && props.turn.status !== 'awaiting_player',
 );
 const waiting = computed(() => locked.value || props.narrating);
+
+// A stalled narration is NOT a wait. Hiding the chapter is only honest while
+// a newer one is genuinely coming; once it has stopped coming, hiding is just
+// withholding the story the player already owns. So the chapter comes back,
+// with the failure stated above it.
+const stalled = computed(() => props.narrationStalled && !locked.value);
 
 // The story drives the situation: when the latest page is a real chapter it
 // already ends inside the current moment, so the engine's scene inventory
@@ -379,10 +391,19 @@ onMounted(() => {
     // The only wait left is Claude writing, and it is short enough to poll
     // properly rather than sample: every couple of seconds until the chapter
     // lands, then nothing.
+    // Keep polling through a stall too, at a slower beat: the chapter is
+    // still coming the moment the narrator recovers, and the player should
+    // not have to reload to find that out.
     timer = setInterval(() => {
-        if (waiting.value)
+        if (waiting.value || stalled.value)
             router.reload({
-                only: ['turn', 'latestChapter', 'character', 'narrating'],
+                only: [
+                    'turn',
+                    'latestChapter',
+                    'character',
+                    'narrating',
+                    'narrationStalled',
+                ],
             });
     }, 2500);
     void enablePush();
@@ -879,6 +900,24 @@ const healthPct = computed(
             >
                 The story waits on you
             </p>
+
+            <!-- The narrator has stopped answering. Say it plainly, above a
+                 story that still works: the dice fell, the world moved, and
+                 only the writing-up is missing. -->
+            <div
+                v-if="stalled"
+                class="mb-4 rounded-xl border border-amber-500/40 bg-amber-500/10 p-4 text-sm"
+            >
+                <p class="font-medium text-foreground">
+                    The narrator has gone quiet.
+                </p>
+                <p class="mt-1 text-muted-foreground">
+                    Your turn resolved and nothing was lost — the chapter for
+                    it just hasn't been written yet. The world keeps trying,
+                    and it will appear here on its own once the narrator
+                    answers again.
+                </p>
+            </div>
 
             <div
                 v-if="waiting"

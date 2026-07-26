@@ -74,4 +74,24 @@ class Turn extends Model
             ->addMinutes((int) config('game.abandoned_turn_minutes'))
             ->isPast();
     }
+
+    /**
+     * Resolved, unnarrated, and past the point where "being written" is still
+     * an honest description.
+     *
+     * Narration takes tens of seconds. Beyond the window the chapter is not
+     * coming without help — the Claude call is failing and the sweep is
+     * retrying it every minute — and the page owes the player that fact
+     * rather than an animation that never ends.
+     */
+    public function narrationIsLate(): bool
+    {
+        if ($this->resolved_at === null || $this->narrated_at !== null) {
+            return false;
+        }
+
+        return $this->resolved_at
+            ->addMinutes((int) config('game.narration_late_minutes'))
+            ->isPast();
+    }
 }

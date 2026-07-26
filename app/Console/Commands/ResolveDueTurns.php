@@ -4,6 +4,7 @@ namespace App\Console\Commands;
 
 use App\Game\Engine\TurnResolver;
 use App\Models\Turn;
+use App\Services\Claude\ClaudeAuthException;
 use App\Services\Claude\Narrator;
 use Illuminate\Console\Command;
 use Throwable;
@@ -49,6 +50,15 @@ class ResolveDueTurns extends Command
             try {
                 $narrator->narrate($turn);
                 $this->info("Narrated turn {$turn->number} of campaign {$turn->campaign_id}.");
+            } catch (ClaudeAuthException $e) {
+                // A refused credential is not this turn's problem, and every
+                // other turn in the queue is about to fail the same way. Stop,
+                // and say the one thing that is actually wrong — rather than
+                // filing a stack trace per turn per minute, which is how a
+                // dead token produced 151 identical reports and no signal.
+                $this->error('Claude rejected the credential — narration is down until it is replaced. '.$e->getMessage());
+
+                return self::FAILURE;
             } catch (Throwable $e) {
                 $this->error("Turn {$turn->id} failed to narrate (will retry next sweep): {$e->getMessage()}");
                 report($e);
