@@ -11,7 +11,7 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\Relations\HasOne;
 
-#[Fillable(['user_id', 'name', 'premise', 'tone', 'world_flavor', 'genre', 'drive', 'tech_level', 'starting_zone_id', 'next_zone_id', 'pending_sheet', 'status', 'title', 'back_cover', 'ended_early', 'started_at', 'ended_at'])]
+#[Fillable(['user_id', 'name', 'premise', 'opening', 'tone', 'world_flavor', 'setting', 'genre', 'drive', 'tech_level', 'starting_zone_id', 'next_zone_id', 'pending_sheet', 'status', 'title', 'back_cover', 'ended_early', 'started_at', 'ended_at'])]
 class Campaign extends Model
 {
     use HasFactory;
@@ -93,6 +93,9 @@ class Campaign extends Model
         if ($this->premise !== null && $this->premise !== '') {
             $lines[] = "Premise and goal (the player decides when it is fulfilled): {$this->premise}";
         }
+        if ($this->opening !== null && $this->opening !== '') {
+            $lines[] = "How the tale opens (the player asked for this moment — the FIRST scene must be true to it, and it must not be replayed later): {$this->opening}";
+        }
         $lines[] = StoryAspects::brief(StoryAspects::drives(), $this->drive, 'What drives this tale:');
         if ($this->tone !== null && $this->tone !== '') {
             $lines[] = "Tone of the telling: {$this->tone}";
@@ -127,11 +130,22 @@ class Campaign extends Model
      * What the world IS, as one prompt block: the land, the genre it wears,
      * and how much magic or machinery runs in it. Every Claude call that
      * invents or narrates ground works inside this.
+     *
+     * A player who described the land in their own words gets those words —
+     * they replace the catalog's brief rather than sitting beside it, because
+     * two descriptions of one place is how a tale ends up narrated in a
+     * country the player never asked for. The rolled flavor stays underneath
+     * as the engine's cold-forge kit and is never named here.
      */
     public function worldBrief(): string
     {
+        $setting = trim((string) $this->setting);
+
         return implode("\n", array_filter([
-            WorldFlavor::brief($this->worldFlavor()),
+            $setting !== ''
+                ? "This campaign's world is the one the player named: {$setting}\n"
+                    .'That is the world. It outranks every other description of place, including anything the design bible uses as an example.'
+                : WorldFlavor::brief($this->worldFlavor()),
             StoryAspects::brief(StoryAspects::genres(), $this->genre, 'Genre of this world:'),
             StoryAspects::brief(StoryAspects::techLevels(), $this->tech_level, 'Magic and machinery here:'),
         ]));

@@ -119,6 +119,7 @@ Zone features already present in every scene here (do not duplicate them):
 
 ## The stage the player set
 {$stage}
+If it names how the tale opens, that moment is not a suggestion: this scene IS that moment. Build the features and actors the moment needs, and write the description standing in it — not approaching it.
 
 ## The character stepping in
 {$characterDescription}

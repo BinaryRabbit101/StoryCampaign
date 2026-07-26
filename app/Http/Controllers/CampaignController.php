@@ -55,6 +55,9 @@ class CampaignController extends Controller
             'genres' => StoryAspects::options(StoryAspects::genres()),
             'drives' => StoryAspects::options(StoryAspects::drives()),
             'techLevels' => StoryAspects::options(StoryAspects::techLevels()),
+            // The lands, each carrying the genres it can honestly wear so the
+            // form can narrow itself the same way the engine's roll does.
+            'lands' => WorldFlavor::options(),
         ]);
     }
 
@@ -64,8 +67,15 @@ class CampaignController extends Controller
             'name' => ['required', 'string', 'max:80'],
             'character_id' => ['nullable', 'integer'],
             'premise' => ['nullable', 'string', 'max:500'],
+            'opening' => ['nullable', 'string', 'max:500'],
             'tone' => ['nullable', 'string', 'max:120'],
+            // Where it is set, two ways: a land named from the catalog (which
+            // brings its cold-forge kit with it) or the player's own words for
+            // somewhere the catalog does not hold. Words are never refused —
+            // only an unknown catalog KEY is, since that would be the engine
+            // inventing ground it has no kit for.
             'world_flavor' => ['nullable', 'string', Rule::in(WorldFlavor::keys())],
+            'setting' => ['nullable', 'string', 'max:200'],
             // The story axes take a catalog key OR the player's own words —
             // the catalog is a menu, not a fence. Bounded, not enumerated.
             'genre' => ['nullable', 'string', 'max:'.StoryAspects::MAX_LENGTH],
@@ -83,13 +93,21 @@ class CampaignController extends Controller
         // can wear the chosen genre and never repeating one the player just
         // played, so a run of new tales cannot keep opening in the same
         // country — and a starfaring tale cannot open on chalk downs.
+        //
+        // A player who described their own setting still gets a rolled flavor
+        // underneath it: the roll is what the cold forge builds from when
+        // Claude is unavailable, so an offline tale still wakes somewhere
+        // rather than nowhere. Their words are what the prompts are told the
+        // world is (see Campaign::worldBrief).
         $recent = $request->user()->campaigns()->latest('id')->limit(3)->pluck('world_flavor')->all();
         $genre = StoryAspects::resolve(StoryAspects::genres(), $validated['genre'] ?? null);
 
         $campaign = $request->user()->campaigns()->create([
             'name' => $validated['name'],
             'premise' => $validated['premise'] ?? null,
+            'opening' => $validated['opening'] ?? null,
             'tone' => $validated['tone'] ?? null,
+            'setting' => $validated['setting'] ?? null,
             'genre' => $validated['genre'] ?? null,
             'drive' => $validated['drive'] ?? null,
             'tech_level' => $validated['tech_level'] ?? null,

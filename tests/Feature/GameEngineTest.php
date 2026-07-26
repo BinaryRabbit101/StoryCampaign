@@ -563,6 +563,56 @@ class GameEngineTest extends TestCase
         $this->assertNull($campaign->user->campaigns()->where('name', 'Nowhere')->first());
     }
 
+    public function test_a_player_may_describe_their_own_setting_and_how_the_tale_opens()
+    {
+        $campaign = $this->createCatCampaign();
+        $this->mock(ClaudeCli::class)->shouldReceive('prompt')->andReturn('She returned.');
+
+        $this->actingAs($campaign->user)->post('/campaigns', [
+            'name' => 'The Stopped Clock',
+            'character_id' => $campaign->character->id,
+            'genre' => 'horror',
+            'setting' => 'a city built inside a stopped clock',
+            'opening' => 'waking in the gear-room with the hands frozen overhead',
+        ])->assertRedirect();
+
+        $tale = $campaign->user->campaigns()->where('name', 'The Stopped Clock')->firstOrFail();
+
+        // The player's words ARE the world: the catalog land is not narrated
+        // alongside them, or the tale gets told in two countries at once.
+        $this->assertSame('a city built inside a stopped clock', $tale->setting);
+        $this->assertStringContainsString('a city built inside a stopped clock', $tale->worldBrief());
+        $this->assertStringNotContainsString(
+            WorldFlavor::get($tale->world_flavor)['title'],
+            $tale->worldBrief(),
+        );
+
+        // A flavor is still rolled underneath — that is the cold forge's kit,
+        // so an offline tale still wakes somewhere.
+        $this->assertTrue(WorldFlavor::has($tale->world_flavor));
+        $this->assertContains($tale->world_flavor, WorldFlavor::keysForGenre('horror'));
+        $this->assertSame(
+            WorldFlavor::coldPlan($tale->world_flavor)['name'],
+            $tale->zones()->firstOrFail()->name,
+        );
+
+        // The opening reaches every prompt that stages or narrates the tale,
+        // and reaches nothing the engine decides.
+        $this->assertStringContainsString('waking in the gear-room', $tale->stageBrief());
+        $this->assertStringContainsString('How the tale opens', $tale->stageBrief());
+
+        // Both are optional and stay unset when nothing was said.
+        $this->actingAs($campaign->user)->post('/campaigns', [
+            'name' => 'Nothing Said',
+            'character_id' => $campaign->character->id,
+        ])->assertRedirect();
+
+        $plain = $campaign->user->campaigns()->where('name', 'Nothing Said')->firstOrFail();
+        $this->assertNull($plain->setting);
+        $this->assertNull($plain->opening);
+        $this->assertStringContainsString(WorldFlavor::get($plain->world_flavor)['title'], $plain->worldBrief());
+    }
+
     public function test_companions_are_recruited_then_coordinated_never_controlled()
     {
         $campaign = $this->createCatCampaign();

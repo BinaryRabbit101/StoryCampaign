@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { Head, router } from '@inertiajs/vue3';
-import { computed, ref } from 'vue';
+import { computed, ref, watch } from 'vue';
 import AmbientBackdrop from '@/components/game/AmbientBackdrop.vue';
 
 interface CampaignRow {
@@ -19,17 +19,26 @@ interface AspectOption {
     brief: string;
 }
 
+interface LandOption {
+    key: string;
+    label: string;
+    land: string;
+    genres: string[];
+}
+
 const props = defineProps<{
     campaigns: CampaignRow[];
     characters: { id: number; name: string; from: string }[];
     genres: AspectOption[];
     drives: AspectOption[];
     techLevels: AspectOption[];
+    lands: LandOption[];
 }>();
 
 const newName = ref('');
 const characterId = ref<number | ''>('');
 const premise = ref('');
+const opening = ref('');
 const tone = ref('');
 const creating = ref(false);
 
@@ -63,6 +72,38 @@ const genreBrief = computed(() => briefFor(props.genres, genre.value));
 const driveBrief = computed(() => briefFor(props.drives, drive.value));
 const techBrief = computed(() => briefFor(props.techLevels, tech.value));
 
+// Where it's set. Same shape as the axes — leave it alone and the engine
+// rolls a land (the usual path, and the reason two tales open in unrelated
+// country); name one from the catalog; or describe somewhere of your own.
+const land = ref('');
+const landText = ref('');
+
+// Only lands that can honestly wear the picked genre, so the menu never
+// offers chalk downs to a starfaring tale. A typed genre constrains nothing —
+// the catalog has never heard of it, and neither has the roll.
+const landChoices = computed(() => {
+    const picked = genre.value;
+    if (!picked || picked === OTHER) return props.lands;
+    const fitting = props.lands.filter((l) => l.genres.includes(picked));
+    return fitting.length ? fitting : props.lands;
+});
+
+const landBrief = computed(
+    () => props.lands.find((l) => l.key === land.value)?.land ?? null,
+);
+
+// A genre change can strand the picked land outside its own pool; drop back
+// to the roll rather than silently sending a land the genre cannot wear.
+watch(landChoices, (choices) => {
+    if (
+        land.value &&
+        land.value !== OTHER &&
+        !choices.some((l) => l.key === land.value)
+    ) {
+        land.value = '';
+    }
+});
+
 function create() {
     if (!newName.value.trim()) return;
     creating.value = true;
@@ -72,7 +113,13 @@ function create() {
             name: newName.value,
             character_id: characterId.value === '' ? null : characterId.value,
             premise: premise.value.trim() || null,
+            opening: opening.value.trim() || null,
             tone: tone.value.trim() || null,
+            // A named land is a catalog key; own words go to `setting` and
+            // leave the engine free to roll the kit underneath them.
+            world_flavor: land.value === OTHER ? null : land.value || null,
+            setting:
+                land.value === OTHER ? landText.value.trim() || null : null,
             genre: aspectValue(genre.value, genreText.value),
             drive: aspectValue(drive.value, driveText.value),
             tech_level: aspectValue(tech.value, techText.value),
@@ -141,7 +188,10 @@ function statusLabel(status: string): string {
                     <path d="m6 9 6 6 6-6" />
                 </svg>
             </button>
-            <p v-show="composerOpen" class="mt-1 mb-4 text-sm text-muted-foreground">
+            <p
+                v-show="composerOpen"
+                class="mt-1 mb-4 text-sm text-muted-foreground"
+            >
                 Only the name is required. Everything else colors the telling —
                 the interview, every chapter, the book's close — and never
                 changes what the engine allows.
@@ -206,6 +256,25 @@ function statusLabel(status: string): string {
                         maxlength="500"
                         placeholder="Find my sister, whatever it costs…"
                         class="w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+                    />
+                </div>
+
+                <div>
+                    <label
+                        class="mb-1 block text-xs font-medium text-muted-foreground"
+                    >
+                        How it opens
+                        <span class="font-normal"
+                            >(optional — the moment the first scene finds
+                            you)</span
+                        >
+                    </label>
+                    <textarea
+                        v-model="opening"
+                        rows="2"
+                        maxlength="500"
+                        placeholder="Waking in a locked room with no memory of the night before…"
+                        class="w-full resize-y rounded-md border border-input bg-background px-3 py-2 text-sm"
                     />
                 </div>
 
@@ -299,6 +368,46 @@ function statusLabel(status: string): string {
                             {{ driveBrief }}
                         </p>
                     </div>
+                </div>
+
+                <div>
+                    <label
+                        class="mb-1 block text-xs font-medium text-muted-foreground"
+                    >
+                        Where it's set
+                        <span class="font-normal"
+                            >(optional — leave it and the world rolls its
+                            own)</span
+                        >
+                    </label>
+                    <select
+                        v-model="land"
+                        class="w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+                    >
+                        <option value="">Somewhere I haven't been yet</option>
+                        <option
+                            v-for="l in landChoices"
+                            :key="l.key"
+                            :value="l.key"
+                        >
+                            {{ l.label }}
+                        </option>
+                        <option :value="OTHER">Somewhere of my own…</option>
+                    </select>
+                    <input
+                        v-if="land === OTHER"
+                        v-model="landText"
+                        type="text"
+                        :maxlength="200"
+                        placeholder="A city built inside a stopped clock…"
+                        class="mt-1.5 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+                    />
+                    <p
+                        v-else-if="landBrief"
+                        class="mt-1.5 text-xs text-muted-foreground"
+                    >
+                        {{ landBrief }}
+                    </p>
                 </div>
 
                 <div>

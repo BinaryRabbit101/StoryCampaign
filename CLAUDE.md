@@ -47,7 +47,11 @@ adjudicates legality or outcomes — it is only ever handed resolved facts.
   campaign creation from the chosen genre's pool, never repeating the
   player's last three lands, stored on `campaigns.world_flavor` and fixed for
   life; also carries the cold-forge kit the engine builds zones from when
-  Claude is unavailable), `StoryAspects` (the three player-set story axes —
+  Claude is unavailable. The roll is the default, not the rule: the player
+  may name a land from the catalog, or describe their own in
+  `campaigns.setting` — typed words replace the catalog brief in
+  `worldBrief()` while a flavor is still rolled underneath for the kit),
+  `StoryAspects` (the three player-set story axes —
   genre, what drives the tale, magic/machinery level — each a catalog pick OR
   the player's own typed words, stored on `campaigns.genre|drive|tech_level`;
   narration colour only, with ONE soft engine consequence: genre narrows the
@@ -139,10 +143,13 @@ adjudicates legality or outcomes — it is only ever handed resolved facts.
   + frontier, both engine-clamped); the player never picks or names a zone
   directly, and a venture card is legal only toward the campaign's own
   pre-forged `next_zone_id`. Items still enter only through evolution.
-- The player-set stage (premise/tone) colors narration, the forge, and seeds
-  the opening through `StageBuilder`: scene-scoped features/actors (source
-  `stage`), clamped by `config/game.php` `stage_budget` + the evolver's stat
-  bounds. It must never create world-level content directly.
+- The player-set stage (premise/opening/tone, all optional) colors narration,
+  the forge, and seeds the opening through `StageBuilder`: scene-scoped
+  features/actors (source `stage`), clamped by `config/game.php`
+  `stage_budget` + the evolver's stat bounds. It must never create
+  world-level content directly. `campaigns.opening` is where the player asked
+  the first scene to find them — it rides in `stageBrief()`, so the stage
+  builder must open ON that moment, not approach it.
 - Companions are coordinated, never controlled: requests are cards in each
   companion's own slot (never the player's pre/main/post), the engine rolls
   the companion's attempt, and failure can cost the companion.
