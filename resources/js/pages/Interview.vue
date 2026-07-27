@@ -35,12 +35,27 @@ const props = defineProps<{
     campaign: { id: number; name: string; status: string };
     draft: Draft | null;
     messages: Message[];
+    names: string[];
     catalog: {
         points: number;
         positives: TraitOption[];
         negatives: TraitOption[];
     };
 }>();
+
+// ---- The name is the player's alone: a dedicated field, never part of the
+// bargain. It opens pre-filled with a suggested name and the die cycles
+// through more; whatever stands here when the tale begins is the name,
+// outranking anything the narrator drafted. ----
+
+const heroName = ref(props.names[0] ?? '');
+let nameIndex = 0;
+
+function rerollName() {
+    if (!props.names.length) return;
+    nameIndex = (nameIndex + 1) % props.names.length;
+    heroName.value = props.names[nameIndex];
+}
 
 const body = ref('');
 const sending = ref(false);
@@ -83,7 +98,6 @@ function adopt(suggestion: string) {
 
 const showBuilder = ref(false);
 const selected = ref<string[]>([]);
-const buildName = ref('');
 const building = ref(false);
 
 const allTraits = computed(() => [
@@ -130,7 +144,7 @@ function confirmBuild() {
     router.post(
         `/campaigns/${props.campaign.id}/interview/build`,
         {
-            name: buildName.value.trim() || null,
+            name: heroName.value.trim() || null,
             traits: selected.value,
             // Stepping in overspent is allowed — but it is a named choice,
             // and the shortfall is recorded as a debt to the world.
@@ -149,7 +163,7 @@ function begin(owing = false) {
     beginning.value = true;
     router.post(
         `/campaigns/${props.campaign.id}/interview/begin`,
-        { owing },
+        { owing, name: heroName.value.trim() || null },
         { onFinish: () => (beginning.value = false) },
     );
 }
@@ -253,6 +267,36 @@ watch(() => props.messages.length, scrollDown);
             Before the world takes shape
         </p>
 
+        <!-- The name is the player's alone — a field, not a negotiation.
+             Pre-filled with a suggestion; the die offers another. -->
+        <div
+            class="sc-rise flex items-center gap-2 rounded-xl border border-sidebar-border/70 bg-background/60 px-4 py-2.5 backdrop-blur-sm dark:border-sidebar-border"
+        >
+            <label
+                for="hero-name"
+                class="shrink-0 text-xs tracking-widest text-muted-foreground uppercase"
+            >
+                Your name
+            </label>
+            <input
+                id="hero-name"
+                v-model="heroName"
+                type="text"
+                maxlength="40"
+                placeholder="Who steps in…"
+                class="min-w-0 flex-1 border-0 bg-transparent text-sm font-medium focus:outline-none"
+            />
+            <button
+                type="button"
+                title="Suggest another name"
+                aria-label="Suggest another name"
+                class="shrink-0 rounded-md border border-input px-2 py-1 text-sm text-muted-foreground transition hover:border-violet-500/60 hover:text-foreground active:scale-[0.95]"
+                @click="rerollName"
+            >
+                🎲
+            </button>
+        </div>
+
         <!-- The bargain, always on the table. The engine prices the sheet the
              narrator is drafting and shows the running total, so the balance
              is never a verdict delivered at the end. -->
@@ -267,7 +311,7 @@ watch(() => props.messages.length, scrollDown);
         >
             <div class="flex items-baseline justify-between gap-3">
                 <p class="truncate text-sm font-medium">
-                    {{ draft.name || 'Still taking shape' }}
+                    {{ heroName.trim() || draft.name || 'Still taking shape' }}
                 </p>
                 <p
                     class="shrink-0 text-sm font-semibold tabular-nums"
@@ -467,14 +511,7 @@ watch(() => props.messages.length, scrollDown);
                     }}
                 </p>
 
-                <div class="flex gap-2">
-                    <input
-                        v-model="buildName"
-                        type="text"
-                        maxlength="40"
-                        placeholder="A name (optional)"
-                        class="flex-1 rounded-md border border-input bg-background px-3 py-2 text-sm"
-                    />
+                <div class="flex justify-end gap-2">
                     <button
                         type="button"
                         :disabled="building || !hasGift"

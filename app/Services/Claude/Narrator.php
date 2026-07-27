@@ -40,6 +40,11 @@ class Narrator
 
         $turn->update(['narrated_at' => now()]);
 
+        // The chapter's line joins the running "story so far" — the memory
+        // the next narration reads so promises and grudges outlive the
+        // two-chapter window. A missing line costs only that chapter's entry.
+        $campaign->appendSynopsis($chapter->number, $response['synopsis_line'] ?? null);
+
         // Frontier growth rides the narration job — the world forges its
         // next zone off the player's clock, and a failure here costs only
         // the wait until the next chapter tries again.
@@ -110,9 +115,23 @@ class Narrator
             : trim(preg_replace('/\s*Health \d+\/\d+\./', '', $nextTurn->situation));
         $land = $campaign->worldBrief();
         $stage = $campaign->stageBrief() ?: '(none set — let the tale find its own direction)';
+        $register = ProseStyle::rules();
+
+        // Long-range memory: the one-line-per-chapter record kept by earlier
+        // narrations. Without it, anything older than the two recent chapters
+        // below has simply never happened as far as the narrator knows.
+        $synopsis = trim((string) $campaign->synopsis);
+        $storySoFar = $synopsis === '' ? '' : <<<SOFAR
+
+## The story so far (one line per chapter, oldest first — the names, promises, debts, and grudges this tale must stay true to)
+{$synopsis}
+
+SOFAR;
 
         return <<<PROMPT
 You are the narrator of a living-world RPG. Write the next chapter of this campaign as flowing third-person past-tense prose, weaving the ENGINE-RESOLVED beats below into one continuous vignette. You decide how things happened, never whether: every fact listed is fixed. Do not mention dice, rolls, cards, slots, meters, or any mechanics.
+
+{$register}
 
 ## Style: action over atmosphere
 - The beats carry the chapter. Every paragraph must have something HAPPENING — movement, contact, exchange, consequence.
@@ -132,10 +151,14 @@ Each listed event carries a bracketed token like [[e1]]. Copy every token into t
 ## The stage the player set (color and direction only — never force the goal closed; the player decides when it is met)
 {$stage}
 
+{$storySoFar}
 ## Recent chapters (for continuity)
 {$previousChapters}
 
 {$intent}
+## Voicing {$character->name} (the player's character)
+Quoted dialogue for {$character->name} belongs to the PLAYER. Write speech in quotes for them ONLY inside a beat that carries the player's own words, and stay close to those words. On beats without them, {$character->name} acts but does not speechify: at most a short functional line the action itself demands ("Hold the door."), never invented sentences of dialogue. Everyone else speaks freely — the register asks for it.
+
 ## Engine-resolved beats of this vignette (fixed facts, in order)
 Some beats carry the player's own words for that moment. Those words are voice and flavor: honor their spirit in how you tell the beat, and never let them alter what the beat's facts say happened.
 {$beats}
@@ -152,7 +175,7 @@ Some beats carry the player's own words for that moment. Those words are voice a
 The reader makes their next choice from the page itself: close the chapter inside this moment, with the people and surroundings named above present in the prose, so nothing the player can act on appears unannounced. Do not summarize or list them — let the scene hold them naturally.
 
 Respond with ONLY a JSON object:
-{"intent_line": "<optional short italicized bridge line in the style of 'She chose to take the rooftops.' or null>", "chapter": "<the chapter prose>"}
+{"intent_line": "<the chapter's italic epigraph — the ONE place a turned phrase is welcome; a compact line in the spirit of 'She chose to take the rooftops.' or 'They read the shack before they read the woman.' The prose register's image limit does not bind this single line. Or null.>", "chapter": "<the chapter prose>", "synopsis_line": "<ONE factual line for the campaign's running record: what this chapter changed — names met, promises made, injuries taken, debts owed. Plain record-keeping, no style.>"}
 PROMPT;
     }
 
@@ -197,7 +220,7 @@ PROMPT;
 
         - On a critical success, do not write a good version of an ordinary act. Write the version people still talk about afterwards. Where the facts say the ground was torn open, something enormous happened to the ground: decide what lies UNDER the ground in THIS land, and let it out. Where the facts say everyone heard it, turn the whole room.
         - On a critical failure, do not write a near miss. Write the version that goes wrong in a way nobody can take back in the same breath. Where the facts say a weapon left their hands, it does not clatter down at their feet — it is gone somewhere that will cost them to reach, and their hands should stay empty for the rest of the chapter.
-        - Reach for the biggest image this land can actually carry, in this land's own materials. A torn floor is a different thing in a canopy town, a derelict station and an ash steppe — write the one this tale is standing in.
+        - Reach for the biggest EVENT this land can actually carry, in this land's own materials. A torn floor is a different thing in a canopy town, a derelict station and an ash steppe — write the one this tale is standing in. Scale lives in what literally happens, not in fancier language: the prose register above still holds at full force.
         - The facts remain fixed and complete. Scale is yours; outcomes are not. Do not kill, destroy, wound, gain, or lose anything the facts above do not state — you are deciding the SHAPE and SIZE of what is listed, never adding to the list.
 
         CRIT;

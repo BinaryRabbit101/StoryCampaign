@@ -11,7 +11,7 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\Relations\HasOne;
 
-#[Fillable(['user_id', 'name', 'premise', 'opening', 'tone', 'world_flavor', 'setting', 'genre', 'drive', 'tech_level', 'starting_zone_id', 'next_zone_id', 'pending_sheet', 'status', 'title', 'back_cover', 'ended_early', 'started_at', 'ended_at'])]
+#[Fillable(['user_id', 'name', 'premise', 'opening', 'tone', 'world_flavor', 'setting', 'genre', 'drive', 'tech_level', 'starting_zone_id', 'next_zone_id', 'pending_sheet', 'status', 'title', 'back_cover', 'ended_early', 'started_at', 'ended_at', 'synopsis'])]
 class Campaign extends Model
 {
     use HasFactory;
@@ -149,6 +149,29 @@ class Campaign extends Model
             StoryAspects::brief(StoryAspects::genres(), $this->genre, 'Genre of this world:'),
             StoryAspects::brief(StoryAspects::techLevels(), $this->tech_level, 'Magic and machinery here:'),
         ]));
+    }
+
+    /**
+     * Append one chapter's line to the running "story so far". The synopsis
+     * is record, not prose: names, promises, injuries, debts. Oldest lines
+     * are shed past ~4000 characters — roughly forty chapters of one-liners
+     * — so the prompt block it feeds can never grow without bound.
+     */
+    public function appendSynopsis(int $chapterNumber, ?string $line): void
+    {
+        $line = trim((string) $line);
+        if ($line === '') {
+            return;
+        }
+
+        $lines = array_values(array_filter(explode("\n", (string) $this->synopsis)));
+        $lines[] = "Ch{$chapterNumber}: ".mb_substr($line, 0, 300);
+
+        while (count($lines) > 1 && mb_strlen(implode("\n", $lines)) > 4000) {
+            array_shift($lines);
+        }
+
+        $this->update(['synopsis' => implode("\n", $lines)]);
     }
 
     public function nextChapterNumber(): int

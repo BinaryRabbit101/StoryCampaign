@@ -8,6 +8,7 @@ use App\Game\Engine\ChapterEvents;
 use App\Game\Engine\RollTable;
 use App\Game\Engine\TurnResolver;
 use App\Game\Meters;
+use App\Game\NameForge;
 use App\Game\StoryAspects;
 use App\Game\WorldFlavor;
 use App\Models\Actor;
@@ -26,6 +27,7 @@ use App\Services\Claude\ZoneForge;
 use App\Services\TurnStarter;
 use Database\Seeders\WorldSeeder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Notification;
 use Tests\TestCase;
 
 class GameEngineTest extends TestCase
@@ -1408,6 +1410,54 @@ class GameEngineTest extends TestCase
     }
 
     /**
+     * The name is the player's alone: a dedicated field, pre-filled from a
+     * per-campaign pool of suggestions, and whatever stands in it when the
+     * tale begins outranks any name the narrator drafted onto the sheet.
+     */
+    public function test_the_name_field_outranks_the_drafted_name()
+    {
+        $this->seed(WorldSeeder::class);
+        $user = User::factory()->create();
+
+        $this->mock(ClaudeCli::class, function ($mock) {
+            $mock->shouldReceive('promptForJson')->andReturn([
+                'reply' => 'So be it.',
+                'suggestions' => [],
+                'character' => [
+                    'name' => 'The Drafted',
+                    'description' => 'A long-limbed presence.',
+                    'capabilities' => [
+                        ['capability' => 'reach', 'magnitude' => 12],
+                        ['capability' => 'intimidate', 'scope' => ['vs' => 'regular']],
+                    ],
+                    'constraints' => [
+                        ['name' => 'ponderous', 'params' => ['pace' => 'slow']],
+                        ['name' => 'stealth_penalty', 'params' => ['reason' => 'unmistakable']],
+                    ],
+                ],
+            ])->byDefault();
+            $mock->shouldReceive('prompt')->andReturn('A tale begins.')->byDefault();
+        });
+
+        $this->actingAs($user)->post('/campaigns', ['name' => 'Named Tale']);
+        $campaign = $user->campaigns()->first();
+
+        // The page hands over the suggestion pool, and the pool is stable:
+        // a reload must offer the same names, not shuffle them under the
+        // player mid-thought.
+        $this->actingAs($user)->get("/campaigns/{$campaign->id}/interview")
+            ->assertInertia(fn ($page) => $page->has('names', 10));
+        $this->assertSame(NameForge::pool($campaign->id), NameForge::pool($campaign->id));
+
+        $this->actingAs($user)->post("/campaigns/{$campaign->id}/interview", ['body' => 'I am mighty, and slow.']);
+
+        // The field wins over the sheet the narrator drafted.
+        $this->actingAs($user)->post("/campaigns/{$campaign->id}/interview/begin", ['name' => '  Wren  '])
+            ->assertRedirect("/play/{$campaign->id}");
+        $this->assertSame('Wren', $campaign->fresh()->character->name);
+    }
+
+    /**
      * The reported bug: the interview finished, the story started, and the
      * page sat there. Anyone landing back on the interview of a tale that has
      * already begun goes straight to it.
@@ -2108,6 +2158,64 @@ class GameEngineTest extends TestCase
         $plain = (new \ReflectionMethod(Narrator::class, 'buildPrompt'))
             ->invoke(app(Narrator::class), $turn->fresh());
         $this->assertStringNotContainsString('The moment this chapter turns on', $plain);
+    }
+
+    /**
+     * Long-range memory and the hero's voice: the prompt carries the running
+     * "story so far" once one exists (and no empty section before then), it
+     * reserves the character's quoted dialogue for beats bearing the
+     * player's words, and each narration appends one factual line to the
+     * record for the next narration to read.
+     */
+    public function test_the_narration_remembers_and_the_hero_speaks_only_the_players_words()
+    {
+        Notification::fake();
+
+        $campaign = $this->createCatCampaign();
+        $turn = app(TurnStarter::class)->openFirstTurn($campaign);
+        $turn->update([
+            'status' => Turn::STATUS_COMPLETE,
+            'branch_trigger' => 'decision_point',
+            'resolution' => [
+                'beats' => [[
+                    'slot' => 'main', 'verb' => 'examine',
+                    'target' => ['type' => 'feature', 'id' => 1, 'name' => 'the shack'],
+                    'degree' => 'success', 'roll' => 14, 'total' => 16, 'difficulty' => 10,
+                    'facts' => ['The shack held a torn manifest.'], 'skipped' => false, 'crit' => null,
+                ]],
+                'scene_reaction' => [],
+                'reaction_rolls' => [],
+                'new_threat' => null,
+            ],
+        ]);
+
+        // No record yet: no empty section pretending there is one.
+        $prompt = (new \ReflectionMethod(Narrator::class, 'buildPrompt'))
+            ->invoke(app(Narrator::class), $turn->fresh());
+        $this->assertStringNotContainsString('The story so far', $prompt);
+        $this->assertStringContainsString('Voicing The Cat', $prompt);
+
+        $campaign->appendSynopsis(1, 'She promised Marn she would clear his name.');
+        $prompt = (new \ReflectionMethod(Narrator::class, 'buildPrompt'))
+            ->invoke(app(Narrator::class), $turn->fresh());
+        $this->assertStringContainsString('The story so far', $prompt);
+        $this->assertStringContainsString('Ch1: She promised Marn she would clear his name.', $prompt);
+
+        // Narrating appends the chapter's own line to the record.
+        $this->mock(ClaudeCli::class, function ($mock) {
+            $mock->shouldReceive('promptForJson')->andReturn([
+                'intent_line' => null,
+                'chapter' => 'A plain chapter. [[e1]]',
+                'synopsis_line' => 'She found the torn manifest in the shack.',
+            ])->byDefault();
+            $mock->shouldReceive('prompt')->andReturn('A tale begins.')->byDefault();
+        });
+
+        app(Narrator::class)->narrate($turn->fresh());
+
+        $synopsis = $campaign->fresh()->synopsis;
+        $this->assertStringContainsString('She promised Marn she would clear his name.', $synopsis);
+        $this->assertStringContainsString('She found the torn manifest in the shack.', $synopsis);
     }
 
     public function test_the_scene_records_its_own_dice_not_only_its_prose()

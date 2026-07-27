@@ -132,10 +132,13 @@ class Interviewer
         $land = $campaign->worldBrief();
         $stage = $campaign->stageBrief();
         $stageSection = $stage === '' ? '' : "\n## The player set the stage for this new tale\n{$stage}\n";
+        $register = ProseStyle::rules();
 
         try {
             return $this->claude->prompt(<<<PROMPT
 A hero returns for a new tale in a living-world RPG. Write a 200-400 word prologue in third-person past tense: {$original->name} steps out of an earlier story and into this new one, "{$campaign->name}". Carry the weight of where their last tale left off, but open cleanly — a new book, not a recap. No mechanics language.
+
+{$register}
 
 ## The land this new tale is set in (fixed — they arrive HERE, and it is not where they came from)
 {$land}
@@ -241,13 +244,21 @@ PROMPT);
 
     /**
      * The player pressed Begin. Finalizes whatever sheet is on the table —
-     * with `owing` when they chose to step through an overspent one.
+     * with `owing` when they chose to step through an overspent one, and
+     * with `name` from the dedicated name field, which outranks whatever
+     * the narrator drafted: the player owns their name outright, it is
+     * never part of the bargain.
      */
-    public function begin(Campaign $campaign, bool $owing = false): void
+    public function begin(Campaign $campaign, bool $owing = false, ?string $name = null): void
     {
         $pending = $campaign->pending_sheet;
         if ($pending === null || ! isset($pending['character'])) {
             return;
+        }
+
+        $name = trim((string) $name);
+        if ($name !== '') {
+            $pending['character']['name'] = $name;
         }
 
         // The prologue is written HERE, once, for the sheet they actually
@@ -267,10 +278,13 @@ PROMPT);
         $land = $campaign->worldBrief();
         $stage = $campaign->stageBrief();
         $stageSection = $stage === '' ? '' : "\n## The player set the stage\n{$stage}\n";
+        $register = ProseStyle::rules();
 
         try {
             return trim($this->claude->prompt(<<<PROMPT
 Write the opening prologue of a living-world RPG campaign: 200-400 words, third-person past tense, narrating this character's arrival into the world. No mechanics language of any kind.
+
+{$register}
 
 ## The land this tale is set in (fixed — the prologue happens HERE)
 {$land}
@@ -497,10 +511,13 @@ PROMPT)) ?: $this->stockPrologue($name);
         $land = $campaign->worldBrief();
         $stage = $campaign->stageBrief();
         $stageSection = $stage === '' ? '' : "\n## The player set the stage\n{$stage}\n";
+        $register = ProseStyle::rules();
 
         try {
             $response = $this->claude->promptForJson(<<<PROMPT
 A player built their character for a living-world RPG by choosing traits from a catalog. The sheet is FIXED — do not add, remove, or reinterpret any ability. Write only the words around it.
+
+{$register}
 
 ## The land this tale is set in (fixed — the prologue happens HERE)
 {$land}
@@ -625,6 +642,7 @@ You do NOT decide when the interview ends — the player does, by pressing Begin
 {$stageSection}
 
 Rules:
+- The character's NAME is set by the player in a dedicated field outside this conversation — never ask what they are called. If they volunteer a name in their words, put it on the sheet; otherwise leave your best working name and move on. It is display-only either way: the field wins at the end.
 - Capabilities must come from this vocabulary: {$vocabulary}
 - Every strong capability should drag a constraint with it (power/constraint coupling). Example: large intimidating size → cannot squeeze through narrow gaps, stealth penalty, breaks fragile surfaces.
 - HARD BUDGET (engine-enforced; the player can SEE this balance on screen while you talk): the sheet starts with {$points} points. {$prices} Balance the draft at zero or better — a gift-heavy character MUST carry real constraints to pay for it. Weave the accounting into your questions in-world ("every gift leaves a debt — where does yours come due?"), never as numbers. If the draft is currently overspent, your next question should be about the price, not about more gifts.

@@ -5,6 +5,7 @@ namespace App\Services;
 use App\Models\Campaign;
 use App\Models\Turn;
 use App\Services\Claude\ClaudeCli;
+use App\Services\Claude\ProseStyle;
 use Illuminate\Support\Str;
 
 /**
@@ -51,9 +52,12 @@ class BookCompiler
             $name = $campaign->character?->name ?? 'the wanderer';
 
             $stage = $campaign->stageBrief();
+            $register = ProseStyle::rules();
 
             $coda = $this->claude->prompt(<<<PROMPT
 The player is ending this RPG campaign early. Write a brief closing coda — a short epilogue (100-200 words, third-person past tense, no mechanics) that gracefully lands the story wherever the character was, in the spirit of: "And so her tale, for now, went quiet on the rooftops of the old district…"
+
+{$register}
 
 Character: {$name}
 The stage the player set for this tale (acknowledge how far the goal got, resolved or not):

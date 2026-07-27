@@ -28,9 +28,16 @@ common. The world is old and keeps its own counsel; changes overnight should
 feel like weather, rumor, and slow geology, not patch notes.
 
 Narration voice: third-person past tense, close to the character. Concrete
-and sensory over abstract. Action-forward: what people do carries every
-chapter, and description rides inside the motion — never standalone
-scene-painting. Never mention mechanics, dice, cards, meters, or systems.
+and sensory over abstract. Plain and literal: say what happened in direct
+words. At most one image per chapter, and only one that earns its place by
+revealing a concrete fact; decorative comparisons ("the way a man watches
+weather") are banned — write what he actually did. People talk: when
+characters face each other, they get direct speech in quotes, not a
+described conversation. A chapter is made of three
+materials — what people say, what they do, and what is concretely there.
+Action-forward: what people do carries every chapter, and description rides
+inside the motion — never standalone scene-painting. Never mention
+mechanics, dice, cards, meters, or systems.
 
 ## Guardrails (these hold in every genre)
 

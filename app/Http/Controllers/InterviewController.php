@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers;
 
+use App\Game\NameForge;
 use App\Game\TraitCatalog;
 use App\Models\Campaign;
 use App\Models\InterviewMessage;
@@ -32,6 +33,10 @@ class InterviewController extends Controller
 
         return Inertia::render('Interview', [
             'campaign' => $campaign->only(['id', 'name', 'status']),
+            // Suggested hero names: the first pre-fills the name field, the
+            // rest feed its reroll. Seeded by campaign so a reload offers
+            // the same names it did the first time.
+            'names' => NameForge::pool($campaign->id),
             // The running sheet, priced. Visible from the narrator's first
             // reply onward, so the bargain is never a surprise at the end.
             'draft' => $interviewer->draftLedger($campaign),
@@ -89,9 +94,12 @@ class InterviewController extends Controller
         abort_unless($campaign->status === 'interview', 400);
         abort_unless($campaign->pending_sheet !== null, 409, 'There is no character yet to step into the world.');
 
-        $validated = $request->validate(['owing' => ['nullable', 'boolean']]);
+        $validated = $request->validate([
+            'owing' => ['nullable', 'boolean'],
+            'name' => ['nullable', 'string', 'max:40'],
+        ]);
 
-        $interviewer->begin($campaign, (bool) ($validated['owing'] ?? false));
+        $interviewer->begin($campaign, (bool) ($validated['owing'] ?? false), $validated['name'] ?? null);
 
         // A refused bargain leaves the campaign in interview and the reason
         // in the transcript; the player carries on tuning.
