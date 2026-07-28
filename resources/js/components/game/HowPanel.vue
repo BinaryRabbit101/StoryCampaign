@@ -5,6 +5,7 @@ import {
     costLabel,
     difficultyAt,
     endeavorLine,
+    threadLine,
     riskChipClass,
     riskLabel,
     signed,
@@ -168,6 +169,13 @@ const placeholder = computed(
                 v-if="card.forecast.endeavor"
                 class="rounded-full bg-teal-500/10 px-2 py-0.5 text-[10px] text-teal-700 dark:text-teal-300"
                 >{{ endeavorLine(card) }}</span
+            >
+            <!-- And whose small story it would help along — the same promise,
+                 worn by somebody else's hope instead of the player's own. -->
+            <span
+                v-if="card.forecast.thread"
+                class="rounded-full bg-violet-500/10 px-2 py-0.5 text-[10px] text-violet-700 dark:text-violet-300"
+                >{{ threadLine(card) }}</span
             >
         </div>
 

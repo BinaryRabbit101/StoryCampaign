@@ -6,6 +6,7 @@ import {
     costLabel,
     difficultyAt,
     endeavorLine,
+    threadLine,
     grantLine,
     riskLabel,
     signed,
@@ -70,9 +71,13 @@ const rows = computed<Row[]>(() => {
         label: cards.length > 1 ? cards[0].verb_label : cards[0].label,
         cards,
         // What this rider is FOR, in one line: the bonus it hands the act,
-        // or — failing that — the endeavor it moves. Both come off the
-        // engine's forecast; neither is worked out here.
-        line: grantLine(cards[0], props.actVerb) ?? endeavorLine(cards[0]),
+        // or — failing that — the endeavor it moves, or the small story it
+        // helps. All three come off the engine's forecast; none is worked
+        // out here.
+        line:
+            grantLine(cards[0], props.actVerb) ??
+            endeavorLine(cards[0]) ??
+            threadLine(cards[0]),
     }));
 });
 

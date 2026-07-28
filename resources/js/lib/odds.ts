@@ -140,6 +140,17 @@ export function endeavorLine(card: ActionCard): string | null {
         : `advances ${card.forecast.endeavor}`;
 }
 
+/**
+ * Whose small story this beat would help along, once the want is discovered.
+ * Same class of promise as the endeavor line, same source — the engine's own
+ * forecast, never re-derived here.
+ */
+export function threadLine(card: ActionCard): string | null {
+    return card.forecast.thread === null
+        ? null
+        : `helps ${card.forecast.thread}`;
+}
+
 /** One target's identity, for collapsing same-verb cards into a chip strip. */
 export const targetKey = (card: ActionCard) =>
     card.target

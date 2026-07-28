@@ -52,6 +52,12 @@ export interface CardForecast {
      * — so the promise on the card is the one the beat actually pays.
      */
     endeavor: string | null;
+    /**
+     * Whose small story this beat would help along, once discovered. Quoted
+     * off the thread's own row like the endeavor above — with the one
+     * difference that a roll-free beat may carry it.
+     */
+    thread: string | null;
 }
 
 /**
