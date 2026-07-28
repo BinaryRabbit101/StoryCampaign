@@ -224,6 +224,31 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | The hour (the wheel the wait turns)
+    |--------------------------------------------------------------------------
+    | A four-phase wheel on the campaign — dawn, day, dusk, night — advanced by
+    | the turns played and by the REAL minutes of the idle wait. The keys are
+    | abstract for the same reason ambient's are: a derelict station has no sun,
+    | so the engine never says sunrise and the narrator renders the phase in
+    | whatever way this land keeps time.
+    |
+    | `turns_per_phase` is the played rhythm: three beats of story and the light
+    | has moved on. `minutes_per_phase` is the real one — four hours, so a lunch
+    | break changes nothing and a genuine night away comes back to changed
+    | light. A single wait can never carry the wheel more than one full turn
+    | around, which is why a week away is a day later rather than a modulo.
+    |
+    | Prices for each phase live in App\Game\Engine\Odds::HOURS with every other
+    | number the dice honor. This block only decides how fast the wheel turns.
+    */
+
+    'hours' => [
+        'turns_per_phase' => 3,
+        'minutes_per_phase' => 240,
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
     | Bargain cards (a complication with a price tag)
     |--------------------------------------------------------------------------
     | Sometimes a card is offered twice: the honest version, and the same beat

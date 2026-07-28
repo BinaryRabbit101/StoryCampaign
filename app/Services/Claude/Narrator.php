@@ -7,6 +7,7 @@ use App\Game\Engine\ChapterEvents;
 use App\Game\Engine\Clocks;
 use App\Game\Engine\Companions;
 use App\Game\Engine\Grudges;
+use App\Game\Engine\Hours;
 use App\Game\Engine\Scars;
 use App\Models\Chapter;
 use App\Models\Turn;
@@ -254,6 +255,29 @@ WAIT;
 
         AIR;
 
+        // The light this chapter stands in — the same phase the board above is
+        // already saying abstractly, so the page and the chapter cannot stand
+        // at two different hours. The engine says WHERE ON THE WHEEL it is; the
+        // land says what that looks like here, and the land outranks every
+        // example in the bible: a derelict station has no sunrise, it has a
+        // deck coming up out of its dimmed cycle.
+        //
+        // Never a clock-face time, ever. The engine does not know what o'clock
+        // it is in this world and would be inventing one to say so. Plain day
+        // carries no block at all — it is the baseline, and a chapter told to
+        // mention that the light is ordinary has been given a chore.
+        $phase = Hours::of($campaign);
+        $light = Hours::fact($phase);
+        $turned = trim((string) ($resolution['hour'] ?? ''));
+        $turned = $turned === '' ? '' : "\n{$turned} Let the change land inside the action, once, as the beats run past it.";
+        $hour = $light === null ? '' : <<<HOUR
+
+        ## The light this scene stands in (fixed fact)
+        {$light}{$turned}
+        Render it exactly ONCE, in whatever form this land keeps time — a horizon, a shift change, a lamp cycle coming up or going down — and let it ride inside the action rather than opening the chapter. Never name a clock time or an hour of the day: what the light is doing is fixed, what it looks like here belongs to the land above.
+
+        HOUR;
+
         // What this place did while nobody made it do anything. The character
         // held still, and the world took the initiative they declined — an
         // arrival, an accident, something the ground had been keeping back.
@@ -300,7 +324,7 @@ Each listed event carries a bracketed token like [[e1]]. Copy every token into t
 ## The stage the player set (color and direction only — never force the goal closed; the player decides when it is met)
 {$stage}
 
-{$storySoFar}{$wait}{$air}
+{$storySoFar}{$wait}{$air}{$hour}
 ## Recent chapters (for continuity)
 {$previousChapters}
 {$continuation}

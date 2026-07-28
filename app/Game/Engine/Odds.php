@@ -133,6 +133,52 @@ class Odds
     ];
 
     /**
+     * What the light is worth, and to what.
+     *
+     * The campaign's hour (Hours::of) turns on a wheel — dawn, day, dusk,
+     * night — advanced by the turns played and by the real minutes of the idle
+     * wait. It reaches the arithmetic only through here, itemized like
+     * everything else, and it is itemized SEPARATELY from the air: a player
+     * hiding in a gloomy night should read two named parts, "The air itself
+     * covers you" and "The dark to move in", not one mystery number that
+     * happens to add up.
+     *
+     * Two-sided at the phase level, exactly as AMBIENT is: each non-day phase
+     * helps something and hinders something. `day` is this table's `clear` — no
+     * parts, no board line, no fact, nothing anywhere.
+     *
+     * Magnitudes are SMALLER than ambient's on purpose (nothing here exceeds
+     * 2, and only the dark reaches it), because the hour STACKS with the air.
+     * A gloomy night must be darker than either alone while the pair still sits
+     * inside the ±4 spread of CONDITIONS above — otherwise the weather and the
+     * clock together would outweigh anything the player built.
+     *
+     * A rule matches on the card's VERB or on the capability it is spent
+     * through, never both twice, and verbs that cast no die (Odds::QUIET) are
+     * absent: a table entry the dice can never honor is a price nobody pays.
+     */
+    private const HOURS = [
+        // The baseline. No parts, no board line, nothing to price.
+        'day' => [],
+
+        'dawn' => [
+            ['label' => 'First light to work by', 'amount' => -1, 'verbs' => ['bandage', 'recover']],
+            ['label' => 'The world is waking around you', 'amount' => 1, 'verbs' => ['hide'], 'capabilities' => ['conceal', 'quiet_move']],
+        ],
+
+        'dusk' => [
+            ['label' => 'Failing light to keep out of', 'amount' => -1, 'verbs' => ['hide'], 'capabilities' => ['conceal', 'quiet_move']],
+            ['label' => 'Failing light to look by', 'amount' => 1, 'verbs' => ['detect', 'scout']],
+        ],
+
+        'night' => [
+            ['label' => 'The dark to move in', 'amount' => -2, 'verbs' => ['hide'], 'capabilities' => ['conceal', 'quiet_move']],
+            ['label' => 'The dark to look through', 'amount' => 2, 'verbs' => ['detect', 'scout']],
+            ['label' => 'Footing you cannot see', 'amount' => 1, 'verbs' => ['ascend', 'cross'], 'capabilities' => ['climb', 'leap', 'swing', 'glide']],
+        ],
+    ];
+
+    /**
      * What an old wound costs, and to what.
      *
      * A scar is a burden the character acquired mid-tale (App\Game\ScarCatalog),
@@ -311,6 +357,14 @@ class Odds
             $parts[] = $part;
         }
 
+        // The light the scene stands in. Same table for the card's forecast and
+        // for the die, read off the same live conditions — and itemized beside
+        // the air rather than folded into it, so a dark night reads as two
+        // named reasons instead of one number nobody can account for.
+        foreach (self::hourParts($conditions['hour'] ?? null, $card['verb'], $card['capability'] ?? null) as $part) {
+            $parts[] = $part;
+        }
+
         // What the body carries out of everywhere it has already been. Same
         // table for the card's forecast and for the die, so a scar can never
         // quietly cost two points the card did not quote.
@@ -371,6 +425,28 @@ class Odds
         $parts = [];
 
         foreach (self::AMBIENT[$ambient] ?? [] as $rule) {
+            $matched = in_array($verb, $rule['verbs'] ?? [], true)
+                || ($capability !== null && in_array($capability, $rule['capabilities'] ?? [], true));
+
+            if ($matched) {
+                $parts[] = ['label' => $rule['label'], 'amount' => $rule['amount']];
+            }
+        }
+
+        return $parts;
+    }
+
+    /**
+     * What the hour costs (or spares) a given card. Public because it is the
+     * one place the hour table is read; nothing else may keep a copy.
+     *
+     * @return list<Part>
+     */
+    public static function hourParts(?string $hour, string $verb, ?string $capability = null): array
+    {
+        $parts = [];
+
+        foreach (self::HOURS[$hour] ?? [] as $rule) {
             $matched = in_array($verb, $rule['verbs'] ?? [], true)
                 || ($capability !== null && in_array($capability, $rule['capabilities'] ?? [], true));
 

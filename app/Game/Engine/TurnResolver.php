@@ -51,6 +51,12 @@ class TurnResolver
                 // The cards were priced against it a turn ago; the dice read
                 // the same key off the same scene, so the quoted DC is paid.
                 'ambient' => Ambient::of($scene),
+                // The light these cards were priced under, read BEFORE the
+                // wheel turns below. The hour keeps moving where the air holds,
+                // so this is the one place the two differ in handling: the die
+                // is measured against the phase the card quoted, and the step
+                // the wait earned lands afterwards, on the cards still to come.
+                'hour' => Hours::of($campaign),
                 // Everywhere this body has already been. The cards were priced
                 // against the same list a turn ago, so an old wound charges the
                 // die exactly what the card said it would.
@@ -383,6 +389,21 @@ class TurnResolver
                 $turn->campaign->fresh()->next_zone_id,
             );
 
+            // The wheel, turned for the wait that ended in this turn and for
+            // the turn itself. It reads the same real clock Meters::regenerate
+            // read at the top and shares nothing else with it — and nothing at
+            // all with what the wait paid out, because rest that worked better
+            // in the dark would be a parallel buff wearing a nightcap.
+            //
+            // It lands HERE rather than beside the regen because the cards the
+            // player just committed to were priced under the old light. A wheel
+            // that turned before the dice would have the die charging a number
+            // the card never quoted, which is the one surprise this whole
+            // engine exists to prevent. So: the beats resolve under the light
+            // they were sold at, the light then moves, and the cards below —
+            // and the board that goes with them — are composed under the new one.
+            $hourChange = Hours::advance($campaign, $turn->created_at);
+
             $turn->update([
                 'status' => Turn::STATUS_COMPLETE,
                 'resolution' => [
@@ -413,6 +434,12 @@ class TurnResolver
                     // one, so an ordinary chapter carries no instructions about
                     // a world that stayed where it was.
                     'world' => $world,
+                    // The light, when it moved while this was going on. One
+                    // plain sentence, null on every turn the wheel stayed put —
+                    // and null on a step into day, which is this wheel's
+                    // baseline and says nothing anywhere, the same rule clear
+                    // air lives by.
+                    'hour' => $hourChange,
                     // The endeavor the player committed to, FINISHED. Null on
                     // every turn it merely moved — the board carries the count
                     // and the narrator carries the goal, and a chapter told to
