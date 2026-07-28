@@ -5,6 +5,7 @@ namespace App\Game\Engine;
 use App\Game\BranchTrigger;
 use App\Game\Hands;
 use App\Game\Meters;
+use App\Game\Verb;
 use App\Models\Actor;
 use App\Models\Character;
 use App\Models\Scene;
@@ -161,7 +162,10 @@ class TurnResolver
 
                 // Partial counts: the facts say they got through (battered),
                 // so the scene must actually change under them.
-                if (in_array($card['verb'], ['flee', 'cross', 'track', 'venture'], true)
+                if (in_array($card['verb'], [
+                    Verb::Flee->value, Verb::Cross->value,
+                    Verb::Track->value, Verb::Venture->value,
+                ], true)
                     && $outcome->degree !== BeatOutcome::FAILURE) {
                     $moved = true;
                 }
@@ -295,8 +299,8 @@ class TurnResolver
             // What the player's own beats settled about who walks with them.
             foreach ($outcomes as $outcome) {
                 $key = match ($outcome->skipped ? null : $outcome->verb) {
-                    'companion_welcome' => 'joined',
-                    'companion_dismiss' => 'parted',
+                    Verb::CompanionWelcome->value => 'joined',
+                    Verb::CompanionDismiss->value => 'parted',
                     default => null,
                 };
                 if ($key !== null) {
@@ -419,7 +423,7 @@ class TurnResolver
             $actor = Actor::find($target['id']);
             // Restrained is a live state: captive-leverage cards stay legal.
             // Track is the exception that WANTS a fled target — that is the trail.
-            $legal = $card['verb'] === 'track' ? ['fled'] : ['active', 'restrained'];
+            $legal = $card['verb'] === Verb::Track->value ? ['fled'] : ['active', 'restrained'];
             if ($actor === null || ! in_array($actor->status, $legal, true)) {
                 return "{$target['name']} is no longer a factor.";
             }
@@ -441,7 +445,7 @@ class TurnResolver
         }
 
         // Lifting wants hands the chain may have filled since the offer.
-        if ($card['verb'] === 'lift' && Hands::free($character) < 1) {
+        if ($card['verb'] === Verb::Lift->value && Hands::free($character) < 1) {
             return 'Their hands are already full.';
         }
 
@@ -538,7 +542,7 @@ class TurnResolver
         // the roll above. It rides along as a resolved fact so the narrator
         // (and the reader's event panel) know HOW the blow took shape.
         $method = $choice['modifiers']['method'] ?? null;
-        if ($verb === 'strike' && is_string($method) && $method !== '' && $method !== 'unspecified') {
+        if ($verb === Verb::Strike->value && is_string($method) && $method !== '' && $method !== 'unspecified') {
             array_unshift($facts, "The attack came as {$method}.");
         }
 
@@ -576,26 +580,29 @@ class TurnResolver
     {
         $facts = [];
 
-        switch ($card['verb']) {
-            case 'bargain':
+        // The catalog, not the raw string: a verb the composer emits and this
+        // switch has never heard of falls straight through to the quiet
+        // default, which is the drift the Verb enum exists to make impossible.
+        switch (Verb::tryFrom($card['verb'])) {
+            case Verb::Bargain:
                 // Taking a returned grudge's terms. Roll-free — the deal was
                 // theirs to offer — and its whole mechanical content is the
                 // closed list the engine picked at their return.
                 $facts = Grudges::strikeBargain($card, $scene, $turn);
                 break;
-            case 'time_slow':
+            case Verb::TimeSlow:
                 $conditions['time_slowed'] = true;
                 $facts[] = 'A time-slow charge was spent; the coming moments stretch in their favor.';
                 break;
-            case 'haste':
+            case Verb::Haste:
                 $conditions['hastened'] = true;
                 $facts[] = 'A haste charge was spent; they move ahead of the world.';
                 break;
-            case 'ready':
+            case Verb::Ready:
                 $conditions['readied'] = true;
                 $facts[] = 'They set themselves, waiting for the precise instant.';
                 break;
-            case 'examine':
+            case Verb::Examine:
                 // Examination has teeth: it can surface what the scene hides,
                 // or read an enemy's next move — plain summary only when
                 // there is genuinely nothing left to find.
@@ -618,7 +625,7 @@ class TurnResolver
                     $facts[] = 'They studied the scene: '.$this->sceneSummary($scene);
                 }
                 break;
-            case 'inspect':
+            case Verb::Inspect:
                 // Reading one thing properly, rather than the whole scene:
                 // what it is and what it would give, in plain sight-language.
                 $feature = $scene->allFeatures()->firstWhere('id', $card['target']['id'] ?? 0);
@@ -626,13 +633,13 @@ class TurnResolver
                     ? 'What they went to look at was no longer there to look at.'
                     : "They read {$feature->name} closely. ".implode(' ', $feature->readings());
                 break;
-            case 'wait':
+            case Verb::Wait:
                 $facts[] = 'They held still and let the scene move first.';
                 break;
-            case 'catch_breath':
+            case Verb::CatchBreath:
                 $facts[] = 'They took a slow breath and steadied themselves.';
                 break;
-            case 'reposition':
+            case Verb::Reposition:
                 // Moving denies the angle any circling enemy was hunting.
                 $denied = false;
                 foreach ($scene->actors()->where('status', 'active')->get() as $mover) {
@@ -647,20 +654,20 @@ class TurnResolver
                     ? 'They shifted footing and broke the angle being worked against them.'
                     : 'They shifted to safer footing.';
                 break;
-            case 'brace':
+            case Verb::Brace:
                 $conditions['braced'] = true;
                 $facts[] = 'They set themselves against the blow they saw coming.';
                 break;
-            case 'command':
+            case Verb::Command:
                 $conditions['commanded'] = true;
                 $facts[] = 'They called the play, and their companions moved with borrowed precision.';
                 break;
-            case 'shield':
+            case Verb::Shield:
                 $conditions['shielded'] = true;
                 $conditions['shield_actor_id'] = $card['target']['id'] ?? null;
                 $facts[] = 'They kept their captive between themselves and the danger.';
                 break;
-            case 'companion_welcome':
+            case Verb::CompanionWelcome:
                 // The answer to somebody who already asked. Roll-free, and it
                 // has to be: the other half of the consent has been given, and
                 // a die that could refuse a yes would be the engine overruling
@@ -679,7 +686,7 @@ class TurnResolver
                 $facts[] = "{$asker->name} fell in beside them — a companion now, walking the same tale.";
                 break;
 
-            case 'companion_dismiss':
+            case Verb::CompanionDismiss:
                 // Parting is never a dead choice: they go, and they leave one
                 // true thing behind. Colour, and nothing the engine will ever
                 // charge or credit anyone for.
@@ -695,7 +702,7 @@ class TurnResolver
                 $facts[] = Companions::partingGift($leaving);
                 break;
 
-            case 'drop':
+            case Verb::Drop:
                 // Putting a thing down is never in doubt, and it must never
                 // be: a player who picks something up has to be able to get
                 // their hands back without asking the dice for permission.
@@ -767,8 +774,10 @@ class TurnResolver
         $targetName = $card['target']['name'] ?? 'the scene';
         $succeeded = in_array($degree, [BeatOutcome::STRONG, BeatOutcome::SUCCESS], true);
 
-        switch ($verb) {
-            case 'ascend':
+        $word = Verb::tryFrom($verb);
+
+        switch ($word) {
+            case Verb::Ascend:
                 if ($succeeded) {
                     $conditions['elevated'] = true;
                     $scene->update(['state' => array_merge($scene->state ?? [], ['elevated' => true, 'position' => $targetName])]);
@@ -782,7 +791,7 @@ class TurnResolver
                 }
                 break;
 
-            case 'strike':
+            case Verb::Strike:
                 $actor = Actor::find($card['target']['id']);
                 $damage = match ($degree) {
                     BeatOutcome::STRONG => 3,
@@ -812,7 +821,7 @@ class TurnResolver
                 }
                 break;
 
-            case 'intimidate':
+            case Verb::Intimidate:
                 $actor = Actor::find($card['target']['id']);
                 if ($succeeded && $actor !== null) {
                     // How they were driven off travels with them: the flights
@@ -829,15 +838,15 @@ class TurnResolver
                 }
                 break;
 
-            case 'restrain':
-            case 'haul':
+            case Verb::Restrain:
+            case Verb::Haul:
                 $actor = Actor::find($card['target']['id']);
                 if ($succeeded && $actor !== null) {
                     $actor->update(['status' => 'restrained']);
-                    $facts[] = $verb === 'haul'
+                    $facts[] = $word === Verb::Haul
                         ? "They seized {$actor->name} and swung skyward, hauling their captive with them."
                         : "{$actor->name} is bound and out of the fight.";
-                    if ($verb === 'haul') {
+                    if ($word === Verb::Haul) {
                         $conditions['elevated'] = true;
                         $scene->update(['state' => array_merge($scene->state ?? [], ['elevated' => true])]);
                     }
@@ -848,24 +857,24 @@ class TurnResolver
                 }
                 break;
 
-            case 'persuade':
-            case 'deceive':
-            case 'calm':
+            case Verb::Persuade:
+            case Verb::Deceive:
+            case Verb::Calm:
                 $actor = Actor::find($card['target']['id']);
                 if ($succeeded && $actor !== null) {
                     $tags = $actor->tags ?? [];
-                    $tags['disposition'] = $verb === 'calm' ? 'calmed' : 'swayed';
+                    $tags['disposition'] = $word === Verb::Calm ? 'calmed' : 'swayed';
                     if ($actor->kind === 'enemy') {
                         $tags['fled_how'] = 'talked';
                     }
                     $actor->update(['tags' => $tags, 'status' => $actor->kind === 'enemy' ? 'fled' : $actor->status]);
-                    $facts[] = "Words landed: {$actor->name} was ".($verb === 'calm' ? 'calmed' : 'won over').'.';
+                    $facts[] = "Words landed: {$actor->name} was ".($word === Verb::Calm ? 'calmed' : 'won over').'.';
                 } else {
                     $facts[] = "The words found no purchase on {$targetName}.";
                 }
                 break;
 
-            case 'speak':
+            case Verb::Speak:
                 // Plain conversation: no trained tongue behind it, so it
                 // opens a door at best — it never routs anyone the way the
                 // capability verbs can.
@@ -883,7 +892,7 @@ class TurnResolver
                 }
                 break;
 
-            case 'hide':
+            case Verb::Hide:
                 if ($succeeded) {
                     $conditions['concealed'] = true;
                     $facts[] = "They folded into the cover of {$targetName}, unseen.";
@@ -892,7 +901,7 @@ class TurnResolver
                 }
                 break;
 
-            case 'scout':
+            case Verb::Scout:
                 $hidden = $scene->features()->get()->first(
                     fn ($f) => ($f->state['hidden'] ?? false) && ! ($f->state['destroyed'] ?? false),
                 );
@@ -909,7 +918,7 @@ class TurnResolver
                 }
                 break;
 
-            case 'detect':
+            case Verb::Detect:
                 $lurker = $scene->actors()->where('status', 'active')->get()
                     ->first(fn (Actor $a) => $a->tags['lurking'] ?? false);
                 if ($succeeded && $lurker !== null) {
@@ -925,7 +934,7 @@ class TurnResolver
                 }
                 break;
 
-            case 'track':
+            case Verb::Track:
                 $quarry = Actor::find($card['target']['id']);
                 if ($quarry === null || $quarry->status !== 'fled') {
                     $facts[] = 'The trail was already cold.';
@@ -948,7 +957,7 @@ class TurnResolver
                 }
                 break;
 
-            case 'interrupt':
+            case Verb::Interrupt:
                 $actor = Actor::find($card['target']['id']);
                 if ($actor === null || ($actor->tags['intent'] ?? null) !== 'windup') {
                     $facts[] = 'The moment to break it had already passed.';
@@ -984,7 +993,7 @@ class TurnResolver
                 }
                 break;
 
-            case 'venture':
+            case Verb::Venture:
                 // Crossing the frontier: the whole zone changes underfoot.
                 if ($degree !== BeatOutcome::FAILURE) {
                     $scene->update(['state' => array_merge($scene->state ?? [], ['venture_zone_id' => $card['target']['id']])]);
@@ -999,10 +1008,10 @@ class TurnResolver
                 }
                 break;
 
-            case 'flee':
-            case 'cross':
+            case Verb::Flee:
+            case Verb::Cross:
                 if ($succeeded) {
-                    $facts[] = $verb === 'flee'
+                    $facts[] = $word === Verb::Flee
                         ? "They made their escape through {$targetName}."
                         : "They crossed {$targetName} and left the old ground behind.";
                 } elseif ($degree === BeatOutcome::PARTIAL) {
@@ -1013,7 +1022,7 @@ class TurnResolver
                 }
                 break;
 
-            case 'break':
+            case Verb::Break:
                 $feature = $scene->allFeatures()->firstWhere('id', $card['target']['id']);
                 if ($succeeded && $feature !== null) {
                     $feature->update(['state' => array_merge($feature->state ?? [], ['destroyed' => true])]);
@@ -1023,7 +1032,7 @@ class TurnResolver
                 }
                 break;
 
-            case 'lift':
+            case Verb::Lift:
                 // A lift that lands ends with the thing HELD. It stops being
                 // ground the moment it leaves the floor: the composer will
                 // not offer it as scenery again until it is set down.
@@ -1040,7 +1049,7 @@ class TurnResolver
                 }
                 break;
 
-            case 'ride':
+            case Verb::Ride:
                 $facts[] = $succeeded
                     ? "They committed to {$targetName} and were carried clean across the scene."
                     : "{$targetName} bucked them off early — a hard landing, but a survivable one.";
@@ -1049,20 +1058,20 @@ class TurnResolver
                 }
                 break;
 
-            case 'bandage':
+            case Verb::Bandage:
                 $heal = $degree === BeatOutcome::STRONG ? 3 : 2;
                 Meters::heal($character, $heal);
                 $facts[] = "They bound their wounds (+{$heal} health).";
                 break;
 
-            case 'loot':
+            case Verb::Loot:
                 $defeated = $scene->actors()->whereIn('status', ['defeated', 'dead'])->count();
                 $facts[] = $defeated > 0
                     ? 'They searched the fallen and took what was worth taking.'
                     : 'There was no one left worth searching.';
                 break;
 
-            case 'recover':
+            case Verb::Recover:
                 // Going back for what a fumble tore out of their hands. The
                 // item's granted capabilities come back with it, so the form
                 // itself widens again the moment they have it.
@@ -1083,7 +1092,7 @@ class TurnResolver
                 }
                 break;
 
-            case 'recruit':
+            case Verb::Recruit:
                 $actor = Actor::find($card['target']['id']);
                 if ($succeeded && $actor !== null && ! Companions::atCap($scene)) {
                     // The asked path into the same one door every companion
@@ -1102,7 +1111,7 @@ class TurnResolver
                 }
                 break;
 
-            case 'companion_block':
+            case Verb::CompanionBlock:
                 $companion = Actor::find($card['target']['id']);
                 $threat = $scene->visibleActors()->first(fn (Actor $a) => $a->kind === 'enemy');
                 if ($companion === null || $threat === null) {
@@ -1129,7 +1138,7 @@ class TurnResolver
                 }
                 break;
 
-            case 'companion_flank':
+            case Verb::CompanionFlank:
                 $companion = Actor::find($card['target']['id']);
                 if ($succeeded && $companion !== null) {
                     $conditions['flanked'] = true;
@@ -1139,7 +1148,7 @@ class TurnResolver
                 }
                 break;
 
-            case 'companion_strike':
+            case Verb::CompanionStrike:
                 $companion = Actor::find($card['target']['id']);
                 $enemy = $scene->visibleActors()->first(fn (Actor $a) => $a->kind === 'enemy');
                 if ($companion === null || $enemy === null) {
@@ -1176,7 +1185,7 @@ class TurnResolver
                 }
                 break;
 
-            case 'companion_scout':
+            case Verb::CompanionScout:
                 $companion = Actor::find($card['target']['id']);
                 if ($succeeded && $companion !== null) {
                     $scene->update(['state' => array_merge($scene->state ?? [], ['exit_scouted' => true])]);
@@ -1186,7 +1195,7 @@ class TurnResolver
                 }
                 break;
 
-            case 'companion_harry':
+            case Verb::CompanionHarry:
                 // The fellow's own trick: drag the angle a foe was working off
                 // the player and onto themselves. It reuses the block's own
                 // vocabulary rather than inventing a second one — a partial
@@ -1220,7 +1229,7 @@ class TurnResolver
                 }
                 break;
 
-            case 'companion_distract':
+            case Verb::CompanionDistract:
                 // Pull the attention off whatever it was gathering for. The
                 // windup dies and they go back to circling — the existing
                 // telegraph vocabulary, moved, never a new state.
@@ -1246,7 +1255,7 @@ class TurnResolver
                 }
                 break;
 
-            case 'companion_forage':
+            case Verb::CompanionForage:
                 // Walking the ground, on their legs instead of yours.
                 $companion = Actor::find($card['target']['id']);
                 $kept = $scene->features()->get()->first(
@@ -1262,7 +1271,7 @@ class TurnResolver
                 }
                 break;
 
-            case 'hurl':
+            case Verb::Hurl:
                 // Two different things leave your hands this way, and the
                 // TARGET says which. A held captive is thrown as a captive;
                 // anything else aimed at while carrying something is the
@@ -1305,7 +1314,7 @@ class TurnResolver
                 }
                 break;
 
-            case 'improvise':
+            case Verb::Improvise:
                 // Base stats, no special bonus — never better than a real
                 // enumerated option, so there's no incentive to game it. The
                 // target only says what the gambit was aimed at; it buys the
