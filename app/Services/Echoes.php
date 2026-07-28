@@ -96,19 +96,35 @@ class Echoes
     public const MAX_FRAME_WORDS = 30;
 
     /**
-     * The engine's frame per rhyme: what makes this a memory rather than a
-     * quotation with no reason to be here. Deliberately plain and
-     * setting-neutral — the remembered tale may have been set in a completely
-     * different land, and the frame has to read honestly across the pair.
+     * The engine's frame per rhyme, in two registers — because whether the
+     * shelf speaks as MEMORY or as LEGEND is a claim about the world, and the
+     * engine only makes the claim it can back.
+     *
+     * When the remembered tale stood on a DIFFERENT land, the frame is a
+     * memory: a thing that comes to them out of another life, owing nobody any
+     * geography. When the two tales share their land, the universe demonstrably
+     * is one place — so the frame speaks as the land's own story, and the
+     * player's old protagonists get their afterlife as figures the ground
+     * still tells of. Same rhymes, same caps, same clamps; only the voice
+     * changes, and only where it is earned.
      *
      * @var array<string, string>
      */
-    private const FRAMES = [
+    private const MEMORY_FRAMES = [
         self::THE_MARK => 'Another life of theirs came away marked like this. "{quote}" — from the tale of {title}.',
         self::THE_RIVAL => 'Another life of theirs closed a score like this one. "{quote}" — from the tale of {title}.',
         self::THE_COMPANY => 'Somebody walked beside them once before, in another life. "{quote}" — from the tale of {title}.',
         self::OLD_GROUND => 'They have stood on ground like this before. "{quote}" — from the tale of {title}.',
         self::THE_GATHERING => 'Another life of theirs gathered toward its end like this. "{quote}" — from the tale of {title}.',
+    ];
+
+    /** @var array<string, string> */
+    private const LEGEND_FRAMES = [
+        self::THE_MARK => 'This land still tells of one who came away marked like this. "{quote}" — from the tale of {title}.',
+        self::THE_RIVAL => 'They tell a story here of a score closed like this one. "{quote}" — from the tale of {title}.',
+        self::THE_COMPANY => 'This land remembers two who walked it together once. "{quote}" — from the tale of {title}.',
+        self::OLD_GROUND => 'This ground remembers one who stood here before them. "{quote}" — from the tale of {title}.',
+        self::THE_GATHERING => 'They still tell how an older tale gathered toward its end here. "{quote}" — from the tale of {title}.',
     ];
 
     /** Which shelf each memento-column rhyme draws from, and only that one. */
@@ -329,7 +345,10 @@ class Echoes
      */
     private static function write(Campaign $campaign, Turn $turn, string $rhyme, array $pick): array
     {
-        $line = self::assemble($rhyme, $pick['quote'], self::titleOf($pick['campaign']));
+        $line = self::assemble(
+            $rhyme, $pick['quote'], self::titleOf($pick['campaign']),
+            legend: self::sharedGround($campaign, $pick['campaign']),
+        );
 
         EchoLine::create([
             'campaign_id' => $campaign->id,
@@ -347,12 +366,27 @@ class Echoes
         return ['rhyme' => $rhyme, 'line' => $line];
     }
 
-    private static function assemble(string $rhyme, string $quote, string $title): string
+    private static function assemble(string $rhyme, string $quote, string $title, bool $legend): string
     {
-        return trim(strtr(self::FRAMES[$rhyme] ?? self::FRAMES[self::OLD_GROUND], [
+        $frames = $legend ? self::LEGEND_FRAMES : self::MEMORY_FRAMES;
+
+        return trim(strtr($frames[$rhyme] ?? $frames[self::OLD_GROUND], [
             '{quote}' => $quote,
             '{title}' => $title,
         ]));
+    }
+
+    /**
+     * Whether the two tales stood on the same land — the whole test for the
+     * legend register. Derived rather than stored, like the quote: the land is
+     * fixed for a campaign's life, so the answer cannot drift, and reading the
+     * stored flavor directly never rolls one for a tale that has none.
+     */
+    private static function sharedGround(Campaign $campaign, Campaign $tale): bool
+    {
+        $land = trim((string) $campaign->world_flavor);
+
+        return $land !== '' && $land === trim((string) $tale->world_flavor);
     }
 
     /** What that tale is called on the shelf: its bound title, else its name. */
@@ -398,15 +432,30 @@ class Echoes
         }
 
         $words = self::MAX_FRAME_WORDS;
-        $title = self::titleOf($echo->sourceCampaign ?? $turn->campaign);
+        $source = $echo->sourceCampaign;
+        $title = self::titleOf($source ?? $turn->campaign);
         $line = $echo->line;
+
+        // The register is re-derived, never trusted from the stored line: the
+        // land is fixed for both tales' lives, so the same echo always speaks
+        // in the same voice, retries included.
+        if ($source !== null && self::sharedGround($turn->campaign, $source)) {
+            return <<<REMEMBER
+
+            ## A story this land still tells (fixed fact — the quoted words are exact)
+            {$line}
+            This is a LEGEND of this same land — an older, finished tale that truly happened on this ground, and the character may have heard it told. Give it one small moment inside the action — a story recalled, a name spoken by the fire — and move on. It is telling, not happening: nobody from that tale is present, nobody in this scene acts on it, and it changes nothing standing here.
+            You may reword the wrapper around the quoted words in at most {$words} words, if it lands better told in this land's voice. The quoted words themselves, and the name "{$title}", must appear exactly as given. Otherwise repeat the whole line exactly.
+
+            REMEMBER;
+        }
 
         return <<<REMEMBER
 
         ## Something they remember from another life (fixed fact — the quoted words are exact)
         {$line}
         This is a MEMORY of a tale that is already finished, not something happening here. Give it one small moment inside the action — a thing that comes to them and is let go of — and move on. Nobody in this scene knows it, nobody acts on it, and it changes nothing standing here.
-        That other tale may have been set in a completely different land: name it only as the memory it is, and never bring its ground, its weather, or its people into this one. Nobody and nothing from it is present.
+        That other tale was set in a different land: name it only as the memory it is, and never bring its ground, its weather, or its people into this one. Nobody and nothing from it is present.
         You may reword the wrapper around the quoted words in at most {$words} words, if it lands better in this land's voice. The quoted words themselves, and the name "{$title}", must appear exactly as given. Otherwise repeat the whole line exactly.
 
         REMEMBER;

@@ -68,10 +68,26 @@ rhyme draws only from its own column. Closed list:
 | `old_ground`   | a scene opened in a land a finished tale was set in          | that tale's `first_ground` memento line, else its first chapter's `intent_line` |
 | `the_gathering`| the finale ARMED this turn                                   | the closing chapter's `intent_line` of a finished tale |
 
-The frame is engine-templated per rhyme ("Another life left a mark like this
-one: «line» — from the tale of <title>", in plain prose register), the quote
-verbatim, the source title named. When several sources qualify, the pick is
-seeded; when none does, the rhyme is silent.
+The frame is engine-templated per rhyme in TWO registers, and which one
+speaks is a claim about the world the engine only makes when it can back it:
+
+- **Memory** (the source tale stood on a different land): "Another life of
+  theirs came away marked like this: «line» — from the tale of <title>." A
+  half-remembered other life owes nobody any geography, so wildly different
+  lands and tech levels never collide.
+- **Legend** (the two tales share their `world_flavor`): "This land still
+  tells of one who came away marked like this…" — the shared universe made
+  audible exactly where it demonstrably IS shared. Past protagonists get
+  their afterlife as figures the ground still tells of; the `old_ground`
+  rhyme lands in this register by construction. The narrator guidance shifts
+  with it (a story the character may have heard told, rather than a private
+  remembering) while every other rule holds: telling, not happening — nobody
+  from that tale is present.
+
+The register is DERIVED from the two campaigns' stored lands, never stored —
+like the quote itself, it cannot drift. The quote stays verbatim, the source
+title named. When several sources qualify, the pick is seeded; when none
+does, the rhyme is silent.
 
 ## Data model
 

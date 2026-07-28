@@ -476,6 +476,42 @@ class EchoTest extends TestCase
         $this->assertSame(1, EchoLine::where('turn_id', $turn->id)->count());
     }
 
+    /**
+     * The two registers: on shared ground the shelf speaks as this land's own
+     * legend; anywhere else it speaks as memory. The register is a claim about
+     * the world, and the engine only makes the one the two lands can back.
+     */
+    public function test_the_frame_speaks_as_legend_on_shared_ground_and_as_memory_elsewhere()
+    {
+        $near = $this->endedTale('The Long Winter', flavor: 'harbor-city');
+        $this->keepsake($near, 'scar_taken', 'It came away with them from the upper stair.');
+
+        $campaign = $this->createCampaign(flavor: 'harbor-city');
+        $this->openBareTurn($campaign);
+
+        $turn = $this->bareTurn($campaign, 90);
+        $legend = Echoes::consider($turn, [Echoes::THE_MARK], new Dice(3));
+
+        $this->assertStringContainsString('This land still tells', $legend['line']);
+        $this->assertStringContainsString('A story this land still tells', Echoes::narratorBlock($turn));
+
+        // The same rhyme sourced from tales that stood on DIFFERENT ground is
+        // a memory, whichever closed book the dice pick — neither land here
+        // matches the present one.
+        $far = $this->endedTale('The Glass Orchard', flavor: 'ash-steppe');
+        $this->keepsake($far, 'scar_taken', 'The orchard kept a sliver of them.');
+
+        $elsewhere = $this->createCampaign('A Tale Elsewhere', flavor: 'neon-sprawl');
+        $this->openBareTurn($elsewhere);
+
+        $turn = $this->bareTurn($elsewhere, 90);
+        $memory = Echoes::consider($turn, [Echoes::THE_MARK], new Dice(3));
+
+        $this->assertStringContainsString('Another life', $memory['line']);
+        $this->assertStringContainsString('another life', Echoes::narratorBlock($turn));
+        $this->assertStringNotContainsString('This land still tells', $memory['line']);
+    }
+
     public function test_the_pick_is_seeded()
     {
         config(['game.echoes.cooldown_chapters' => 0]);
@@ -563,9 +599,11 @@ class EchoTest extends TestCase
         app(Narrator::class)->narrate($turn->fresh());
 
         $prompt = collect($this->prompts)->first(fn (string $p) => str_contains($p, 'You are the narrator'));
-        $this->assertStringContainsString('Something they remember from another life', $prompt);
+        // Both tales stand on the same land, so the block arrives in the
+        // legend register — the shared universe spoken only where it is real.
+        $this->assertStringContainsString('A story this land still tells', $prompt);
         $this->assertStringContainsString($engineWords, $prompt);
-        $this->assertStringContainsString('Nobody in this scene knows it', $prompt);
+        $this->assertStringContainsString('nobody in this scene acts on it', $prompt);
 
         $after = EchoLine::first();
         $this->assertSame($this->reworded, $after->line);

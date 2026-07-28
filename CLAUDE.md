@@ -233,7 +233,11 @@ adjudicates legality or outcomes — it is only ever handed resolved facts.
   is never asked to remember on the player's behalf. The row on `echoes` stores
   the source campaign, type, and id, so the quote is re-derived from the real
   persisted row rather than copied — the narrator may reword only the FRAME
-  around it. Rare by four caps in `config/game.php` `echoes`: a seeded chance,
+  around it. The frame speaks in two registers, derived (never stored) from
+  the two tales' lands: MEMORY ("another life") when the lands differ, LEGEND
+  ("this land still tells of…") when they match — the shared universe made
+  audible only where the ground can back the claim, `old_ground` always
+  legend by construction. Rare by four caps in `config/game.php` `echoes`: a seeded chance,
   `campaign_cap` 4, `cooldown_chapters` 3 (counted in turns — a chapter is one
   turn's telling), one per turn, and each source line once per campaign. No
   push; it lands as the `echo` resolution key, one narrator block, and one
