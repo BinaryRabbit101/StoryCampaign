@@ -62,10 +62,34 @@ export interface CardBargain {
     complication_label: string;
 }
 
+/**
+ * The nine words the verb board is built from. Presentation only — the engine
+ * never resolves a family, and no card is ever composed from one. The list is
+ * `App\Game\VerbFamily`; the page never decides membership, it only draws it.
+ */
+export type VerbFamily =
+    | 'look'
+    | 'go'
+    | 'take'
+    | 'fight'
+    | 'speak'
+    | 'hide'
+    | 'tend'
+    | 'wait'
+    | 'do';
+
 export interface ActionCard {
     id: string;
     slot: 'pre' | 'main' | 'post' | 'companion';
     verb: string;
+    /**
+     * Which board word this card sits under, decided by the engine's catalog.
+     * The client never re-derives it: a second copy of the vocabulary living
+     * here is how a verb added last week ends up filed under nothing.
+     */
+    family: VerbFamily;
+    /** The verb's own short name, for the board's second level. */
+    verb_label: string;
     label: string;
     description: string;
     target: { type: string; id: number | null; name: string } | null;

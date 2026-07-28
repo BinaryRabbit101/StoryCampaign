@@ -6,6 +6,7 @@ use App\Game\Capability;
 use App\Game\Hands;
 use App\Game\Meters;
 use App\Game\TurnSlot;
+use App\Game\Verb;
 use App\Models\Actor;
 use App\Models\Character;
 use App\Models\Scene;
@@ -73,11 +74,11 @@ class CardComposer
         if ($scene->state['exit_scouted'] ?? false) {
             $cards['main'][] = new ActionCard(
                 slot: TurnSlot::Main,
-                verb: 'flee',
+                verb: Verb::Flee->value,
                 label: 'Take the scouted way out',
                 description: 'Slip out through the route your companion found. It holds until the scene turns.',
                 target: ['type' => 'exit', 'id' => null, 'name' => 'the scouted way out'],
-                modifiers: [$this->approachModifier('flee')],
+                modifiers: [$this->approachModifier(Verb::Flee)],
             );
         }
 
@@ -106,11 +107,11 @@ class CardComposer
         if ($frontier !== null) {
             $cards['main'][] = new ActionCard(
                 slot: TurnSlot::Main,
-                verb: 'venture',
+                verb: Verb::Venture->value,
                 label: "Press on toward {$frontier->name}",
                 description: "Leave {$scene->zone->name} behind for good. {$frontier->description}",
                 target: ['type' => 'zone', 'id' => $frontier->id, 'name' => $frontier->name],
-                modifiers: [$this->approachModifier('venture')],
+                modifiers: [$this->approachModifier(Verb::Venture)],
             );
         }
 
@@ -192,7 +193,7 @@ class CardComposer
 
             $cards[] = new ActionCard(
                 slot: TurnSlot::Post,
-                verb: 'drop',
+                verb: Verb::Drop->value,
                 label: "Set down {$entry['name']}",
                 description: 'Put it down and have your hands back.',
                 target: $target,
@@ -204,13 +205,13 @@ class CardComposer
                 }
                 $cards[] = new ActionCard(
                     slot: TurnSlot::Main,
-                    verb: 'hurl',
+                    verb: Verb::Hurl->value,
                     label: "Throw {$entry['name']} at {$actor->name}",
                     description: "Everything you are holding, all at once. {$entry['name']} does not come back to your hands.",
                     target: ['type' => 'actor', 'id' => $actor->id, 'name' => $actor->name],
                     capability: 'lift',
                     risk: 'risky',
-                    modifiers: [$this->approachModifier('hurl')],
+                    modifiers: [$this->approachModifier(Verb::Hurl)],
                 );
             }
         }
@@ -354,7 +355,7 @@ class CardComposer
             }
             $cards[] = new ActionCard(
                 slot: TurnSlot::Main,
-                verb: 'cross',
+                verb: Verb::Cross->value,
                 label: ucfirst($via)." across {$feature->name}",
                 description: $risk === 'degraded'
                     ? "The {$feature->name} is at the very edge of what you can clear. Risky."
@@ -362,7 +363,7 @@ class CardComposer
                 target: $target,
                 capability: $capability->value,
                 risk: $risk,
-                modifiers: [$this->approachModifier('cross')],
+                modifiers: [$this->approachModifier(Verb::Cross)],
             );
         }
 
@@ -374,7 +375,7 @@ class CardComposer
                 $tight = $grade > $required;
                 $cards[] = new ActionCard(
                     slot: TurnSlot::Main,
-                    verb: 'flee',
+                    verb: Verb::Flee->value,
                     label: "Flee into {$feature->name}",
                     description: $tight
                         ? "You can just barely fit through {$feature->name} — a tight squeeze, and it will cost you time."
@@ -382,7 +383,7 @@ class CardComposer
                     target: $target,
                     capability: 'squeeze',
                     risk: $tight ? 'degraded' : 'safe',
-                    modifiers: [$this->approachModifier('flee')],
+                    modifiers: [$this->approachModifier(Verb::Flee)],
                 );
             }
         }
@@ -394,7 +395,7 @@ class CardComposer
             if (! $blocked) {
                 $cards[] = new ActionCard(
                     slot: TurnSlot::Pre,
-                    verb: 'hide',
+                    verb: Verb::Hide->value,
                     label: "Take cover behind {$feature->name}",
                     description: "Conceal yourself using {$feature->name} before acting.",
                     target: $target,
@@ -410,12 +411,12 @@ class CardComposer
             $item = $affordances['dropped_item'];
             $cards[] = new ActionCard(
                 slot: TurnSlot::Main,
-                verb: 'recover',
+                verb: Verb::Recover->value,
                 label: "Take up {$item['name']}",
                 description: "Go back for {$item['name']} and get it in your hands again. Everything it was giving you comes back with it.",
                 target: $target,
                 risk: 'safe',
-                modifiers: [$this->approachModifier('recover')],
+                modifiers: [$this->approachModifier(Verb::Recover)],
             );
         }
 
@@ -423,13 +424,13 @@ class CardComposer
         if (isset($affordances['breakable']) && isset($capabilities['break'])) {
             $cards[] = new ActionCard(
                 slot: TurnSlot::Main,
-                verb: 'break',
+                verb: Verb::Break->value,
                 label: "Break {$feature->name}",
                 description: "Force {$feature->name} open or apart.",
                 target: $target,
                 capability: 'break',
                 risk: 'risky',
-                modifiers: [$this->approachModifier('break')],
+                modifiers: [$this->approachModifier(Verb::Break)],
             );
         }
 
@@ -444,7 +445,7 @@ class CardComposer
             if ($mag >= $weight * 0.75 && Hands::free($character) >= $hands) {
                 $cards[] = new ActionCard(
                     slot: TurnSlot::Main,
-                    verb: 'lift',
+                    verb: Verb::Lift->value,
                     label: "Take up {$feature->name}",
                     description: $mag >= $weight
                         ? "Heave {$feature->name} up and hold it. {$grip}"
@@ -461,7 +462,7 @@ class CardComposer
             if (isset($capabilities[$via])) {
                 $cards[] = new ActionCard(
                     slot: TurnSlot::Main,
-                    verb: 'ride',
+                    verb: Verb::Ride->value,
                     label: 'Ride '.$feature->name,
                     description: "Commit to the {$feature->name} and let it carry you.",
                     target: $target,
@@ -510,7 +511,7 @@ class CardComposer
 
         return new ActionCard(
             slot: TurnSlot::Pre,
-            verb: 'ascend',
+            verb: Verb::Ascend->value,
             label: ucfirst($capability->label())." up to {$feature->name}",
             description: $description,
             target: $target,
@@ -540,14 +541,14 @@ class CardComposer
             return [
                 new ActionCard(
                     slot: TurnSlot::Main,
-                    verb: 'companion_welcome',
+                    verb: Verb::CompanionWelcome->value,
                     label: "Welcome {$actor->name}",
                     description: "{$asked} Say yes, and they leave this place at your side.",
                     target: $target,
                 ),
                 new ActionCard(
                     slot: TurnSlot::Main,
-                    verb: 'companion_dismiss',
+                    verb: Verb::CompanionDismiss->value,
                     label: "Send {$actor->name} on their way",
                     description: "{$asked} Part well instead — nobody walks off from you with nothing.",
                     target: $target,
@@ -562,7 +563,7 @@ class CardComposer
             return [
                 new ActionCard(
                     slot: TurnSlot::Main,
-                    verb: 'speak',
+                    verb: Verb::Speak->value,
                     label: "Speak with {$actor->name}",
                     description: "{$actor->name} has been keeping near you without being asked. Say something to them.",
                     target: $target,
@@ -579,7 +580,7 @@ class CardComposer
             if (($tags['truce'] ?? false) && isset($tags['deal'])) {
                 $cards[] = new ActionCard(
                     slot: TurnSlot::Main,
-                    verb: 'bargain',
+                    verb: Verb::Bargain->value,
                     label: "Hear {$actor->name}'s terms",
                     description: "{$actor->name} has come to settle, not to fight. ".Grudges::dealDetail($tags['deal']).' Take the terms, and the old score dies here.',
                     target: $target,
@@ -599,27 +600,27 @@ class CardComposer
 
             $cards[] = new ActionCard(
                 slot: TurnSlot::Main,
-                verb: 'strike',
+                verb: Verb::Strike->value,
                 label: "Strike at {$actor->name}",
                 description: $description,
                 target: $target,
                 risk: 'risky',
-                modifiers: [$this->approachModifier('strike'), $this->methodModifier($character)],
+                modifiers: [$this->approachModifier(Verb::Strike), $this->methodModifier($character)],
             );
 
             if ($intent === 'windup') {
                 $cards[] = new ActionCard(
                     slot: TurnSlot::Main,
-                    verb: 'interrupt',
+                    verb: Verb::Interrupt->value,
                     label: "Break {$actor->name}'s windup",
                     description: "{$actor->name} is gathering something heavy. Get inside it before it lands.",
                     target: $target,
                     risk: 'risky',
-                    modifiers: [$this->approachModifier('interrupt')],
+                    modifiers: [$this->approachModifier(Verb::Interrupt)],
                 );
                 $cards[] = new ActionCard(
                     slot: TurnSlot::Pre,
-                    verb: 'brace',
+                    verb: Verb::Brace->value,
                     label: "Brace for {$actor->name}'s blow",
                     description: 'Set your footing against what you can see coming — the blow will find less of you.',
                     target: $target,
@@ -634,23 +635,26 @@ class CardComposer
             if ($scope === null || $actor->tier === $scope) {
                 $cards[] = new ActionCard(
                     slot: TurnSlot::Main,
-                    verb: 'intimidate',
+                    verb: Verb::Intimidate->value,
                     label: "Loom over {$actor->name}",
                     description: "Let your presence do the work — drive {$actor->name} back without a blow.",
                     target: $target,
                     capability: 'intimidate',
-                    modifiers: [$this->approachModifier('intimidate')],
+                    modifiers: [$this->approachModifier(Verb::Intimidate)],
                 );
             }
         }
 
         $spokenTo = false;
-        foreach (['persuade', 'deceive', 'calm'] as $social) {
+        foreach ([Verb::Persuade, Verb::Deceive, Verb::Calm] as $verb) {
+            // The three trained tongues share a capability name with their verb,
+            // which is why one loop can serve all of them.
+            $social = $verb->value;
             if (($tags[$social.'able'] ?? ($tags['talkable'] ?? false)) && isset($capabilities[$social])) {
                 $spokenTo = true;
                 $cards[] = new ActionCard(
                     slot: TurnSlot::Main,
-                    verb: $social,
+                    verb: $verb->value,
                     label: ucfirst($social)." {$actor->name}",
                     description: "Work on {$actor->name} with words.",
                     target: $target,
@@ -665,7 +669,7 @@ class CardComposer
         if (! $hostile && ! $spokenTo) {
             $cards[] = new ActionCard(
                 slot: TurnSlot::Main,
-                verb: 'speak',
+                verb: Verb::Speak->value,
                 label: "Speak with {$actor->name}",
                 description: "Open a plain conversation with {$actor->name} — no craft behind it, just what you have to say.",
                 target: $target,
@@ -678,7 +682,7 @@ class CardComposer
             && (($tags['companionable'] ?? false) || in_array($tags['disposition'] ?? null, ['swayed', 'calmed'], true))) {
             $cards[] = new ActionCard(
                 slot: TurnSlot::Main,
-                verb: 'recruit',
+                verb: Verb::Recruit->value,
                 label: "Ask {$actor->name} to come along",
                 description: "Invite {$actor->name} to walk this tale beside you. They decide.",
                 target: $target,
@@ -688,13 +692,13 @@ class CardComposer
         if (($tags['restrainable'] ?? $hostile) && isset($capabilities['restrain'])) {
             $cards[] = new ActionCard(
                 slot: TurnSlot::Main,
-                verb: 'restrain',
+                verb: Verb::Restrain->value,
                 label: "Restrain {$actor->name}",
                 description: "Bind {$actor->name} rather than harm them.",
                 target: $target,
                 capability: 'restrain',
                 risk: 'risky',
-                modifiers: [$this->approachModifier('restrain')],
+                modifiers: [$this->approachModifier(Verb::Restrain)],
             );
 
             // Composition, not enumeration: restrain + swing + carry_extra
@@ -706,14 +710,14 @@ class CardComposer
                     if (in_array('swing', $vias, true) && ! ($feature->state['destroyed'] ?? false)) {
                         $cards[] = new ActionCard(
                             slot: TurnSlot::Main,
-                            verb: 'haul',
+                            verb: Verb::Haul->value,
                             label: "Haul {$actor->name} up to {$feature->name}",
                             description: "Snatch {$actor->name} and swing to {$feature->name}, taking them with you.",
                             target: $target,
                             capability: 'restrain',
                             risk: 'risky',
                             composed: true,
-                            modifiers: [$this->approachModifier('haul')],
+                            modifiers: [$this->approachModifier(Verb::Haul)],
                         );
                         break;
                     }
@@ -739,7 +743,7 @@ class CardComposer
         // Pre: keep the captive between you and the danger.
         $cards[] = new ActionCard(
             slot: TurnSlot::Pre,
-            verb: 'shield',
+            verb: Verb::Shield->value,
             label: "Shield yourself with {$captive->name}",
             description: "Keep {$captive->name} between you and whatever answers — blows meant for you find your captive first.",
             target: $target,
@@ -752,7 +756,7 @@ class CardComposer
             $hasOtherEnemy = $actors->contains(fn (Actor $a) => $a->kind === 'enemy' && $a->id !== $captive->id);
             $cards[] = new ActionCard(
                 slot: TurnSlot::Main,
-                verb: 'hurl',
+                verb: Verb::Hurl->value,
                 label: "Hurl {$captive->name}".($hasOtherEnemy ? ' into the fray' : ' aside'),
                 description: $hasOtherEnemy
                     ? "Send {$captive->name} crashing into their allies. The hold ends — one way or the other."
@@ -761,7 +765,7 @@ class CardComposer
                 capability: isset($capabilities['lift']) ? 'lift' : 'carry_extra',
                 risk: 'risky',
                 composed: true,
-                modifiers: [$this->approachModifier('hurl')],
+                modifiers: [$this->approachModifier(Verb::Hurl)],
             );
         }
 
@@ -773,14 +777,14 @@ class CardComposer
                 if ($canGo && ! ($feature->state['destroyed'] ?? false)) {
                     $cards[] = new ActionCard(
                         slot: TurnSlot::Pre,
-                        verb: 'haul',
+                        verb: Verb::Haul->value,
                         label: "Drag {$captive->name} up to {$feature->name}",
                         description: "Take your captive with you to {$feature->name} — height, leverage, and a hostage in hand.",
                         target: $target,
                         capability: 'carry_extra',
                         risk: 'risky',
                         composed: true,
-                        modifiers: [$this->approachModifier('haul')],
+                        modifiers: [$this->approachModifier(Verb::Haul)],
                     );
                     break;
                 }
@@ -808,7 +812,7 @@ class CardComposer
             if ($hiddenRemains || ! ($scene->state['exit_scouted'] ?? false)) {
                 $cards[] = new ActionCard(
                     slot: TurnSlot::Pre,
-                    verb: 'scout',
+                    verb: Verb::Scout->value,
                     label: 'Read the ground',
                     description: 'Sweep the scene for what others miss — hidden ways, overlooked cover, a route out.',
                     capability: 'scout',
@@ -820,7 +824,7 @@ class CardComposer
             && $scene->activeActors()->contains(fn (Actor $a) => $a->tags['lurking'] ?? false)) {
             $cards[] = new ActionCard(
                 slot: TurnSlot::Pre,
-                verb: 'detect',
+                verb: Verb::Detect->value,
                 label: 'Something is wrong — find it',
                 description: 'The scene is off in a way you can almost name. Hunt the source before it moves first.',
                 capability: 'detect',
@@ -831,12 +835,12 @@ class CardComposer
             foreach ($scene->actors()->where('status', 'fled')->get() as $quarry) {
                 $cards[] = new ActionCard(
                     slot: TurnSlot::Main,
-                    verb: 'track',
+                    verb: Verb::Track->value,
                     label: "Follow {$quarry->name}'s trail",
                     description: "{$quarry->name} ran. Their trail is still warm — follow it out of this place.",
                     target: ['type' => 'actor', 'id' => $quarry->id, 'name' => $quarry->name],
                     capability: 'track',
-                    modifiers: [$this->approachModifier('track')],
+                    modifiers: [$this->approachModifier(Verb::Track)],
                 );
             }
         }
@@ -845,7 +849,7 @@ class CardComposer
             && $actors->contains(fn (Actor $a) => $a->kind === 'companion')) {
             $cards[] = new ActionCard(
                 slot: TurnSlot::Pre,
-                verb: 'command',
+                verb: Verb::Command->value,
                 label: 'Call the play',
                 description: "Direct your companions with a commander's precision — every request lands sharper this turn.",
                 capability: 'command',
@@ -873,7 +877,7 @@ class CardComposer
             $threat = $enemies->first();
             $cards[] = new ActionCard(
                 slot: TurnSlot::Companion,
-                verb: 'companion_block',
+                verb: Verb::CompanionBlock->value,
                 label: "Block {$threat->name}",
                 description: "{$companion->name} plants themselves in {$threat->name}'s path — held off from you, if the line holds.",
                 target: $target,
@@ -881,7 +885,7 @@ class CardComposer
             );
             $cards[] = new ActionCard(
                 slot: TurnSlot::Companion,
-                verb: 'companion_flank',
+                verb: Verb::CompanionFlank->value,
                 label: 'Flank the threat',
                 description: "{$companion->name} circles wide so the threat must look two ways — your strike lands harder.",
                 target: $target,
@@ -889,7 +893,7 @@ class CardComposer
             );
             $cards[] = new ActionCard(
                 slot: TurnSlot::Companion,
-                verb: 'companion_strike',
+                verb: Verb::CompanionStrike->value,
                 label: "Strike at {$threat->name}",
                 description: "{$companion->name} takes the fight to {$threat->name} themselves — and answers for how it goes.",
                 target: $target,
@@ -901,7 +905,7 @@ class CardComposer
         if (! ($scene->state['exit_scouted'] ?? false)) {
             $cards[] = new ActionCard(
                 slot: TurnSlot::Companion,
-                verb: 'companion_scout',
+                verb: Verb::CompanionScout->value,
                 label: 'Find a way out',
                 description: "{$companion->name} slips off to search for an exit while you hold the scene.",
                 target: $target,
@@ -935,7 +939,7 @@ class CardComposer
         return match (true) {
             $signature === Companions::HARRY && $threat !== null => new ActionCard(
                 slot: TurnSlot::Companion,
-                verb: Companions::HARRY,
+                verb: Verb::CompanionHarry->value,
                 label: "Harry {$threat->name}",
                 description: "{$companion->name} worries at {$threat->name} from the wrong side until whatever angle they were working comes off you. It puts them in reach of it.",
                 target: $target,
@@ -945,7 +949,7 @@ class CardComposer
 
             $signature === Companions::DISTRACT && $threat !== null => new ActionCard(
                 slot: TurnSlot::Companion,
-                verb: Companions::DISTRACT,
+                verb: Verb::CompanionDistract->value,
                 label: "Pull {$threat->name}'s attention",
                 description: "{$companion->name} gives {$threat->name} something they have to look at — whatever they were gathering for comes apart, and they go back to circling.",
                 target: $target,
@@ -954,7 +958,7 @@ class CardComposer
 
             $signature === Companions::FORAGE && $this->sceneHides($scene) => new ActionCard(
                 slot: TurnSlot::Companion,
-                verb: Companions::FORAGE,
+                verb: Verb::CompanionForage->value,
                 label: 'Send them over the ground',
                 description: "{$companion->name} walks the place on their own legs and comes back with whatever it was keeping to itself.",
                 target: $target,
@@ -977,14 +981,17 @@ class CardComposer
     {
         $cards = [];
 
-        foreach (['time_slow', 'haste'] as $tempo) {
+        foreach ([Verb::TimeSlow, Verb::Haste] as $verb) {
+            // The two tempo verbs are spent through the capability of the same
+            // name, out of the meter of the same name — one word, three roles.
+            $tempo = $verb->value;
             if (isset($capabilities[$tempo]) && Meters::charges($character, $tempo) >= 1) {
                 $capability = Capability::from($tempo);
                 $cards[] = new ActionCard(
                     slot: TurnSlot::Pre,
-                    verb: $tempo,
+                    verb: $verb->value,
                     label: $capability->label(),
-                    description: $tempo === 'time_slow'
+                    description: $verb === Verb::TimeSlow
                         ? 'The world thickens and slows; your next act lands with uncanny precision.'
                         : 'Quicken your blood; move before anyone can answer.',
                     capability: $tempo,
@@ -996,7 +1003,7 @@ class CardComposer
         if (isset($capabilities['ready'])) {
             $cards[] = new ActionCard(
                 slot: TurnSlot::Pre,
-                verb: 'ready',
+                verb: Verb::Ready->value,
                 label: 'Ready yourself',
                 description: 'Set a stance and wait for the right instant.',
                 capability: 'ready',
@@ -1020,13 +1027,13 @@ class CardComposer
         $cards = [
             new ActionCard(
                 slot: TurnSlot::Main,
-                verb: 'examine',
+                verb: Verb::Examine->value,
                 label: 'Examine the scene',
                 description: 'Take stock: study what is around you before committing to anything.',
             ),
             new ActionCard(
                 slot: TurnSlot::Main,
-                verb: 'wait',
+                verb: Verb::Wait->value,
                 label: 'Wait',
                 // The card has always promised that the scene moves first. It
                 // is only true once something is actually coming, so the card
@@ -1043,7 +1050,7 @@ class CardComposer
         if ($health['current'] < $health['max']) {
             $cards[] = new ActionCard(
                 slot: TurnSlot::Post,
-                verb: 'bandage',
+                verb: Verb::Bandage->value,
                 label: 'Bind your wounds',
                 description: 'Once the moment settles, tend to your injuries.',
             );
@@ -1051,7 +1058,7 @@ class CardComposer
 
         $cards[] = new ActionCard(
             slot: TurnSlot::Post,
-            verb: 'catch_breath',
+            verb: Verb::CatchBreath->value,
             label: 'Catch your breath',
             description: 'Recover your composure after the main effort.',
         );
@@ -1061,7 +1068,7 @@ class CardComposer
             // resolver treats post as contingent.
             $cards[] = new ActionCard(
                 slot: TurnSlot::Post,
-                verb: 'loot',
+                verb: Verb::Loot->value,
                 label: 'Search the fallen',
                 description: 'If the fight ends in your favor, go through what they carried.',
             );
@@ -1069,7 +1076,7 @@ class CardComposer
 
         $cards[] = new ActionCard(
             slot: TurnSlot::Post,
-            verb: 'reposition',
+            verb: Verb::Reposition->value,
             label: 'Reposition',
             description: 'Move to safer footing once the dust settles.',
         );
@@ -1106,7 +1113,7 @@ class CardComposer
 
             $cards[] = new ActionCard(
                 slot: TurnSlot::Pre,
-                verb: 'inspect',
+                verb: Verb::Inspect->value,
                 label: "Look closer at {$feature->name}",
                 description: "Read {$feature->name} properly before you commit — what it is, what it would take, and what it might give you.",
                 target: $target,
@@ -1114,7 +1121,7 @@ class CardComposer
 
             $cards[] = new ActionCard(
                 slot: TurnSlot::Main,
-                verb: 'improvise',
+                verb: Verb::Improvise->value,
                 label: "Improvise with {$feature->name}",
                 description: "Turn {$feature->name} to your advantage in some way none of the offered options cover. No training behind it — say what you mean to try in your own words, and trust your nerve.",
                 target: $target,
@@ -1126,7 +1133,7 @@ class CardComposer
         foreach ($actors->reject(fn (Actor $a) => $a->kind === 'companion')->take(4) as $actor) {
             $cards[] = new ActionCard(
                 slot: TurnSlot::Main,
-                verb: 'improvise',
+                verb: Verb::Improvise->value,
                 label: "Improvise on {$actor->name}",
                 description: "Try something on {$actor->name} that none of the offered options cover. No training behind it — say what you mean to try in your own words, and trust your nerve.",
                 target: ['type' => 'actor', 'id' => $actor->id, 'name' => $actor->name],
@@ -1137,7 +1144,7 @@ class CardComposer
 
         $cards[] = new ActionCard(
             slot: TurnSlot::Main,
-            verb: 'improvise',
+            verb: Verb::Improvise->value,
             label: 'Do something else entirely',
             description: 'Something off this list and aimed at nothing here in particular. Write what you attempt in your own words below — the outcome rides on plain luck and grit.',
             risk: 'risky',
@@ -1160,38 +1167,38 @@ class CardComposer
      * `balanced|cautious|bold` so validation and the resolver never care
      * which family dressed the row.
      */
-    private function approachModifier(string $verb = 'improvise'): array
+    private function approachModifier(Verb $verb = Verb::Improvise): array
     {
         [$balanced, $cautious, $bold, $cautiousFact, $boldFact] = match ($verb) {
-            'flee', 'venture', 'cross', 'track', 'recover' => [
+            Verb::Flee, Verb::Venture, Verb::Cross, Verb::Track, Verb::Recover => [
                 'Steady on',
                 'Creep — slow, certain, nothing given away',
                 'Dash — flat out, and damn the noise',
                 'They crept, testing every step and giving nothing away.',
                 'They went flat out, trading care for speed and letting the noise fall where it would.',
             ],
-            'strike', 'interrupt', 'hurl' => [
+            Verb::Strike, Verb::Interrupt, Verb::Hurl => [
                 'Measured',
                 'Guarded — risk nothing, win nothing grand',
                 'All-in — everything behind it, nothing held back',
                 'They fought guarded, offering no opening and reaching for no glory.',
                 'They threw everything behind it, all commitment and no guard.',
             ],
-            'restrain', 'haul' => [
+            Verb::Restrain, Verb::Haul => [
                 'Firm',
                 'Patient — let the grip come to you',
                 'Overwhelming — take them before they can think',
                 'They worked patiently, waiting for the hold to offer itself.',
                 'They rushed the hold, all weight and violence at once.',
             ],
-            'break' => [
+            Verb::Break => [
                 'Firm',
                 'Pry — work it loose a piece at a time',
                 'Smash — through in one blow or not at all',
                 'They pried at it patiently, working it loose piece by piece.',
                 'They put everything into one breaking blow.',
             ],
-            'intimidate' => [
+            Verb::Intimidate => [
                 'Level',
                 'Cold — a quiet menace, slow and certain',
                 'Eruptive — fill the room all at once',

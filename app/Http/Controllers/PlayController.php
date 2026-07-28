@@ -10,6 +10,7 @@ use App\Game\Engine\Scars;
 use App\Game\Engine\TurnResolver;
 use App\Game\Hands;
 use App\Game\TurnSlot;
+use App\Game\Verb;
 use App\Models\Campaign;
 use App\Models\Turn;
 use App\Services\Claude\Narrator;
@@ -99,7 +100,7 @@ class PlayController extends Controller
                 // before the board existed carry none; the page falls back to
                 // the prose those turns were written with.
                 'board' => $turn->situation_board,
-                'cards' => $turn->isOpen() ? $turn->cards : null,
+                'cards' => $turn->isOpen() ? $this->withVocabulary($turn->cards) : null,
                 // The wait ahead, and whether it has been spoken for. Only
                 // while the turn is open: once it is submitted the wait it
                 // offered is over, and a picker on a locked turn would be
@@ -127,6 +128,42 @@ class PlayController extends Controller
                 'entities' => ChapterEntities::for($campaign, $chapterTurn),
             ],
         ]);
+    }
+
+    /**
+     * The board word and the short name for every card on the turn.
+     *
+     * Cards composed before the catalog existed are stored without either, and
+     * the board is a LENS: it may never drop a card the engine offered. So the
+     * vocabulary is filled in here, from the catalog, rather than guessed at on
+     * the client — which is the whole reason the family rides on the card in
+     * the first place.
+     *
+     * @param  array<string,mixed>|null  $cards
+     * @return array<string,mixed>|null
+     */
+    private function withVocabulary(?array $cards): ?array
+    {
+        if ($cards === null) {
+            return null;
+        }
+
+        $fill = function (array $card): array {
+            $card['family'] ??= Verb::familyOf($card['verb'] ?? '')->value;
+            $card['verb_label'] ??= Verb::labelOf($card['verb'] ?? '');
+
+            return $card;
+        };
+
+        foreach (TurnSlot::playerSlots() as $slot) {
+            $cards[$slot->value] = array_map($fill, $cards[$slot->value] ?? []);
+        }
+
+        foreach ($cards['companions'] ?? [] as $index => $companion) {
+            $cards['companions'][$index]['cards'] = array_map($fill, $companion['cards'] ?? []);
+        }
+
+        return $cards;
     }
 
     /**
