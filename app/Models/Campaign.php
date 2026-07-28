@@ -11,7 +11,7 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\Relations\HasOne;
 
-#[Fillable(['user_id', 'name', 'premise', 'opening', 'tone', 'world_flavor', 'setting', 'genre', 'drive', 'tech_level', 'starting_zone_id', 'next_zone_id', 'pending_sheet', 'status', 'title', 'back_cover', 'ended_early', 'started_at', 'ended_at', 'synopsis', 'hour_phase', 'hour_progress'])]
+#[Fillable(['user_id', 'name', 'premise', 'opening', 'tone', 'world_flavor', 'setting', 'genre', 'drive', 'tech_level', 'starting_zone_id', 'next_zone_id', 'pending_sheet', 'status', 'title', 'back_cover', 'ended_early', 'started_at', 'ended_at', 'synopsis', 'hour_phase', 'hour_progress', 'finale'])]
 class Campaign extends Model
 {
     use HasFactory;
@@ -20,6 +20,8 @@ class Campaign extends Model
     {
         return [
             'pending_sheet' => 'array',
+            // The ending this tale is walking toward, engine-written only.
+            'finale' => 'array',
             'ended_early' => 'boolean',
             'started_at' => 'datetime',
             'ended_at' => 'datetime',

@@ -93,11 +93,13 @@ enum Verb: string
     // ---- Wait: ceding the initiative on purpose ----
     case Wait = 'wait';
 
-    // ---- Do: acts that answer to nothing else — the untrained gambit, and
-    //      the endeavors a player takes up and sets back down ----
+    // ---- Do: acts that answer to nothing else — the untrained gambit, the
+    //      endeavors a player takes up and sets back down, and the one act
+    //      that begins the end of the tale ----
     case Improvise = 'improvise';
     case Undertake = 'undertake';
     case Abandon = 'abandon';
+    case Face = 'face';
 
     /**
      * The board word this verb sits under. Exactly one, always — a verb in two
@@ -140,7 +142,17 @@ enum Verb: string
             // taking, fighting, talking, hiding, tending, or waiting: it is
             // the plain act of setting yourself to something, and DO is the
             // family for acts that answer to nothing else.
-            self::Improvise, self::Undertake, self::Abandon => VerbFamily::Do,
+            //
+            // `face` — taking up the tale's own ending — is the same shape of
+            // act, and it is filed here for a reason worth writing down. A
+            // finale aimed at a nemesis reads as FIGHT and one aimed at
+            // unfinished business reads as DO, but a verb gets exactly one
+            // family (there is a test), and the family is fixed on the case
+            // rather than on the card. FIGHT would light the board's fighting
+            // word on empty ground for every tale whose ending is not a person,
+            // which is a lie the board would tell every turn; DO never
+            // misleads. The card's own label names what is being faced.
+            self::Improvise, self::Undertake, self::Abandon, self::Face => VerbFamily::Do,
         };
     }
 
@@ -213,6 +225,7 @@ enum Verb: string
             self::Improvise => 'Improvise',
             self::Undertake => 'Take it on',
             self::Abandon => 'Let it go',
+            self::Face => 'Face it',
         };
     }
 

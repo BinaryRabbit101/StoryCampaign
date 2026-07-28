@@ -6,6 +6,7 @@ use App\Game\Engine\Ambient;
 use App\Game\Engine\ChapterEvents;
 use App\Game\Engine\Clocks;
 use App\Game\Engine\Companions;
+use App\Game\Engine\Finale;
 use App\Game\Engine\Grudges;
 use App\Game\Engine\Hours;
 use App\Game\Engine\Scars;
@@ -85,6 +86,21 @@ class Narrator
         // close is retried with it and a broken Claude call cannot strand a
         // campaign half-ended.
         if ($turn->resolution['fall']['final'] ?? false) {
+            try {
+                $this->books->close($campaign->fresh(), early: true, withCoda: true);
+            } catch (\Throwable $e) {
+                report($e);
+            }
+
+            return $chapter;
+        }
+
+        // And the tale that reached the end it CHOSE. Same path and the same
+        // reasoning: the coda belongs behind the chapter that tells the last of
+        // it, never ahead of it. The only difference from the fall above is
+        // which condition brought the tale here — everything after it is
+        // identical, because the close is the existing close.
+        if ($turn->resolution['finale']['complete'] ?? false) {
             try {
                 $this->books->close($campaign->fresh(), early: true, withCoda: true);
             } catch (\Throwable $e) {
@@ -220,6 +236,13 @@ class Narrator
         $fall = Scars::narratorBlock($turn);
         $marks = $fall === '' ? Scars::marksBlock($character) : '';
 
+        // The closing movement, while the tale is walking its last stretch —
+        // and the facts of the ending on the chapter it lands in. Guidance
+        // about SHAPE, in plain words: write toward rest, let it narrow, never
+        // announce that a story is ending. Empty on every chapter of every tale
+        // that has not taken its ending up.
+        $closing = Finale::narratorBlock($turn);
+
         // The one thing this chapter left on the shelf, if it left anything.
         // The object is fixed and already written down; the invitation is only
         // to word it better than the engine could, inside a clamp. Empty on
@@ -353,7 +376,7 @@ Some beats carry the player's own words for that moment. Those words are voice a
 
 ## How the scene answered
 {$reaction}
-{$world}{$endeavor}{$figures}{$company}{$standing}{$sideStory}{$fall}{$news}{$keepsake}{$criticals}
+{$world}{$endeavor}{$figures}{$company}{$standing}{$sideStory}{$fall}{$closing}{$news}{$keepsake}{$criticals}
 ## Where the vignette stops
 {$turn->branch_trigger}: the chapter must end on this note, at a clean decision point, leaving the situation open for the player's next choice. {$wordLow}-{$wordHigh} words.
 

@@ -234,13 +234,45 @@ class Grudges
     }
 
     /**
+     * The return the ENGINE asks for, by name.
+     *
+     * The chapter floor and the one-per-scene rule above are waived here and
+     * only here — and only through this explicit parameter, which nothing in
+     * ordinary play reaches. It exists for the finale: a tale that has taken up
+     * its ending has to be able to put its nemesis in front of the player, and
+     * a 15%-per-heat roll behind a two-chapter floor is a last act that might
+     * simply never happen.
+     *
+     * Always telegraphing, never lurking and never under truce: the last
+     * arrival is not an ambush and not a negotiation, and the tale has to be
+     * able to see it coming.
+     */
+    public static function forceReturn(Campaign $campaign, string $name, Scene $next, Dice $dice, Turn $turn): ?Actor
+    {
+        $grudge = Grudge::where('campaign_id', $campaign->id)
+            ->where('actor_name', $name)
+            ->where('status', 'simmering')->first();
+
+        if ($grudge === null) {
+            return null;
+        }
+
+        return self::spawnReturn($grudge, $next, $dice, $turn, telegraphing: true);
+    }
+
+    /**
      * Spawn the grudge into the scene from its stored snapshot. Disposition
      * picks the entry mode — never the odds: vengeful arrives in the open
      * with an aggressive intent telegraphed, wary slips in lurking (the
      * existing ambush machinery), scheming approaches under truce carrying
      * an engine-picked deal.
+     *
+     * @param  bool  $telegraphing  Set only by the finale's forced return: the
+     *                              entry is read as vengeful whatever the stored
+     *                              disposition says, so the last arrival is
+     *                              always one the player can see coming.
      */
-    private static function spawnReturn(Grudge $grudge, Scene $next, Dice $dice, Turn $turn): Actor
+    private static function spawnReturn(Grudge $grudge, Scene $next, Dice $dice, Turn $turn, bool $telegraphing = false): Actor
     {
         // The chapters between flee and return healed them; how they CHANGED
         // is the evolver's business, applied to the snapshot before now.
@@ -252,13 +284,15 @@ class Grudges
         $tags = $grudge->tags ?? [];
         $tags['grudge_id'] = $grudge->id;
 
-        $history = [self::entry('returned', match ($grudge->disposition) {
+        $disposition = $telegraphing ? 'vengeful' : $grudge->disposition;
+
+        $history = [self::entry('returned', match ($disposition) {
             'vengeful' => "Came back for them at {$next->title}, making no secret of it.",
             'wary' => "Came back at {$next->title} — carefully, keeping to the edges.",
             default => "Came back at {$next->title} carrying an offer instead of a blade.",
         }, $turn, null, $next->title)];
 
-        switch ($grudge->disposition) {
+        switch ($disposition) {
             case 'vengeful':
                 $tags['intent'] = 'press';
                 break;

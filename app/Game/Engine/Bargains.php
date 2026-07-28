@@ -160,7 +160,12 @@ class Bargains
         // Improvise resolves against base stats with no bonus and must never
         // be better than a real enumerated option. A bargained improvise would
         // be exactly that.
-        if ($card->verb === 'improvise') {
+        //
+        // And the ending is not a thing to be sweetened. `face` casts no die,
+        // so the gate above already refuses it — this names it anyway, because
+        // the day somebody gives that beat a roll, the tale's one irreversible
+        // choice must not quietly become available at a discount.
+        if (in_array($card->verb, ['improvise', 'face'], true)) {
             return [];
         }
 

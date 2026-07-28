@@ -518,6 +518,46 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | The finale (a tale that ends on a peak)
+    |--------------------------------------------------------------------------
+    | Tales used to STOP rather than conclude: the scar cap ended them and
+    | nothing else did. Every system above now produces climax material — a
+    | nemesis, unfinished business, permanent cost, a shelf of keepsakes — and
+    | nothing spent it. The finale is a curator: it reads how much a tale has
+    | accumulated, ARMS an ending it offers and never forces, and stages the
+    | last of it out of what the tale itself built.
+    |
+    | `chapter_floor` is the whole guard against a short tale being offered an
+    | ending it has not earned. Signals alone cannot arm it: a campaign that
+    | took two scars in its first three chapters is a rough opening, not a
+    | third act.
+    |
+    | `arm_threshold` is how much standing debt makes an ending honest. The
+    | weights are the shape of that judgement: a nemesis at full heat is worth
+    | two because a tale with one already has its last scene written; the rest
+    | are worth one apiece, and keepsakes are counted in fours because the shelf
+    | fills on its own and would otherwise arm every tale by attrition.
+    |
+    | Nothing here can force an ending. What these numbers decide is when a card
+    | APPEARS; declining it costs nothing, forever.
+    */
+
+    'finale' => [
+        'chapter_floor' => 8,
+        'arm_threshold' => 4,
+        'weights' => [
+            'max_heat_grudge' => 2,
+            'clock_filled' => 1,
+            'zone_beyond_first' => 1,
+            'scar' => 1,
+            'mementos' => 1,
+        ],
+        // How many keepsakes are worth one signal.
+        'mementos_per_signal' => 4,
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
     | Previously On (the returning-player recap)
     |--------------------------------------------------------------------------
     | A short, dismissible panel above the form, compiled from strings the

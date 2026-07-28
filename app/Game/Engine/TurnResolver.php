@@ -195,6 +195,11 @@ class TurnResolver
                 $endeavor = array_merge($endeavor, $tick['facts']);
                 $endeavorFilled ??= $tick['filled'];
 
+                // And the tale's last stretch, when it is running: the same
+                // rule off the same row, on a clock the player never took on
+                // and cannot set down.
+                Finale::advance($campaign, $outcome);
+
                 // Partial counts: the facts say they got through (battered),
                 // so the scene must actually change under them.
                 if (in_array($card['verb'], [
@@ -315,6 +320,18 @@ class TurnResolver
                 ? Scars::takeFall($character, $scene, $turn, $dice, $outcomes, $reactionRolls, $this->dresser)
                 : null;
 
+            // The tale's own ending, weighed once, off facts already fixed.
+            //
+            // It arms when the chapters and the standing debts say the tale has
+            // earned one, and begins when the player takes the card up — never
+            // otherwise. Ahead of the trigger below so an arrival it stages is
+            // read as the fork it is; behind the fall, because a body that ran
+            // out mid-finale ends the tale through the scar cap's own path and
+            // this has nothing to add to it.
+            $finale = $fall === null
+                ? Finale::consider($campaign, $scene, $turn, $dice, $outcomes)
+                : null;
+
             $trigger = $fall !== null
                 ? BranchTrigger::ResourceThreshold
                 : ($trigger ?? $this->evaluateTrigger($character, $scene, $outcomes, $moved, $newThreat, $wasInDanger));
@@ -376,6 +393,17 @@ class TurnResolver
             // stranger who happened to take a liking to them.
             $thread = $scene->id === $sceneBefore->id ? [] : Threads::onSceneExit($sceneBefore, $scene);
             $thread = array_merge($thread, Threads::resolveTurn($scene, $turn, $outcomes, $concealedBefore));
+
+            // The last stretch, after the ground has settled: the pinned score
+            // brought back at the first change of ground — forced and
+            // telegraphing, the one place those clamps are waived — and the
+            // ending itself, which lands the moment that score is settled or the
+            // engine's own clock is full. It has to ask after the settling
+            // above, because that is where a score becomes closed.
+            $finale = Finale::step($campaign, $turn, $finale, $sceneBefore, $scene, $dice);
+            if ($finale['complete'] ?? false) {
+                $trigger = BranchTrigger::IntentComplete;
+            }
 
             // Companions the road provided, rather than ones the player asked
             // for. Both paths end the same way — a consensual offer pair on the
@@ -494,6 +522,12 @@ class TurnResolver
                     // nobody ever discovered, which is the dormancy rule as the
                     // narrator sees it.
                     'thread' => $thread === [] ? null : $thread,
+
+                    // The tale's ending: armed, taken up, arrived at, or
+                    // landed. Null on every turn none of that happened, which
+                    // is nearly all of them — and the plain facts of it when it
+                    // did, in the words the chapter will be written from.
+                    'finale' => $finale,
                 ],
                 'branch_trigger' => $trigger->value,
                 'meters_snapshot' => $character->meters,
@@ -517,6 +551,13 @@ class TurnResolver
             // nothing left to choose — and the book closes behind the fall's
             // own chapter, in the narration run that writes it.
             if ($fall !== null && $fall['record']['final']) {
+                return $turn->fresh();
+            }
+
+            // The tale that reached the end it chose. Same shape and the same
+            // reason: nothing left to choose, no successor opened, and the book
+            // closes behind this chapter in the narration run that writes it.
+            if ($finale['complete'] ?? false) {
                 return $turn->fresh();
             }
 
@@ -765,6 +806,13 @@ class TurnResolver
                 // take something else on. Everything already done is lost —
                 // that loss IS the commitment the clock was worth.
                 $facts = Clocks::abandon($scene, $card['target']['id'] ?? null);
+                break;
+            case Verb::Face:
+                // Taking up the tale's own ending. Roll-free like every other
+                // declaration, and the state it changes is written by Finale
+                // itself further down this resolution — the beat only says the
+                // decision was made, once, in plain words.
+                $facts[] = 'They stopped putting it off, and turned to meet the end of it.';
                 break;
             case Verb::TimeSlow:
                 $conditions['time_slowed'] = true;

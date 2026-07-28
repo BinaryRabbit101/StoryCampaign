@@ -101,9 +101,21 @@ class CardComposer
             $cards[$card->slot->value][] = $card;
         }
 
+        // The ending, offered and never forced. It stands on the table for as
+        // long as the tale is ripe and the player has not taken it up; nothing
+        // behind it escalates, and declining it is free forever.
+        foreach (Finale::cards($scene->campaign) as $card) {
+            $cards[$card->slot->value][] = $card;
+        }
+
         // The frontier: once the world has forged the next zone, the way
         // out of this one stands open as a real, named choice.
-        $frontier = $scene->campaign?->nextZone;
+        //
+        // Not while the last stretch is running. A tale walking into its own
+        // ending is not also being offered a whole new country to walk into
+        // instead — you chose this ground, and the way on is closed until it is
+        // finished. Nothing else about the world pauses.
+        $frontier = Finale::isUnderway($scene->campaign) ? null : $scene->campaign?->nextZone;
         if ($frontier !== null) {
             $cards['main'][] = new ActionCard(
                 slot: TurnSlot::Main,

@@ -61,6 +61,13 @@ class Odds
         // a die to adjudicate. A "failed" welcome would be the engine telling
         // the player their yes did not take.
         'companion_welcome', 'companion_dismiss',
+        // Taking up the tale's own ending. A declaration again, and the most
+        // consequential one there is: a die that could REFUSE it would have the
+        // engine telling the player their decision to walk into the last of it
+        // did not take, and a die that could grant it would price the one
+        // irreversible choice in the game against the same ladder as a door.
+        // What follows the declaration is where every roll lives.
+        'face',
     ];
 
     /**
