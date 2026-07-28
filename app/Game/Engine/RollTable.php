@@ -13,22 +13,11 @@ use App\Models\Turn;
  * roll, which is exactly why the player may take as long as they like over it
  * and why nothing they do on that screen can change a number.
  *
- * @phpstan-type Row array{id:string,side:string,actor:string,action:string,verb:string,icon:string,difficulty:int,band:string,roll:int,modifier:int,total:int,degree:string,crit:?string,outcome:?string}
+ * @phpstan-type Part array{label:string,amount:int}
+ * @phpstan-type Row array{id:string,side:string,actor:string,action:string,verb:string,icon:string,difficulty:int,band:string,roll:int,modifier:int,total:int,degree:string,crit:?string,outcome:?string,difficulty_parts:list<Part>,bonus_parts:list<Part>}
  */
 class RollTable
 {
-    /**
-     * The three bands the player reads a difficulty in. The engine's spread
-     * runs roughly 8–22: a card taken cautiously against an open target sits
-     * at the bottom, a degraded reach at a guarded enemy after an earlier
-     * failure at the top.
-     */
-    private const BANDS = [
-        9 => 'Easy',
-        13 => 'Medium',
-        17 => 'Hard',
-    ];
-
     /** @return list<Row> */
     public static function for(Turn $turn): array
     {
@@ -62,6 +51,8 @@ class RollTable
                 degree: $beat['degree'],
                 crit: $beat['crit'] ?? null,
                 outcome: self::outcomeLine($beat['facts'] ?? []),
+                difficultyParts: $beat['difficulty_parts'] ?? [],
+                bonusParts: $beat['bonus_parts'] ?? [],
             );
         }
 
@@ -78,6 +69,8 @@ class RollTable
                 degree: $reaction['degree'] ?? BeatOutcome::FAILURE,
                 crit: $reaction['crit'] ?? null,
                 outcome: $reaction['outcome'] ?? null,
+                difficultyParts: $reaction['difficulty_parts'] ?? [],
+                bonusParts: $reaction['bonus_parts'] ?? [],
             );
         }
 
@@ -97,6 +90,8 @@ class RollTable
         string $degree,
         ?string $crit,
         ?string $outcome,
+        array $difficultyParts = [],
+        array $bonusParts = [],
     ): array {
         return [
             'id' => $id,
@@ -106,7 +101,7 @@ class RollTable
             'verb' => $verb,
             'icon' => ChapterEvents::iconFor($verb),
             'difficulty' => $difficulty,
-            'band' => self::band($difficulty),
+            'band' => Odds::band($difficulty),
             'roll' => $roll,
             // The engine keeps the bonus inside the total; the table shows it
             // back as the +N the player earned with their set-up beats.
@@ -115,18 +110,12 @@ class RollTable
             'degree' => $degree,
             'crit' => $crit,
             'outcome' => $outcome,
+            // Why both numbers were what they were. Turns committed before
+            // the ledger existed carry no parts; the table simply shows the
+            // arithmetic without the reasons for those.
+            'difficulty_parts' => array_values($difficultyParts),
+            'bonus_parts' => array_values($bonusParts),
         ];
-    }
-
-    private static function band(int $difficulty): string
-    {
-        foreach (self::BANDS as $ceiling => $label) {
-            if ($difficulty <= $ceiling) {
-                return $label;
-            }
-        }
-
-        return 'Brutal';
     }
 
     /**

@@ -14,6 +14,40 @@ export interface CardCost {
     amount: number;
 }
 
+/** One line of the odds ledger: a reason, and what it is worth. */
+export interface OddsPart {
+    label: string;
+    amount: number;
+}
+
+/**
+ * What a card promises before it is chosen. A turn commits the instant it is
+ * submitted, so the difficulty has to be readable up front — and it comes
+ * from the same engine ledger the dice are later measured against.
+ */
+export interface CardForecast {
+    /** False for beats that simply happen: setting down, steadying, waiting. */
+    rolls: boolean;
+    difficulty: number;
+    band: string;
+    parts: OddsPart[];
+    /** The difficulty at each stance, so the chips can price themselves. */
+    stances: Record<string, number>;
+    /** Bonuses already standing — high ground held before this turn began. */
+    bonus: number;
+    bonus_parts: OddsPart[];
+    /** What choosing this card buys the beats that follow it. */
+    grant: {
+        condition: string;
+        label: string;
+        amount: number;
+        verbs: string[] | null;
+        slot: string | null;
+        /** Bought outright, or only if the beat lands. */
+        certain: boolean;
+    } | null;
+}
+
 export interface ActionCard {
     id: string;
     slot: 'pre' | 'main' | 'post' | 'companion';
@@ -26,6 +60,7 @@ export interface ActionCard {
     cost: CardCost[];
     modifiers: CardModifier[];
     composed: boolean;
+    forecast: CardForecast;
 }
 
 export interface SlotChoice {
@@ -78,6 +113,8 @@ export interface ChapterEvent {
         total: number;
         difficulty: number;
         crit: Crit;
+        difficulty_parts: OddsPart[];
+        bonus_parts: OddsPart[];
     } | null;
 }
 
@@ -102,6 +139,9 @@ export interface RollRow {
     degree: string;
     crit: Crit;
     outcome: string | null;
+    /** Why the difficulty was what it was, and where the modifier came from. */
+    difficulty_parts: OddsPart[];
+    bonus_parts: OddsPart[];
 }
 
 export interface RollTable {
@@ -134,6 +174,36 @@ export interface ChapterEntity {
      */
     aliases: string[];
     lines: string[];
+}
+
+/**
+ * The state of play as groups. Shown beside every chapter, never as one
+ * run-on paragraph — and an empty board is a real reading of a quiet place.
+ */
+export interface SituationGroup {
+    key: string;
+    title: string;
+    tone: 'neutral' | 'foe' | 'ally' | 'person' | 'ground' | 'self';
+    items: string[];
+}
+
+/** Something physically in the character's hands. */
+export interface CarriedThing {
+    name: string;
+    feature_id: number | null;
+    hands: number;
+}
+
+/** One exchange in the evolution conversation. */
+export interface GrowthMessage {
+    id: number;
+    role: 'player' | 'narrator';
+    body: string;
+    /** Whether the sheet actually changed — the engine's verdict, not prose. */
+    granted: boolean | null;
+    changes:
+        { kind: 'gift' | 'burden'; label: string; detail: string }[] | null;
+    suggestions: string[] | null;
 }
 
 export interface CharacterItem {

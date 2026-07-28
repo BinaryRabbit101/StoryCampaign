@@ -9,6 +9,7 @@ use App\Models\Campaign;
 use App\Models\Chapter;
 use App\Models\Character;
 use App\Models\InterviewMessage;
+use App\Models\Turn;
 use App\Notifications\InterviewReplyNotification;
 use App\Notifications\StoryBegunNotification;
 use App\Services\CapabilityClamp;
@@ -72,10 +73,9 @@ class Interviewer
         // prose rather than failing the campaign. The world is forged first
         // so the prologue's stage plan can reference the forged ground.
         $this->forge->ensureStartingZone($campaign);
-        $prologue = $this->returningPrologue($campaign, $original);
         $opening = $this->stage->plan($campaign, $original->description);
 
-        DB::transaction(function () use ($campaign, $original, $prologue, $opening) {
+        $turn = DB::transaction(function () use ($campaign, $original, $opening) {
             $meters = $original->meters;
             $meters['health']['current'] = $meters['health']['max'];
             foreach ($meters['tempo'] ?? [] as $name => $pool) {
@@ -107,24 +107,18 @@ class Interviewer
                 ]);
             }
 
-            Chapter::create([
-                'campaign_id' => $campaign->id,
-                'turn_id' => null,
-                'number' => $campaign->nextChapterNumber(),
-                'kind' => 'prologue',
-                'intent_line' => null,
-                'body' => $prologue,
-            ]);
-
             $campaign->update(['status' => 'active', 'started_at' => now()]);
 
-            $this->starter->openFirstTurn($campaign, $opening);
+            return $this->starter->openFirstTurn($campaign, $opening);
         });
+
+        // The prologue is written LAST, against the scene that now exists.
+        $this->recordPrologue($campaign, $this->returningPrologue($campaign, $original, $turn));
 
         $this->announceBegun($campaign);
     }
 
-    private function returningPrologue(Campaign $campaign, Character $original): string
+    private function returningPrologue(Campaign $campaign, Character $original, Turn $turn): string
     {
         $previous = $original->campaign;
         $lastChapter = $previous?->chapters()->reorder('number', 'desc')->first();
@@ -133,6 +127,7 @@ class Interviewer
         $stage = $campaign->stageBrief();
         $stageSection = $stage === '' ? '' : "\n## The player set the stage for this new tale\n{$stage}\n";
         $register = ProseStyle::rules();
+        $landing = $this->landing($turn);
 
         try {
             return $this->claude->prompt(<<<PROMPT
@@ -150,6 +145,8 @@ A hero returns for a new tale in a living-world RPG. Write a 200-400 word prolog
 ## Where their last tale ("{$previous?->name}") left them
 {$closing}
 
+{$landing}
+
 Respond with ONLY the prologue prose.
 PROMPT);
         } catch (\Throwable $e) {
@@ -157,6 +154,63 @@ PROMPT);
 
             return "{$original->name} stepped once more into the waiting world. What was learned in the last tale came along; what was lost stayed lost. Somewhere ahead, a new story was already making room.";
         }
+    }
+
+    /**
+     * Where the prologue has to arrive.
+     *
+     * The prologue used to be written before the opening scene existed, so it
+     * ended wherever the prose felt like ending and the first chapter then
+     * began somewhere else entirely — two stories stapled together, with the
+     * reader asked to step over the gap. It is written last now, and this is
+     * the ground it has to land on: the exact place, the exact cast, the exact
+     * moment the player's first choice will be made in.
+     */
+    private function landing(Turn $turn): string
+    {
+        $scene = $turn->scene;
+        $place = trim(($scene?->title ?? '').' — '.($scene?->description ?? ''), ' —');
+
+        $facts = [];
+        foreach ($turn->situation_board ?? [] as $group) {
+            if ($group['key'] === 'self' || $group['items'] === []) {
+                continue;
+            }
+            $facts[] = "- {$group['title']}: ".implode(', ', $group['items']);
+        }
+        $listed = $facts === []
+            ? '- Nobody else is here. The place is empty, and that emptiness is the truth of it — do not populate it.'
+            : implode("\n", $facts);
+
+        return <<<LANDING
+## Where this prologue ENDS (fixed — this is the seam, and it must not show)
+The player's first choice happens in the moment immediately after your last sentence. So finish standing in it: same place, same people, same breath.
+
+Place: {$place}
+{$listed}
+
+- End INSIDE this moment, not approaching it and not past it. The last paragraph should be here, with these people, on this ground.
+- Do not resolve anything listed above. Whoever is here is still here when you stop; whatever is unsettled is still unsettled.
+- Introduce every person and thing listed, naturally, as the prose arrives — the next chapter will use these names and they must not be strangers.
+- Do not invent other people or places for the closing scene. If the list is empty, the character arrives alone.
+LANDING;
+    }
+
+    /**
+     * Write down the opening chapter. Called after the world is already open,
+     * so a narrator that falls over costs the tale its prologue's polish and
+     * nothing else — the campaign is live either way.
+     */
+    private function recordPrologue(Campaign $campaign, string $body): void
+    {
+        Chapter::create([
+            'campaign_id' => $campaign->id,
+            'turn_id' => null,
+            'number' => $campaign->fresh()->nextChapterNumber(),
+            'kind' => 'prologue',
+            'intent_line' => null,
+            'body' => $body,
+        ]);
     }
 
     /**
@@ -261,17 +315,14 @@ PROMPT);
             $pending['character']['name'] = $name;
         }
 
-        // The prologue is written HERE, once, for the sheet they actually
-        // chose — not on every exchange. Asking for 300 words of prose
-        // alongside each question would have made every reply in a live
-        // conversation carry the cost of a chapter nobody had asked for yet.
-        $pending['prologue'] ??= $this->creationPrologue($campaign, $pending['character']);
-
         $this->finalize($campaign, $pending, force: $owing);
     }
 
-    /** The opening chapter for a finished creation sheet. */
-    private function creationPrologue(Campaign $campaign, array $sheet): string
+    /**
+     * The opening chapter for a finished creation sheet — written once the
+     * first scene exists, so it can end standing in it.
+     */
+    private function creationPrologue(Campaign $campaign, array $sheet, Turn $turn): string
     {
         $name = $sheet['name'] ?? 'The Nameless';
         $description = $sheet['description'] ?? '';
@@ -279,6 +330,7 @@ PROMPT);
         $stage = $campaign->stageBrief();
         $stageSection = $stage === '' ? '' : "\n## The player set the stage\n{$stage}\n";
         $register = ProseStyle::rules();
+        $landing = $this->landing($turn);
 
         try {
             return trim($this->claude->prompt(<<<PROMPT
@@ -291,6 +343,8 @@ Write the opening prologue of a living-world RPG campaign: 200-400 words, third-
 {$stageSection}
 ## The character
 {$name}: {$description}
+
+{$landing}
 
 Respond with ONLY the prologue prose.
 PROMPT)) ?: $this->stockPrologue($name);
@@ -344,7 +398,7 @@ PROMPT)) ?: $this->stockPrologue($name);
         $this->forge->ensureStartingZone($campaign);
         $opening = $this->stage->plan($campaign, $sheet['description'] ?? '');
 
-        DB::transaction(function () use ($campaign, $response, $opening, $sheet, $clamped) {
+        $turn = DB::transaction(function () use ($campaign, $opening, $sheet, $clamped) {
 
             $meters = Meters::default();
             foreach ($clamped['capabilities'] as $entry) {
@@ -379,19 +433,13 @@ PROMPT)) ?: $this->stockPrologue($name);
                 ]);
             }
 
-            Chapter::create([
-                'campaign_id' => $campaign->id,
-                'turn_id' => null,
-                'number' => $campaign->nextChapterNumber(),
-                'kind' => 'prologue',
-                'intent_line' => null,
-                'body' => $response['prologue'] ?? $response['reply'] ?? '',
-            ]);
-
             $campaign->update(['status' => 'active', 'started_at' => now(), 'pending_sheet' => null]);
 
-            $this->starter->openFirstTurn($campaign, $opening);
+            return $this->starter->openFirstTurn($campaign, $opening);
         });
+
+        // Written last, into the scene that now exists — see landing().
+        $this->recordPrologue($campaign, $this->creationPrologue($campaign, $sheet, $turn));
 
         $this->announceBegun($campaign);
     }
@@ -400,9 +448,9 @@ PROMPT)) ?: $this->stockPrologue($name);
      * The point-buy path: the player picked priced traits from the catalog
      * instead of describing themselves. The ENGINE has already validated
      * the balance and compiles the sheet; Claude is only asked to write
-     * prose around the finished numbers — a description, attack styles,
-     * and a prologue — and a failed call falls back to stock text rather
-     * than blocking the birth.
+     * prose around the finished numbers — a description and attack styles —
+     * and a failed call falls back to stock text rather than blocking the
+     * birth. The prologue comes later, once there is a scene for it to end in.
      *
      * @param  list<string>  $traitKeys
      */
@@ -424,7 +472,7 @@ PROMPT)) ?: $this->stockPrologue($name);
         $prose = $this->traitProse($campaign, $name, $build);
         $opening = $this->stage->plan($campaign, $prose['description']);
 
-        DB::transaction(function () use ($campaign, $build, $name, $prose, $opening) {
+        $turn = DB::transaction(function () use ($campaign, $build, $name, $prose, $opening) {
             $meters = Meters::default();
             $meters['health']['max'] = max(4, $meters['health']['max'] + $build['health']);
             $meters['health']['current'] = $meters['health']['max'];
@@ -466,19 +514,16 @@ PROMPT)) ?: $this->stockPrologue($name);
                 'body' => 'So shaped, so weighed — the world accepts the bargain. Your tale begins.',
             ]);
 
-            Chapter::create([
-                'campaign_id' => $campaign->id,
-                'turn_id' => null,
-                'number' => $campaign->nextChapterNumber(),
-                'kind' => 'prologue',
-                'intent_line' => null,
-                'body' => $prose['prologue'],
-            ]);
-
             $campaign->update(['status' => 'active', 'started_at' => now()]);
 
-            $this->starter->openFirstTurn($campaign, $opening);
+            return $this->starter->openFirstTurn($campaign, $opening);
         });
+
+        // Written last, into the scene that now exists — see landing().
+        $this->recordPrologue($campaign, $this->creationPrologue($campaign, [
+            'name' => $name,
+            'description' => $prose['description'],
+        ], $turn));
 
         $this->announceBegun($campaign);
     }
@@ -502,7 +547,10 @@ PROMPT)) ?: $this->stockPrologue($name);
      * Prose around a fixed sheet. Claude may not alter the numbers — it is
      * handed the finished traits and asked only for words.
      *
-     * @return array{description: string, attack_styles: ?list<string>, prologue: string}
+     * The prologue is deliberately NOT asked for here: it is written later,
+     * once the opening scene exists, so it can end standing in it.
+     *
+     * @return array{description: string, attack_styles: ?list<string>}
      */
     private function traitProse(Campaign $campaign, string $name, array $build): array
     {
@@ -531,15 +579,13 @@ Burdens: {$burdens}
 Respond with ONLY a JSON object:
 {
   "description": "<2-3 sentence portrait of who this is, embodying every gift and burden, no mechanics language>",
-  "attack_styles": <3-6 short phrases for how this body attacks, fitted to the gifts, e.g. "a driving shoulder", "a lash of the long limb">,
-  "prologue": "<200-400 word prologue chapter narrating this character's arrival into the world, third-person past tense, no mechanics>"
+  "attack_styles": <3-6 short phrases for how this body attacks, fitted to the gifts, e.g. "a driving shoulder", "a lash of the long limb">
 }
 PROMPT);
 
             return [
                 'description' => trim((string) ($response['description'] ?? '')) ?: $this->stockDescription($name, $build),
                 'attack_styles' => $this->attackStyles(['attack_styles' => $response['attack_styles'] ?? []]),
-                'prologue' => trim((string) ($response['prologue'] ?? '')) ?: $this->stockPrologue($name),
             ];
         } catch (\Throwable $e) {
             report($e);
@@ -547,7 +593,6 @@ PROMPT);
             return [
                 'description' => $this->stockDescription($name, $build),
                 'attack_styles' => null,
-                'prologue' => $this->stockPrologue($name),
             ];
         }
     }
@@ -664,7 +709,18 @@ Keep this reply SHORT. The player is waiting on it in a live conversation, and t
 PROMPT;
     }
 
-    /** Growth: same narrated-request mechanic, Claude as in-world limiter. */
+    /**
+     * Evolution: same narrated-request mechanic, Claude as in-world limiter.
+     *
+     * The verdict is recorded alongside the answer, and this is the whole
+     * point of the columns. A refusal and a grant used to arrive as the same
+     * thing — one line of in-world prose, gone as soon as the page reloaded —
+     * so a player who asked for something and got a graceful "not yet" could
+     * not tell it apart from a player whose sheet had just changed, or from a
+     * request that had simply vanished. What changed is now written down in
+     * the engine's own words, because Claude's prose is deliberately vague
+     * about numbers and the sheet is not.
+     */
     public function grow(Campaign $campaign, string $request): InterviewMessage
     {
         $character = $campaign->character;
@@ -672,18 +728,26 @@ PROMPT;
         $sheet = $character->capabilities->map(fn ($c) => $c->only(['capability', 'magnitude', 'grade', 'scope']))->toJson();
         $constraints = $character->constraints->map(fn ($c) => $c->only(['name', 'params', 'coupled_capability']))->toJson();
         $bounds = json_encode(config('game.bounds.capability_magnitudes'));
+        $vocabulary = implode(', ', array_column(Capability::cases(), 'value'));
+        $transcript = $this->growthTranscript($campaign);
 
         $response = $this->claude->promptForJson(<<<PROMPT
-A player asks to grow their character. Either translate the request into a small capability/magnitude change, or push back in-world if it overreaches ("your tail can hold one more item, but lifting a grown person is beyond it — perhaps with training, later"). One change at a time; deepening an existing magnitude is cheaper than a new capability.
+A player asks to evolve their character. Either translate the request into a small capability/magnitude change, or push back in-world if it overreaches ("your tail can hold one more item, but lifting a grown person is beyond it — perhaps with training, later"). One change at a time; deepening an existing magnitude is cheaper than a new capability.
 
+Capabilities must come from this vocabulary: {$vocabulary}
 Current capabilities: {$sheet}
 Current constraints: {$constraints}
 Hard bounds (engine-enforced): {$bounds}
-
+{$transcript}
 Player's request: {$request}
 
 Respond with ONLY a JSON object:
-{"reply": "<in-world answer>", "granted": <bool>, "changes": <null or [{"capability": "...", "magnitude": <int|null>, "grade": <string|null>, "scope": <object|null>}]>}
+{
+  "reply": "<in-world answer — say plainly whether the world grants this, and what it costs>",
+  "granted": <bool>,
+  "changes": <null or [{"capability": "...", "magnitude": <int|null>, "grade": <string|null>, "scope": <object|null>}]>,
+  "suggestions": <2-4 things the player could ask for NEXT, each in the player's own voice, one plain sentence, ≤ 120 characters — a refusal should suggest the smaller version of what they wanted>
+}
 PROMPT);
 
         // Written down only once the world has answered — same bargain as
@@ -695,27 +759,83 @@ PROMPT);
             'body' => $request,
         ]);
 
+        // What the ENGINE did, not what Claude said it did. The clamp may
+        // have cut a proposed magnitude down, or dragged a new constraint in
+        // behind a strong gift — the player is owed the real ledger.
+        $applied = [];
         if (($response['granted'] ?? false) && is_array($response['changes'] ?? null)) {
             $clamped = $this->clamp->clamp($response['changes']);
             foreach ($clamped['capabilities'] as $entry) {
+                $before = $character->capabilities()->where('capability', $entry['capability'])->first();
                 $character->capabilities()->updateOrCreate(
                     ['capability' => $entry['capability']],
                     $entry + ['source' => 'growth'],
                 );
+                $applied[] = [
+                    'kind' => 'gift',
+                    'label' => str_replace('_', ' ', $entry['capability']),
+                    'detail' => $this->magnitudeChange($before?->magnitude, $entry['magnitude'] ?? null, $entry['grade'] ?? null),
+                ];
             }
             foreach ($clamped['constraints'] as $constraint) {
-                $character->constraints()->firstOrCreate(
+                $fresh = $character->constraints()->firstOrCreate(
                     ['name' => $constraint['name']],
                     $constraint + ['source' => 'growth'],
                 );
+                if ($fresh->wasRecentlyCreated) {
+                    $applied[] = [
+                        'kind' => 'burden',
+                        'label' => str_replace('_', ' ', $constraint['name']),
+                        'detail' => 'the price this gift drags with it',
+                    ];
+                }
             }
         }
+
+        // Claude can say yes and change nothing — an unusable capability name,
+        // a magnitude already held. The sheet is the authority on whether this
+        // was a grant, so the record says what actually moved.
+        $granted = $applied !== [];
 
         return InterviewMessage::create([
             'campaign_id' => $campaign->id,
             'kind' => 'growth',
             'role' => 'narrator',
             'body' => $response['reply'] ?? '…',
+            'granted' => $granted,
+            'changes' => $applied,
+            'suggestions' => array_values(array_filter(
+                array_map('strval', $response['suggestions'] ?? []),
+                fn (string $s) => trim($s) !== '',
+            )),
         ]);
+    }
+
+    /**
+     * The evolution conversation so far. Asking twice for the same thing
+     * should meet the same answer, and a world that has already said "not
+     * until you have carried it a while" needs to remember saying it.
+     */
+    private function growthTranscript(Campaign $campaign): string
+    {
+        $lines = $campaign->interviewMessages()
+            ->where('kind', 'growth')->orderBy('id')->get()->take(-8)
+            ->map(fn (InterviewMessage $m) => ($m->role === 'player' ? 'PLAYER: ' : 'WORLD: ').$m->body)
+            ->join("\n");
+
+        return $lines === '' ? '' : "\n## Earlier in this conversation\n{$lines}\n";
+    }
+
+    private function magnitudeChange(?int $before, ?int $after, ?string $grade): string
+    {
+        if ($after === null) {
+            return $grade === null ? 'newly yours' : "newly yours ({$grade})";
+        }
+
+        if ($before === null) {
+            return "newly yours, at {$after}";
+        }
+
+        return $before === $after ? "held at {$after}" : "{$before} → {$after}";
     }
 }

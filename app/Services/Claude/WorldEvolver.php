@@ -6,6 +6,7 @@ use App\Models\Actor;
 use App\Models\Campaign;
 use App\Models\Chapter;
 use App\Models\EvolutionRun;
+use App\Models\Grudge;
 use App\Models\Item;
 use App\Models\SceneFeature;
 use App\Models\Zone;
@@ -64,7 +65,7 @@ class WorldEvolver
         try {
             $zones = $this->campaignZones($campaign);
             $plan = $this->claude->promptForJson($this->buildPrompt($campaign, $zones, $kind, $budget));
-            $applied = $this->apply($run, $plan, $budget, $zones);
+            $applied = $this->apply($run, $plan, $budget, $zones, $campaign);
             $applied['campaign'] = ['id' => $campaign->id, 'name' => $campaign->name];
 
             $chronicle = trim($plan['chronicle'] ?? '') ?: 'The world shifted in ways not yet visible.';
@@ -118,6 +119,14 @@ class WorldEvolver
         $land = $campaign->worldBrief();
         $stage = $campaign->stageBrief() ?: '(none set)';
 
+        // The tale's open scores: enemies who fled and are still out there.
+        // The evolver may develop them off-screen — never bring them back;
+        // the engine alone decides whether and when a grudge returns.
+        $grudgeBudget = (int) ($budget['grudges'] ?? 0);
+        $grudges = Grudge::where('campaign_id', $campaign->id)->where('status', 'simmering')->get();
+        $grudgeList = $grudges->map(fn (Grudge $g) => "- {$g->actor_name} ({$g->disposition}): "
+            .collect($g->history)->pluck('detail')->take(-3)->join(' '))->join("\n") ?: '(none)';
+
         return <<<PROMPT
 You are the world-evolution process of a living-world RPG, on a {$kind} run, tending ONE campaign's private world. Evolve it: new enemies, items, and affordance-bearing features in the zones this tale walks. You may introduce NEW AFFORDANCE TYPES (e.g. wind currents rideable via glide, flooded passages requiring swim) — the capability grammar stays constant, its vocabulary of scene features grows. Do NOT rewrite core mechanics, and do not invent new zones — the frontier does that.
 
@@ -136,6 +145,10 @@ Zones:
 {$zoneList}
 Zone-level actor templates in them: {$actorCount}. Items (world-wide): {$itemCount}.
 
+## Open grudges — enemies who fled this tale and are still out there (tend at most {$grudgeBudget})
+{$grudgeList}
+You may develop a grudge off-screen: one sentence of what they have been doing (chronicle material), and optionally a small stat or tag change within the same bounds as actors. Never decide that they return, and never place them anywhere — the tale itself chooses their moment.
+
 ## Recent evolution log (do not contradict or duplicate; do not spiral difficulty)
 {$recentRuns}
 
@@ -151,14 +164,15 @@ Respond with ONLY a JSON object:
   "rationale": "<one paragraph, out-of-world, for the evolution log>",
   "features": [{"zone_slug": "...", "name": "...", "feature_type": "...", "affordances": {...}}],
   "actors": [{"zone_slug": "...", "name": "...", "kind": "enemy|npc|creature", "tier": "regular|elite", "stats": {"health": {"current": 6, "max": 6}, "attack": 2}, "tags": {"intimidatable": true, "type": "regular"}}],
-  "items": [{"slug": "...", "name": "...", "description": "...", "power": 1, "grants": [{"capability": "...", "magnitude": null}]}]
+  "items": [{"slug": "...", "name": "...", "description": "...", "power": 1, "grants": [{"capability": "...", "magnitude": null}]}],
+  "grudges": [{"name": "<an open grudge's exact name>", "development": "<one sentence, in-world>", "stats": {"health": {"max": 7}, "attack": 2}, "tags": {}}]
 }
 Empty arrays are fine — a quiet night is a legitimate evolution.
 PROMPT;
     }
 
     /** Validate against the budget and bounds, then apply. Returns the applied change set. */
-    private function apply(EvolutionRun $run, array $plan, array $budget, $zones): array
+    private function apply(EvolutionRun $run, array $plan, array $budget, $zones, Campaign $campaign): array
     {
         $applied = ['rationale' => $plan['rationale'] ?? null];
 
@@ -218,7 +232,71 @@ PROMPT;
         }
         $applied['items'] = $items->values()->all();
 
+        $applied['grudges'] = $this->tendGrudges($plan, $budget, $campaign);
+
         return $applied;
+    }
+
+    /**
+     * Grudge tending: the LLM proposes how a fled enemy changed off-screen;
+     * the engine clamps every delta to the same actor bounds, bumps heat by
+     * at most one per run, and never lets a proposal touch the return
+     * machinery — a grudge is a story thread, not a difficulty spiral.
+     *
+     * @return list<array{name: string, development: ?string}>
+     */
+    private function tendGrudges(array $plan, array $budget, Campaign $campaign): array
+    {
+        // The engine's own markers and scene-transient combat state: a tag
+        // delta may deepen who they are, never how or when they come back.
+        $reserved = array_flip([
+            'intent', 'angle', 'ambush', 'shaken', 'cornered', 'pinned',
+            'lurking', 'lurking_since', 'fled_how', 'called_off',
+            'grudge_id', 'truce', 'deal', 'truce_health',
+        ]);
+
+        $tended = [];
+
+        foreach (collect($plan['grudges'] ?? [])->take($budget['grudges'] ?? 0) as $proposal) {
+            $grudge = Grudge::where('campaign_id', $campaign->id)
+                ->where('actor_name', $proposal['name'] ?? '')
+                ->where('status', 'simmering')->first();
+            if ($grudge === null) {
+                continue;
+            }
+
+            $stats = $grudge->stats;
+            if (isset($proposal['stats']['health']['max'])) {
+                $max = min(12, max(1, (int) $proposal['stats']['health']['max']));
+                $stats['health'] = ['current' => $max, 'max' => $max];
+            }
+            if (isset($proposal['stats']['attack'])) {
+                $stats['attack'] = min(4, max(1, (int) $proposal['stats']['attack']));
+            }
+
+            $tags = array_merge($grudge->tags ?? [],
+                array_diff_key((array) ($proposal['tags'] ?? []), $reserved));
+
+            $development = trim((string) ($proposal['development'] ?? '')) ?: null;
+            $history = $grudge->history;
+            if ($development !== null) {
+                $history[] = [
+                    'turn_id' => null, 'chapter_id' => null,
+                    'event' => 'developed', 'detail' => $development, 'place' => null,
+                ];
+            }
+
+            $grudge->update([
+                'stats' => $stats,
+                'tags' => $tags,
+                'heat' => min(3, $grudge->heat + 1),
+                'history' => $history,
+            ]);
+
+            $tended[] = ['name' => $grudge->actor_name, 'development' => $development];
+        }
+
+        return $tended;
     }
 
     /**

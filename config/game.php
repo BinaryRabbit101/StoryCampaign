@@ -122,8 +122,8 @@ return [
         // Per-evolution-run budget: hard caps on how much a single run
         // may add, so the world never sprawls overnight.
         'evolution_budget' => [
-            'daily' => ['zones' => 0, 'features' => 3, 'actors' => 2, 'items' => 1, 'affordance_types' => 1],
-            'weekly' => ['zones' => 1, 'features' => 6, 'actors' => 4, 'items' => 2, 'affordance_types' => 2],
+            'daily' => ['zones' => 0, 'features' => 3, 'actors' => 2, 'items' => 1, 'affordance_types' => 1, 'grudges' => 2],
+            'weekly' => ['zones' => 1, 'features' => 6, 'actors' => 4, 'items' => 2, 'affordance_types' => 2, 'grudges' => 3],
         ],
         'max_item_power' => 5,
         'max_actor_tier' => 'elite', // evolution may not mint bosses without a weekly run

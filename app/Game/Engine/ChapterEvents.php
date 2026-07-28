@@ -12,7 +12,8 @@ use App\Models\Turn;
  * Derived, never stored — the turn's resolution stays the single source
  * of truth, so ids are stable across every re-derivation.
  *
- * @phpstan-type Event array{id:string,icon:string,label:string,slot:?string,verb:?string,degree:?string,skipped:bool,facts:list<string>,note:?string,crit:?string,roll:?array{roll:int,total:int,difficulty:int,crit:?string}}
+ * @phpstan-type Part array{label:string,amount:int}
+ * @phpstan-type Event array{id:string,icon:string,label:string,slot:?string,verb:?string,degree:?string,skipped:bool,facts:list<string>,note:?string,crit:?string,roll:?array{roll:int,total:int,difficulty:int,crit:?string,difficulty_parts:list<Part>,bonus_parts:list<Part>}}
  */
 class ChapterEvents
 {
@@ -42,6 +43,7 @@ class ChapterEvents
         'examine' => 'study',
         'inspect' => 'study',
         'speak' => 'parley',
+        'bargain' => 'parley',
         'hurl' => 'force',
         'shield' => 'defense',
         'recruit' => 'parley',
@@ -102,6 +104,8 @@ class ChapterEvents
                         'total' => $beat['total'],
                         'difficulty' => $beat['difficulty'],
                         'crit' => $beat['crit'] ?? null,
+                        'difficulty_parts' => array_values($beat['difficulty_parts'] ?? []),
+                        'bonus_parts' => array_values($beat['bonus_parts'] ?? []),
                     ]
                     : null,
             ];

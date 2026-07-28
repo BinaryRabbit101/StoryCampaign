@@ -6,6 +6,7 @@ use App\Game\Engine\ChapterEntities;
 use App\Game\Engine\ChapterEvents;
 use App\Game\Engine\RollTable;
 use App\Game\Engine\TurnResolver;
+use App\Game\Hands;
 use App\Game\TurnSlot;
 use App\Models\Campaign;
 use App\Models\Turn;
@@ -66,6 +67,10 @@ class PlayController extends Controller
                 'description' => $character->description,
                 'status' => $character->status,
                 'meters' => $character->meters,
+                // What is physically in their hands right now — scene matter
+                // they picked up, not the items they own.
+                'carrying' => Hands::held($character),
+                'hands_free' => Hands::free($character),
                 'capabilities' => $character->capabilities->map(fn ($c) => $c->only(['capability', 'magnitude', 'grade', 'scope', 'source'])),
                 'constraints' => $character->constraints->map(fn ($c) => $c->only(['name', 'params', 'coupled_capability'])),
                 'items' => $character->items->map(fn ($i) => [
@@ -82,8 +87,19 @@ class PlayController extends Controller
                 'number' => $turn->number,
                 'status' => $turn->status,
                 'situation' => $turn->situation,
+                // Grouped bullets, shown beside every chapter. Turns opened
+                // before the board existed carry none; the page falls back to
+                // the prose those turns were written with.
+                'board' => $turn->situation_board,
                 'cards' => $turn->isOpen() ? $turn->cards : null,
             ],
+            // The evolution conversation, so a request and the world's answer
+            // to it stay on screen together. Without this the answer was
+            // written to the database and shown to nobody.
+            'growth' => $campaign->interviewMessages()
+                ->where('kind', 'growth')->orderBy('id')->get()->take(-10)
+                ->map(fn ($m) => $m->only(['id', 'role', 'body', 'granted', 'changes', 'suggestions']))
+                ->values(),
             'latestChapter' => $latestChapter === null ? null : [
                 ...$latestChapter->only(['number', 'kind', 'intent_line', 'body']),
                 'events' => $chapterTurn === null ? [] : ChapterEvents::for($chapterTurn),

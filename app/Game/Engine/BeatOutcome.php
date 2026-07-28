@@ -33,6 +33,13 @@ class BeatOutcome
      *                             even against a difficulty it would have
      *                             cleared anyway, and a natural 1 is a fumble
      *                             even when the bonuses would have carried it.
+     * @param  list<array{label:string,amount:int}>  $difficultyParts  Why the
+     *                                                                 number was what it was. A player who sees
+     *                                                                 "2 vs 18" and nothing else cannot tell a
+     *                                                                 hard choice from a bad one; these are what
+     *                                                                 the dice table shows behind the arithmetic.
+     * @param  list<array{label:string,amount:int}>  $bonusParts  The same for
+     *                                                            everything the roll carried into it.
      */
     public function __construct(
         public readonly string $slot,
@@ -46,6 +53,8 @@ class BeatOutcome
         public readonly bool $skipped = false,
         public readonly ?string $note = null,
         public readonly ?string $crit = null,
+        public readonly array $difficultyParts = [],
+        public readonly array $bonusParts = [],
     ) {}
 
     public function succeeded(): bool
@@ -67,6 +76,8 @@ class BeatOutcome
             'skipped' => $this->skipped,
             'note' => $this->note,
             'crit' => $this->crit,
+            'difficulty_parts' => $this->difficultyParts,
+            'bonus_parts' => $this->bonusParts,
         ];
     }
 

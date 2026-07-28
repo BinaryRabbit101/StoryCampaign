@@ -62,14 +62,30 @@ adjudicates legality or outcomes — it is only ever handed resolved facts.
   `creation_points`; Claude only writes prose around the finished sheet),
   `CapabilityGroup` (slot scoping), `TurnSlot` (pre/main/post), `BranchTrigger`
   (the 8 vignette stop conditions), `Meters` (tempo regens in real time across
-  the idle wait; health only via recovery beats).
+  the idle wait; health only via recovery beats), `Hands` (what is physically
+  held: a successful `lift` puts scene matter IN the character's two hands,
+  where it stops being ground, opens `drop`/`hurl`, and degrades the cards
+  that want a free hand until it is set down — distinct from `items`, which
+  are owned and travel between tales).
 - `app/Game/Engine/` — `CardComposer` (the intersection engine: capabilities ×
   affordances × constraints → cards, with graceful degradation and composed
-  cards), `TurnResolver` (slot chain with legality-driven abort, seeded `Dice`,
-  enemy reaction, branch triggers, next-turn generation), `SceneDresser`
+  cards), `Odds` (the difficulty/bonus ladder, ITEMIZED — the single source
+  both the card's forecast and the resolver's roll read, so a card can never
+  quote a DC the dice won't honor), `TurnResolver` (slot chain with
+  legality-driven abort, seeded `Dice`, enemy reaction, branch triggers,
+  next-turn generation), `SituationBoard` (the state of play as grouped
+  bullets + the prose compilation the narrator prompt reads), `SceneDresser`
   (scene generation: a seeded SUBSET of zone templates instantiated as
   scene-scoped copies + spawned actors + a zone `locales` title, marked
-  `state.dressed`), `ActionCard`, `BeatOutcome`.
+  `state.dressed`), `Grudges` (the nemesis system: an enemy who newly flees
+  becomes a campaign-scoped `grudges` row keyed by NAME — heat 0–3, a
+  disposition rolled from the flee circumstances, append-only history the
+  narrator quotes; the engine alone rolls returns at scene transition
+  (heat×15%, 2-chapter floor, one per scene — vengeful arrives telegraphing,
+  wary arrives `lurking`, scheming arrives under `truce` with an engine-picked
+  deal the roll-free `bargain` verb accepts); the evolver only tends simmering
+  grudges within actor clamps and +1 heat/run; killed/kept/bargained is
+  `resolved` and terminal), `ActionCard`, `BeatOutcome`.
 - Anti-repetition systems (all engine-side, no LLM): every visible feature
   and actor carries capability-free `inspect`/`improvise`/`speak` cards, so
   ground the character's gifts don't fit is still actionable and the card
@@ -108,6 +124,23 @@ adjudicates legality or outcomes — it is only ever handed resolved facts.
 - Every turn stop must offer ≥ 2 legal cards (generic fallbacks guarantee it).
 - Improvise resolves against base stats with no bonus — never better than a
   real enumerated option.
+- Nothing about a card's odds may be a surprise. Turns commit on submit — the
+  player cannot go back and re-pick — so every card carries a `forecast` (DC
+  per stance, the bonuses already standing, and what a set-up beat grants the
+  beats after it), and every resolved roll carries `difficulty_parts` /
+  `bonus_parts`. Both come from `Odds` and nowhere else: a second copy of that
+  ladder is how a card starts promising a DC the dice do not honor. The
+  modifier is always displayed, `+0` included — hiding it when it happens to
+  be zero is exactly when its absence is worth stating.
+- The scene arrives thin. Openings and transitions draw few features and often
+  no actors at all; an empty room is a legitimate reading of a place, and a
+  scene that spends the whole world on arrival leaves nothing to appear later.
+  The alarm clock and the wandering-threat roll are how company shows up.
+- The prologue is written LAST, after the first scene and turn exist, and is
+  handed that scene as the moment it must END standing in (`Interviewer::
+  landing()`); the first chapter is then told it continues from it. Writing
+  the prologue before the opening scene existed is what made the two read as
+  different books stapled together.
 - The optional per-beat note ("in your own words", one per chosen card, stored
   as `submission.<slot>.note` and carried on `BeatOutcome::$note`) colors
   narration only; it must never reach the mechanics path — the resolver reads

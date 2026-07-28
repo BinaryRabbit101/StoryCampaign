@@ -3,6 +3,7 @@
 namespace App\Game\Engine;
 
 use App\Game\Capability;
+use App\Game\Hands;
 use App\Game\Meters;
 use App\Game\TurnSlot;
 use App\Models\Actor;
@@ -29,10 +30,17 @@ class CardComposer
         $capabilities = $character->effectiveCapabilities();
         // Only what the player can perceive makes cards: hidden features wait
         // for examine/scout, a lurking ambusher for detect (or its spring).
-        $features = $scene->visibleFeatures();
+        // What is already in their hands is not ground any more — it comes
+        // back as its own cards below, not as something to climb or hide behind.
+        $features = $scene->visibleFeatures()
+            ->reject(fn (SceneFeature $f) => Hands::isHolding($character, $f->id));
         $actors = $scene->visibleActors();
 
         $cards = ['pre' => [], 'main' => [], 'post' => []];
+
+        foreach ($this->carriedCards($character, $actors) as $card) {
+            $cards[$card->slot->value][] = $card;
+        }
 
         foreach ($features as $feature) {
             foreach ($this->featureCards($character, $capabilities, $feature) as $card) {
@@ -98,8 +106,25 @@ class CardComposer
             );
         }
 
+        // What is already true as these cards are offered. Every card prices
+        // itself against this, so "high ground, +2 to a strike" is on the card
+        // before it is chosen rather than a surprise on the dice table.
+        $conditions = ['elevated' => (bool) ($scene->state['elevated'] ?? false)];
+
+        // Full hands never forbid an action — a held crate that locked the
+        // screen would be a punishment, not a choice — but they make the
+        // hand-hungry ones harder, and the card says so in both places the
+        // player can read: the wording, and the difficulty.
+        $cards = array_map(
+            fn (array $slotCards) => array_map(
+                fn (ActionCard $c) => $this->underLoad($c, $character),
+                $slotCards,
+            ),
+            $cards,
+        );
+
         $composed = array_map(
-            fn (array $slotCards) => array_map(fn (ActionCard $c) => $c->toArray(), $slotCards),
+            fn (array $slotCards) => array_map(fn (ActionCard $c) => $c->toArray($conditions), $slotCards),
             $cards,
         );
 
@@ -112,13 +137,89 @@ class CardComposer
                 'id' => $companion->id,
                 'name' => $companion->name,
                 'cards' => array_map(
-                    fn (ActionCard $c) => $c->toArray(),
+                    fn (ActionCard $c) => $c->toArray($conditions),
                     $this->companionCards($companion, $actors, $scene),
                 ),
             ])
             ->values()->all();
 
         return $composed;
+    }
+
+    /**
+     * What a thing in your hands lets you do.
+     *
+     * Lifting used to end with the object shoved aside and forgotten. Now it
+     * ends with the object HELD, which is a position rather than an event —
+     * so it has to keep offering choices, and one of them has to be putting
+     * it down again. Setting it down is free and always available: a player
+     * who picks something up must never be stuck holding it.
+     *
+     * @return list<ActionCard>
+     */
+    private function carriedCards(Character $character, $actors): array
+    {
+        $cards = [];
+
+        foreach (Hands::held($character) as $entry) {
+            $target = ['type' => 'carried', 'id' => $entry['feature_id'], 'name' => $entry['name']];
+
+            $cards[] = new ActionCard(
+                slot: TurnSlot::Post,
+                verb: 'drop',
+                label: "Set down {$entry['name']}",
+                description: 'Put it down and have your hands back.',
+                target: $target,
+            );
+
+            foreach ($actors as $actor) {
+                if ($actor->kind !== 'enemy') {
+                    continue;
+                }
+                $cards[] = new ActionCard(
+                    slot: TurnSlot::Main,
+                    verb: 'hurl',
+                    label: "Throw {$entry['name']} at {$actor->name}",
+                    description: "Everything you are holding, all at once. {$entry['name']} does not come back to your hands.",
+                    target: ['type' => 'actor', 'id' => $actor->id, 'name' => $actor->name],
+                    capability: 'lift',
+                    risk: 'risky',
+                    modifiers: [$this->approachModifier('hurl')],
+                );
+            }
+        }
+
+        return $cards;
+    }
+
+    /**
+     * The price of full hands, written onto the cards that want one.
+     *
+     * A degraded card is still offered and still winnable — it just costs
+     * five points of difficulty, which is the honest weight of trying it
+     * one-handed around a crate. The card says which, so the player can put
+     * the thing down first if the trade is not worth it.
+     */
+    private function underLoad(ActionCard $card, Character $character): ActionCard
+    {
+        if ($card->risk === 'degraded' || ! Hands::encumbers($character, $card->verb)) {
+            return $card;
+        }
+
+        $held = Hands::summary($character);
+
+        return new ActionCard(
+            slot: $card->slot,
+            verb: $card->verb,
+            label: $card->label,
+            description: rtrim($card->description, ' ')." Your hands are full of {$held} — this goes harder one-armed.",
+            target: $card->target,
+            capability: $card->capability,
+            risk: 'degraded',
+            cost: $card->cost,
+            modifiers: $card->modifiers,
+            composed: $card->composed,
+        );
     }
 
     /** @return list<ActionCard> */
@@ -236,17 +337,22 @@ class CardComposer
             );
         }
 
+        // Lifting ends with the thing IN THEIR HANDS, not merely moved: the
+        // card has to promise that, and it has to say what holding it costs,
+        // because the hands it fills are the same hands the next card wants.
         if (isset($affordances['lift_weight']) && isset($capabilities['lift'])) {
             $weight = (int) $affordances['lift_weight'];
             $mag = $capabilities['lift']->magnitude ?? 0;
-            if ($mag >= $weight * 0.75) {
+            $hands = Hands::handsFor($weight);
+            $grip = $hands >= 2 ? 'It needs both hands.' : 'One hand stays on it.';
+            if ($mag >= $weight * 0.75 && Hands::free($character) >= $hands) {
                 $cards[] = new ActionCard(
                     slot: TurnSlot::Main,
                     verb: 'lift',
-                    label: "Lift {$feature->name}",
+                    label: "Take up {$feature->name}",
                     description: $mag >= $weight
-                        ? "Heave {$feature->name} aside."
-                        : "{$feature->name} is heavier than anything you've lifted — you might manage it, straining.",
+                        ? "Heave {$feature->name} up and hold it. {$grip}"
+                        : "{$feature->name} is heavier than anything you've lifted — you might get it up, straining. {$grip}",
                     target: $target,
                     capability: 'lift',
                     risk: $mag >= $weight ? 'safe' : 'degraded',
@@ -326,6 +432,21 @@ class CardComposer
         $hostile = $actor->kind === 'enemy';
 
         if ($hostile) {
+            // A returned grudge under truce came carrying terms. Hearing them
+            // out is a real choice standing beside the strike, not instead of
+            // it: take the deal and the score dies, or answer with steel and
+            // the truce dies. The deal's content was engine-picked at their
+            // return — the card only quotes it.
+            if (($tags['truce'] ?? false) && isset($tags['deal'])) {
+                $cards[] = new ActionCard(
+                    slot: TurnSlot::Main,
+                    verb: 'bargain',
+                    label: "Hear {$actor->name}'s terms",
+                    description: "{$actor->name} has come to settle, not to fight. ".Grudges::dealDetail($tags['deal']).' Take the terms, and the old score dies here.',
+                    target: $target,
+                );
+            }
+
             // The enemy's telegraphed intent colors the strike: a windup is an
             // opening, a guard a warning. The resolver reads the same intent
             // for the actual difficulty — the card only tells the truth.

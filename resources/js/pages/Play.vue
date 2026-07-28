@@ -11,11 +11,15 @@ import AmbientBackdrop from '@/components/game/AmbientBackdrop.vue';
 import SlotPicker from '@/components/game/SlotPicker.vue';
 import { enablePush } from '@/lib/push';
 import type {
+    ActionCard,
+    CarriedThing,
     ChapterEntity,
     ChapterEvent,
     CharacterItem,
     CharacterMeters,
+    GrowthMessage,
     RollTable,
+    SituationGroup,
     SlotChoice,
     TurnCards,
 } from '@/types/game';
@@ -27,6 +31,9 @@ const props = defineProps<{
         description: string;
         status: string;
         meters: CharacterMeters;
+        /** Scene matter physically in their hands — not the items they own. */
+        carrying: CarriedThing[];
+        hands_free: number;
         capabilities: {
             capability: string;
             magnitude: number | null;
@@ -46,8 +53,12 @@ const props = defineProps<{
         number: number;
         status: string;
         situation: string;
+        /** The same facts as `situation`, grouped. Null on pre-board turns. */
+        board: SituationGroup[] | null;
         cards: TurnCards | null;
     } | null;
+    /** The evolution conversation: what was asked, and how the world answered. */
+    growth: GrowthMessage[];
     /**
      * A turn is resolved but Claude has not written its chapter yet. Turns
      * resolve inline now, so this is the only wait left in the game.
@@ -108,11 +119,30 @@ const waiting = computed(() => locked.value || props.narrating);
 // with the failure stated above it.
 const stalled = computed(() => props.narrationStalled && !locked.value);
 
-// The story drives the situation: when the latest page is a real chapter it
-// already ends inside the current moment, so the engine's scene inventory
-// stays backstage. It surfaces only when no chapter carries the lead-in
-// (fresh from the prologue, or narration still catching up).
-const showSituation = computed(() => props.latestChapter?.kind !== 'chapter');
+// The board stands beside every chapter, not instead of one.
+//
+// It used to hide whenever a real chapter was on screen, on the theory that
+// the prose already ends inside the current moment. It does — but the reader
+// who most needs to check what is standing where is the one mid-fight with a
+// chapter in hand, and making them reconstruct the cast from a paragraph is
+// the opposite of help. Empty groups are simply absent, so a quiet place
+// shows a short board rather than a list of reassurances nobody asked for.
+const board = computed<SituationGroup[]>(() => props.turn?.board ?? []);
+
+// Turns opened before the board existed still carry the prose they were
+// written with. Nothing is lost on an old save; it just reads as one line.
+const legacySituation = computed(() =>
+    board.value.length === 0 ? (props.turn?.situation ?? '') : '',
+);
+
+const TONE_DOTS: Record<SituationGroup['tone'], string> = {
+    foe: 'bg-red-500',
+    ally: 'bg-amber-500',
+    person: 'bg-teal-500',
+    ground: 'bg-[#8a5a33]',
+    self: 'bg-violet-500',
+    neutral: 'bg-muted-foreground/50',
+};
 
 // ---- Anchors in the prose ----
 //
@@ -227,6 +257,10 @@ function dismissDetail(e: Event) {
 function dismissOnEscape(e: KeyboardEvent) {
     if (e.key === 'Escape') detail.value = null;
 }
+
+/** Always signed, +0 included — see the roll block in the detail card. */
+const signed = (amount: number) =>
+    `${amount > 0 ? '+' : '−'}${Math.abs(amount)}`;
 
 const degreeClass = (event: ChapterEvent) =>
     event.skipped
@@ -366,6 +400,52 @@ const unanchoredEvents = computed(() => {
     );
 });
 
+/**
+ * What the set-up beats already chosen will hand to the beats after them.
+ *
+ * The engine states this on each card ("readied — +2 to whatever comes next")
+ * so the page never has to re-derive the rules; it only adds up the cards the
+ * player has actually picked. Passed down so the act's difficulty is quoted
+ * against the plan being assembled rather than against an empty one.
+ */
+const setupGrants = computed(() => {
+    const chosen: ActionCard[] = [];
+
+    if (pre.value && props.turn?.cards) {
+        const card = props.turn.cards.pre.find(
+            (c) => c.id === pre.value!.card_id,
+        );
+        if (card) {
+            chosen.push(card);
+        }
+    }
+
+    for (const companion of props.turn?.cards?.companions ?? []) {
+        const choice = companionChoices.value[companion.id];
+
+        if (!choice) {
+            continue;
+        }
+
+        const card = companion.cards.find((c) => c.id === choice.card_id);
+
+        if (card) {
+            chosen.push(card);
+        }
+    }
+
+    return chosen
+        .map((card) => card.forecast.grant)
+        .filter((grant): grant is NonNullable<typeof grant> => grant !== null)
+        .map((grant) => ({
+            label: grant.label,
+            amount: grant.amount,
+            certain: grant.certain,
+            verbs: grant.verbs,
+            slot: grant.slot,
+        }));
+});
+
 // Staged, visible resource commitment: the running cost of the whole chain.
 const runningCost = computed(() => {
     const totals: Record<string, number> = {};
@@ -454,19 +534,36 @@ function submit() {
     );
 }
 
+const asking = ref(false);
+
+/**
+ * Ask the world to change you.
+ *
+ * The panel deliberately stays OPEN after the answer lands. Closing it was
+ * the whole bug: the request went off, the world wrote a reply, and the
+ * player was returned to a page that looked exactly as it had before —
+ * no answer, no verdict, no way to tell the ask from a no-op.
+ */
 function requestGrowth() {
-    if (!growthText.value.trim()) return;
+    if (!growthText.value.trim() || asking.value) return;
+    asking.value = true;
     router.post(
         `/campaigns/${props.campaign.id}/grow`,
         { body: growthText.value },
         {
-            onSuccess: () => (
-                (growthText.value = ''),
-                (showGrowth.value = false)
-            ),
+            preserveScroll: true,
+            onSuccess: () => (growthText.value = ''),
+            onFinish: () => (asking.value = false),
         },
     );
 }
+
+/** The world's own suggestions for what to ask next, from its last answer. */
+const growthSuggestions = computed(() => {
+    const last = props.growth[props.growth.length - 1];
+
+    return last?.role === 'narrator' ? (last.suggestions ?? []) : [];
+});
 
 function endCampaign(coda: boolean) {
     router.post(`/campaigns/${props.campaign.id}/end`, { coda });
@@ -596,6 +693,43 @@ const healthPct = computed(
                         </div>
                     </div>
 
+                    <!-- What is in their hands right now. Separate from the
+                         items below on purpose: those are owned and travel
+                         with them, this is scene matter they can put down —
+                         and it is the thing that decides whether the next
+                         card comes one-armed. -->
+                    <div v-if="character.carrying.length">
+                        <p
+                            class="mb-1 text-[10px] tracking-widest text-muted-foreground uppercase"
+                        >
+                            In hand
+                        </p>
+                        <div class="flex flex-wrap items-center gap-1">
+                            <span
+                                v-for="thing in character.carrying"
+                                :key="thing.name"
+                                class="rounded-full bg-sky-500/10 px-2 py-0.5 text-xs text-sky-700 dark:text-sky-300"
+                            >
+                                {{ thing.name
+                                }}<span class="opacity-70">
+                                    ·
+                                    {{
+                                        thing.hands === 2
+                                            ? 'both hands'
+                                            : 'one hand'
+                                    }}</span
+                                >
+                            </span>
+                            <span class="text-xs text-muted-foreground">
+                                {{
+                                    character.hands_free === 0
+                                        ? 'no hand free'
+                                        : `${character.hands_free} hand${character.hands_free === 1 ? '' : 's'} free`
+                                }}
+                            </span>
+                        </div>
+                    </div>
+
                     <div>
                         <p
                             class="mb-1 text-[10px] tracking-widest text-muted-foreground uppercase"
@@ -663,7 +797,7 @@ const healthPct = computed(
                             class="text-muted-foreground underline"
                             @click="showGrowth = !showGrowth"
                         >
-                            ask to grow
+                            ask to evolve
                         </button>
                         <button
                             class="text-muted-foreground underline"
@@ -683,25 +817,133 @@ const healthPct = computed(
                 </div>
             </Transition>
 
+            <!-- Asking to evolve is a conversation, not a one-way form.
+                 It used to be a lone text box: the request went off, the
+                 world wrote an answer, and the answer was shown to nobody —
+                 so there was no way to tell a granted ask from a refused one
+                 from one that never arrived. The transcript stays on screen,
+                 and the engine's own verdict sits under each reply. -->
             <Transition name="unfold">
-                <form
+                <div
                     v-if="showGrowth"
-                    class="mt-3 flex gap-2"
-                    @submit.prevent="requestGrowth"
+                    class="mt-3 space-y-3 border-t border-sidebar-border/50 pt-3"
                 >
-                    <input
-                        v-model="growthText"
-                        maxlength="2000"
-                        placeholder="Describe how you want to grow — the world will answer…"
-                        class="flex-1 rounded-md border border-input bg-background px-3 py-2 text-sm"
-                    />
-                    <button
-                        type="submit"
-                        class="rounded-md bg-primary px-3 py-2 text-sm text-primary-foreground transition active:scale-95"
+                    <p class="text-xs text-muted-foreground">
+                        Tell the world how you want to change. It answers in its
+                        own voice, and it may say no — a smaller version of the
+                        same ask often lands.
+                    </p>
+
+                    <div
+                        v-if="growth.length"
+                        class="max-h-72 space-y-2 overflow-y-auto pr-1"
                     >
-                        Ask
-                    </button>
-                </form>
+                        <div
+                            v-for="message in growth"
+                            :key="message.id"
+                            class="rounded-lg px-3 py-2 text-sm"
+                            :class="
+                                message.role === 'player'
+                                    ? 'ml-6 bg-muted/70'
+                                    : 'mr-6 border border-sidebar-border/60'
+                            "
+                        >
+                            <p
+                                class="mb-0.5 text-[10px] tracking-widest text-muted-foreground uppercase"
+                            >
+                                {{
+                                    message.role === 'player'
+                                        ? 'You'
+                                        : 'The world'
+                                }}
+                            </p>
+                            <p class="whitespace-pre-wrap">
+                                {{ message.body }}
+                            </p>
+
+                            <!-- The verdict, from the sheet rather than the
+                                 prose. The world speaks in-world on purpose
+                                 and will not quote numbers; the player still
+                                 needs to know whether anything moved. -->
+                            <div
+                                v-if="
+                                    message.role === 'narrator' &&
+                                    message.granted !== null
+                                "
+                                class="mt-2 border-t border-sidebar-border/50 pt-1.5"
+                            >
+                                <p
+                                    v-if="!message.granted"
+                                    class="text-xs text-amber-700 dark:text-amber-400"
+                                >
+                                    Nothing on your sheet changed.
+                                </p>
+                                <template v-else>
+                                    <p
+                                        class="text-xs font-medium text-emerald-700 dark:text-emerald-400"
+                                    >
+                                        Your sheet changed:
+                                    </p>
+                                    <ul class="mt-0.5 space-y-0.5">
+                                        <li
+                                            v-for="change in message.changes ??
+                                            []"
+                                            :key="`${change.kind}-${change.label}`"
+                                            class="text-xs"
+                                            :class="
+                                                change.kind === 'gift'
+                                                    ? 'text-emerald-700 dark:text-emerald-400'
+                                                    : 'text-red-700 dark:text-red-400'
+                                            "
+                                        >
+                                            {{
+                                                change.kind === 'gift'
+                                                    ? '＋'
+                                                    : '−'
+                                            }}
+                                            {{ change.label }}
+                                            <span class="text-muted-foreground"
+                                                >— {{ change.detail }}</span
+                                            >
+                                        </li>
+                                    </ul>
+                                </template>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div
+                        v-if="growthSuggestions.length"
+                        class="flex flex-wrap gap-1"
+                    >
+                        <button
+                            v-for="suggestion in growthSuggestions"
+                            :key="suggestion"
+                            type="button"
+                            class="rounded-full border border-input px-2.5 py-1 text-left text-xs transition hover:bg-accent active:scale-95"
+                            @click="growthText = suggestion"
+                        >
+                            {{ suggestion }}
+                        </button>
+                    </div>
+
+                    <form class="flex gap-2" @submit.prevent="requestGrowth">
+                        <input
+                            v-model="growthText"
+                            maxlength="2000"
+                            :disabled="asking"
+                            placeholder="Describe how you want to change — the world will answer…"
+                            class="flex-1 rounded-md border border-input bg-background px-3 py-2 text-sm disabled:opacity-60"
+                        />
+                        <button
+                            type="submit"
+                            :disabled="asking || !growthText.trim()"
+                            class="rounded-md bg-primary px-3 py-2 text-sm text-primary-foreground transition active:scale-95 disabled:opacity-50"
+                        >
+                            {{ asking ? 'Asking…' : 'Ask' }}
+                        </button>
+                    </form>
+                </div>
             </Transition>
         </div>
 
@@ -759,10 +1001,7 @@ const healthPct = computed(
                         :class="
                             detail?.key === `entity:${seg.entity.key}`
                                 ? 'text-violet-600 decoration-violet-500 dark:text-violet-400 dark:decoration-violet-400'
-                                : [
-                                      tone(seg.entity).text,
-                                      tone(seg.entity).line,
-                                  ]
+                                : [tone(seg.entity).text, tone(seg.entity).line]
                         "
                         :title="`${seg.entity.name} — tap for detail`"
                         data-anchor
@@ -847,35 +1086,66 @@ const healthPct = computed(
                     >
                         Your words: “{{ detail.note }}”
                     </p>
-                    <p
-                        v-if="detail.roll"
-                        class="mt-1.5 font-mono text-xs text-muted-foreground"
-                    >
-                        d20 {{ detail.roll.roll
-                        }}<template
-                            v-if="detail.roll.total !== detail.roll.roll"
+                    <template v-if="detail.roll">
+                        <!-- The whole sum, +0 included: a modifier that only
+                             shows itself when non-zero leaves the reader
+                             unable to tell "nothing helped" from "something
+                             is broken". -->
+                        <p
+                            class="mt-1.5 font-mono text-xs text-muted-foreground"
                         >
-                            + {{ detail.roll.total - detail.roll.roll }} =
-                            {{ detail.roll.total }}</template
-                        >
-                        vs {{ detail.roll.difficulty }}
-                        <span
-                            v-if="detail.roll.crit"
-                            class="font-sans font-bold"
-                            :class="
-                                detail.roll.crit === 'success'
-                                    ? 'text-amber-600 dark:text-amber-300'
-                                    : 'text-rose-600 dark:text-rose-400'
+                            d20 {{ detail.roll.roll }}
+                            {{ signed(detail.roll.total - detail.roll.roll) }} =
+                            <span class="font-semibold text-foreground">{{
+                                detail.roll.total
+                            }}</span>
+                            vs DC {{ detail.roll.difficulty }}
+                            <span
+                                v-if="detail.roll.crit"
+                                class="font-sans font-bold"
+                                :class="
+                                    detail.roll.crit === 'success'
+                                        ? 'text-amber-600 dark:text-amber-300'
+                                        : 'text-rose-600 dark:text-rose-400'
+                                "
+                            >
+                                ·
+                                {{
+                                    detail.roll.crit === 'success'
+                                        ? '★ NAT 20'
+                                        : '☠ NAT 1'
+                                }}
+                            </span>
+                        </p>
+                        <ul
+                            v-if="
+                                detail.roll.difficulty_parts.length ||
+                                detail.roll.bonus_parts.length
                             "
+                            class="mt-1 space-y-0.5 text-[11px] text-muted-foreground"
                         >
-                            ·
-                            {{
-                                detail.roll.crit === 'success'
-                                    ? '★ NAT 20'
-                                    : '☠ NAT 1'
-                            }}
-                        </span>
-                    </p>
+                            <li
+                                v-for="part in detail.roll.difficulty_parts"
+                                :key="`d-${part.label}`"
+                                class="flex justify-between gap-3"
+                            >
+                                <span>{{ part.label }}</span>
+                                <span class="tabular-nums">{{
+                                    part.amount
+                                }}</span>
+                            </li>
+                            <li
+                                v-for="part in detail.roll.bonus_parts"
+                                :key="`b-${part.label}`"
+                                class="flex justify-between gap-3 text-emerald-700 dark:text-emerald-400"
+                            >
+                                <span>{{ part.label }}</span>
+                                <span class="tabular-nums">{{
+                                    signed(part.amount)
+                                }}</span>
+                            </li>
+                        </ul>
+                    </template>
                 </div>
             </Transition>
         </article>
@@ -886,20 +1156,48 @@ const healthPct = computed(
             class="sc-rise rounded-xl border border-sidebar-border/70 bg-background/60 p-5 backdrop-blur-sm dark:border-sidebar-border"
             style="animation-delay: 160ms"
         >
-            <template v-if="showSituation && !waiting">
+            <!-- The board, beside every chapter rather than instead of one.
+                 Grouped, so the eye can find the one line it came for; and
+                 short when the ground is quiet, because an empty room is a
+                 real answer and does not need padding out. -->
+            <template v-if="!waiting">
                 <p
-                    class="mb-1 text-xs tracking-widest text-muted-foreground uppercase"
+                    class="mb-2 text-xs tracking-widest text-muted-foreground uppercase"
                 >
                     The situation
                 </p>
-                <p class="mb-4 text-sm">{{ turn.situation }}</p>
+                <dl v-if="board.length" class="mb-4 space-y-2">
+                    <div v-for="group in board" :key="group.key">
+                        <dt
+                            class="text-[10px] tracking-widest text-muted-foreground uppercase"
+                        >
+                            {{ group.title }}
+                        </dt>
+                        <dd class="mt-0.5">
+                            <ul class="space-y-0.5">
+                                <li
+                                    v-for="item in group.items"
+                                    :key="item"
+                                    class="flex gap-2 text-sm"
+                                >
+                                    <span
+                                        class="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full"
+                                        :class="TONE_DOTS[group.tone]"
+                                        aria-hidden="true"
+                                    />
+                                    <span>{{ item }}</span>
+                                </li>
+                            </ul>
+                        </dd>
+                    </div>
+                </dl>
+                <p v-else-if="legacySituation" class="mb-4 text-sm">
+                    {{ legacySituation }}
+                </p>
+                <p v-else class="mb-4 text-sm text-muted-foreground italic">
+                    Nothing but the ground and you.
+                </p>
             </template>
-            <p
-                v-else-if="!waiting"
-                class="mb-4 text-xs tracking-widest text-muted-foreground uppercase"
-            >
-                The story waits on you
-            </p>
 
             <!-- The narrator has stopped answering. Say it plainly, above a
                  story that still works: the dice fell, the world moved, and
@@ -912,10 +1210,9 @@ const healthPct = computed(
                     The narrator has gone quiet.
                 </p>
                 <p class="mt-1 text-muted-foreground">
-                    Your turn resolved and nothing was lost — the chapter for
-                    it just hasn't been written yet. The world keeps trying,
-                    and it will appear here on its own once the narrator
-                    answers again.
+                    Your turn resolved and nothing was lost — the chapter for it
+                    just hasn't been written yet. The world keeps trying, and it
+                    will appear here on its own once the narrator answers again.
                 </p>
             </div>
 
@@ -959,9 +1256,13 @@ const healthPct = computed(
                 </p>
             </div>
 
+            <!-- Each beat is its own fold. Only the required one starts
+                 open: three fully expanded lists made the player scroll a
+                 page and a half to reach the single choice they had to make,
+                 and length is what turned a set of options into a chore. -->
             <form
                 v-else-if="turn.cards"
-                class="space-y-6"
+                class="space-y-2"
                 @submit.prevent="submit"
             >
                 <SlotPicker
@@ -994,6 +1295,8 @@ const healthPct = computed(
                     hint="the beat that matters"
                     :cards="turn.cards.main"
                     :optional="false"
+                    :open-by-default="true"
+                    :carried-bonus="setupGrants"
                 />
                 <SlotPicker
                     v-model="post"
@@ -1001,9 +1304,10 @@ const healthPct = computed(
                     hint="if the moment allows it"
                     :cards="turn.cards.post"
                     :optional="true"
+                    :carried-bonus="setupGrants"
                 />
 
-                <div class="flex items-center justify-between gap-3">
+                <div class="flex items-center justify-between gap-3 pt-3">
                     <span
                         v-if="runningCost.length"
                         class="text-xs text-violet-600 dark:text-violet-400"

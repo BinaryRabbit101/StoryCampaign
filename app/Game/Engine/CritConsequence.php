@@ -2,6 +2,7 @@
 
 namespace App\Game\Engine;
 
+use App\Game\Hands;
 use App\Game\Meters;
 use App\Models\Actor;
 use App\Models\Character;
@@ -165,6 +166,16 @@ class CritConsequence
         if (in_array($verb, self::FORCE, true) || in_array($verb, self::HOLD, true)) {
             Meters::damage($character, 1);
             $facts[] = "The whole force of the attempt on {$target} turned back on them (1 damage).";
+
+            // Scene matter goes first, and it simply goes: a crate juggled
+            // through a fumble this bad hits the floor. Unlike a weapon it
+            // leaves nothing to go back for — it is ground again, wherever
+            // it came down.
+            $spilled = Hands::releaseAll($character);
+            if ($spilled !== []) {
+                $names = implode(' and ', array_column($spilled, 'name'));
+                $facts[] = "Everything they were carrying went down with it — {$names} hit the ground and stayed there.";
+            }
 
             // The signature fumble: the thing in their hands is not in their
             // hands any more, and it took its powers with it.

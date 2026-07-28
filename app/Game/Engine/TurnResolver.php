@@ -3,6 +3,7 @@
 namespace App\Game\Engine;
 
 use App\Game\BranchTrigger;
+use App\Game\Hands;
 use App\Game\Meters;
 use App\Models\Actor;
 use App\Models\Character;
@@ -59,6 +60,10 @@ class TurnResolver
             // a fresh grip always survives the turn it was won.
             $heldBefore = $scene->actors()->where('status', 'restrained')->pluck('id')->all();
 
+            // Whoever was already gone when the turn began: only a flight
+            // that happens THIS turn writes into the tale's memory.
+            $fledBefore = $scene->actors()->where('status', 'fled')->pluck('id')->all();
+
             $outcomes = [];
             $trigger = null;
             $moved = false;
@@ -109,7 +114,7 @@ class TurnResolver
                     continue;
                 }
 
-                $outcome = $this->resolveBeat($card, $choice, $character, $scene, $dice, $conditions);
+                $outcome = $this->resolveBeat($card, $choice, $character, $scene, $dice, $conditions, $turn);
                 $outcomes[] = $outcome;
 
                 if (! $outcome->succeeded()) {
@@ -137,6 +142,10 @@ class TurnResolver
             $enemyFacts = array_merge($springFacts, $this->enemyReaction($character, $scene, $dice, $conditions, $moved, $reactionRolls));
             $enemyFacts = array_merge($enemyFacts, $this->captiveStruggle($scene, $dice, $heldBefore, $reactionRolls));
 
+            // The tale remembers: an enemy who newly broke and ran this turn
+            // becomes a grudge — the world's memory against the player.
+            Grudges::recordFlights($scene, $turn, $fledBefore);
+
             // The alarm clock: every turn spent toe-to-toe in the same place
             // raises the odds the district answers. At three, it does.
             $alarm = (int) ($scene->state['alarm'] ?? 0);
@@ -163,11 +172,17 @@ class TurnResolver
 
             $trigger ??= $this->evaluateTrigger($character, $scene, $outcomes, $moved, $newThreat, $wasInDanger);
 
+            $sceneBefore = $scene;
             if ($moved) {
-                $scene = $this->transitionScene($scene, $dice);
+                $scene = $this->transitionScene($scene, $dice, $turn);
             } else {
                 $this->rollEnemyIntents($scene, $dice);
             }
+
+            // Settle every returning grudge against what this turn actually
+            // did to them: killed or kept closes the score; a player who
+            // walked away leaves it simmering for another day.
+            Grudges::settle($sceneBefore, $scene, $moved, $turn);
 
             $turn->update([
                 'status' => Turn::STATUS_COMPLETE,
@@ -220,7 +235,7 @@ class TurnResolver
             }
 
             $playerFailure = $conditions['prior_failure'];
-            $outcomes[] = $this->resolveBeat($card, $choice, $character, $scene, $dice, $conditions);
+            $outcomes[] = $this->resolveBeat($card, $choice, $character, $scene, $dice, $conditions, $turn);
             $conditions['prior_failure'] = $playerFailure;
         }
 
@@ -248,6 +263,19 @@ class TurnResolver
             }
         }
 
+        // A thing they were holding when the card was offered and are not
+        // holding now: an earlier beat in this same chain threw it or set it
+        // down, and the follow-up has nothing left to act on.
+        if (($target['type'] ?? null) === 'carried'
+            && ! Hands::isHolding($character, $target['id'] ?? null)) {
+            return "{$target['name']} is no longer in their hands.";
+        }
+
+        // Lifting wants hands the chain may have filled since the offer.
+        if ($card['verb'] === 'lift' && Hands::free($character) < 1) {
+            return 'Their hands are already full.';
+        }
+
         // A venture card is only legal toward the campaign's own pre-forged
         // frontier zone — never an arbitrary zone id.
         if (($target['type'] ?? null) === 'zone'
@@ -264,7 +292,7 @@ class TurnResolver
         return null;
     }
 
-    private function resolveBeat(array $card, array $choice, Character $character, Scene $scene, Dice $dice, array &$conditions): BeatOutcome
+    private function resolveBeat(array $card, array $choice, Character $character, Scene $scene, Dice $dice, array &$conditions, Turn $turn): BeatOutcome
     {
         $verb = $card['verb'];
         $approach = $choice['modifiers']['approach'] ?? 'balanced';
@@ -274,41 +302,19 @@ class TurnResolver
         }
 
         // Tempo and quiet beats auto-succeed; everything else rolls.
-        if (in_array($verb, ['time_slow', 'haste', 'ready', 'examine', 'inspect', 'wait', 'catch_breath', 'reposition', 'shield', 'brace', 'command'], true)) {
-            return $this->quietBeat($card, $character, $scene, $conditions, $this->note($choice));
+        if (! Odds::rolls($verb)) {
+            return $this->quietBeat($card, $character, $scene, $conditions, $turn, $this->note($choice));
         }
 
-        $difficulty = 10 + match ($card['risk']) {
-            'degraded' => 5,
-            'risky' => 3,
-            default => 0,
-        };
-        $difficulty += match ($approach) {
-            'cautious' => -2,
-            'bold' => 2,
-            default => 0,
-        };
-        if ($conditions['prior_failure']) {
-            $difficulty += 2; // degraded conditions: the world didn't cooperate
-        }
-
-        // The telegraphed intent is real: a guard is genuinely harder to
-        // breach, a windup genuinely leaves the enemy open. The card already
-        // told the player which — the dice honor the same fact.
-        if (in_array($verb, ['strike', 'interrupt', 'restrain'], true)) {
-            $intent = Actor::find($card['target']['id'] ?? 0)?->tags['intent'] ?? null;
-            $difficulty += $intent === 'guard' ? 3 : 0;
-            $difficulty -= $intent === 'windup' ? 2 : 0;
-        }
-
-        $bonus = 0;
-        $bonus += $conditions['time_slowed'] ? 4 : 0;
-        $bonus += $conditions['hastened'] ? 2 : 0;
-        $bonus += $conditions['readied'] ? 2 : 0;
-        $bonus += ($conditions['elevated'] && $verb === 'strike') ? 2 : 0;
-        $bonus += ($conditions['concealed'] && in_array($verb, ['strike', 'restrain', 'haul'], true)) ? 3 : 0;
-        $bonus += ($conditions['flanked'] && $verb === 'strike') ? 2 : 0;
-        $bonus += ($conditions['commanded'] && $card['slot'] === 'companion') ? 2 : 0;
+        // The ledger, not a second copy of it. The card the player committed
+        // to printed a difficulty and a bonus from Odds; this is the same
+        // call, so the number they were shown is the number they are measured
+        // against. Two copies of this arithmetic is exactly how a card would
+        // start promising a DC the dice do not honor.
+        $difficultyLedger = Odds::difficulty($card, $approach, $conditions);
+        $bonusLedger = Odds::bonus($conditions, $verb, $card['slot']);
+        $difficulty = $difficultyLedger['value'];
+        $bonus = $bonusLedger['value'];
 
         $roll = $dice->d20();
         $total = $roll + $bonus;
@@ -371,7 +377,8 @@ class TurnResolver
         }
 
         return new BeatOutcome($card['slot'], $verb, $card['target'] ?? null, $degree, $roll, $total, $difficulty, $facts,
-            note: $this->note($choice), crit: $crit);
+            note: $this->note($choice), crit: $crit,
+            difficultyParts: $difficultyLedger['parts'], bonusParts: $bonusLedger['parts']);
     }
 
     /**
@@ -386,11 +393,17 @@ class TurnResolver
         return $note === '' ? null : $note;
     }
 
-    private function quietBeat(array $card, Character $character, Scene $scene, array &$conditions, ?string $note = null): BeatOutcome
+    private function quietBeat(array $card, Character $character, Scene $scene, array &$conditions, Turn $turn, ?string $note = null): BeatOutcome
     {
         $facts = [];
 
         switch ($card['verb']) {
+            case 'bargain':
+                // Taking a returned grudge's terms. Roll-free — the deal was
+                // theirs to offer — and its whole mechanical content is the
+                // closed list the engine picked at their return.
+                $facts = Grudges::strikeBargain($card, $scene, $turn);
+                break;
             case 'time_slow':
                 $conditions['time_slowed'] = true;
                 $facts[] = 'A time-slow charge was spent; the coming moments stretch in their favor.';
@@ -468,10 +481,63 @@ class TurnResolver
                 $conditions['shield_actor_id'] = $card['target']['id'] ?? null;
                 $facts[] = 'They kept their captive between themselves and the danger.';
                 break;
+            case 'drop':
+                // Putting a thing down is never in doubt, and it must never
+                // be: a player who picks something up has to be able to get
+                // their hands back without asking the dice for permission.
+                $put = Hands::release($character, $card['target']['id'] ?? null);
+                $facts[] = $put === null
+                    ? 'Their hands were already empty.'
+                    : "They set {$put['name']} down and had their hands back.";
+                break;
         }
 
         return new BeatOutcome($card['slot'], $card['verb'], $card['target'] ?? null,
             BeatOutcome::SUCCESS, 0, 0, 0, $facts, note: $note);
+    }
+
+    /**
+     * Throwing what you are holding.
+     *
+     * The object leaves their hands however the roll goes — that is the whole
+     * bargain of picking something up and committing it. A hit hurts; a miss
+     * costs them the thing and leaves them empty-handed and open, which is
+     * exactly the risk that makes it a real choice rather than a free attack.
+     *
+     * @return list<string>
+     */
+    private function hurlCarried(array $card, Character $character, Scene $scene, string $degree, bool $succeeded): array
+    {
+        $held = Hands::held($character)[0] ?? null;
+        if ($held === null) {
+            return ['There was nothing in their hands to throw.'];
+        }
+
+        Hands::release($character, $held['feature_id'] ?? null);
+
+        // It landed somewhere: the ground keeps it, out of the scene's way.
+        $feature = $scene->allFeatures()->firstWhere('id', $held['feature_id'] ?? 0);
+        $feature?->update(['state' => array_merge($feature->state ?? [], ['destroyed' => true])]);
+
+        $actor = Actor::find($card['target']['id'] ?? 0);
+        if (! $succeeded || $actor === null) {
+            return [$degree === BeatOutcome::PARTIAL
+                ? "{$held['name']} went wide of ".($actor?->name ?? 'the target').' and struck nothing but ground — and their hands are empty now.'
+                : "The throw was clumsy: {$held['name']} left their hands, hit nothing, and is no longer theirs to use."];
+        }
+
+        $damage = $degree === BeatOutcome::STRONG ? 3 : 2;
+        $stats = $actor->stats;
+        $stats['health']['current'] = max(0, $stats['health']['current'] - $damage);
+        $actor->update(['stats' => $stats]);
+
+        if ($stats['health']['current'] === 0) {
+            $actor->update(['status' => 'defeated']);
+
+            return ["{$held['name']} caught {$actor->name} full on, and {$actor->name} went down under it."];
+        }
+
+        return ["{$held['name']} slammed into {$actor->name} ({$stats['health']['current']}/{$stats['health']['max']} left). Their hands are empty now."];
     }
 
     /**
@@ -535,7 +601,9 @@ class TurnResolver
             case 'intimidate':
                 $actor = Actor::find($card['target']['id']);
                 if ($succeeded && $actor !== null) {
-                    $actor->update(['status' => 'fled']);
+                    // How they were driven off travels with them: the flights
+                    // sweep reads it to color a grudge's disposition.
+                    $actor->update(['status' => 'fled', 'tags' => array_merge($actor->tags ?? [], ['fled_how' => 'intimidated'])]);
                     $facts[] = "{$actor->name} broke and fled before them.";
                 } elseif ($degree === BeatOutcome::PARTIAL && $actor !== null) {
                     $facts[] = "{$actor->name} faltered, shaken but standing.";
@@ -573,6 +641,9 @@ class TurnResolver
                 if ($succeeded && $actor !== null) {
                     $tags = $actor->tags ?? [];
                     $tags['disposition'] = $verb === 'calm' ? 'calmed' : 'swayed';
+                    if ($actor->kind === 'enemy') {
+                        $tags['fled_how'] = 'talked';
+                    }
                     $actor->update(['tags' => $tags, 'status' => $actor->kind === 'enemy' ? 'fled' : $actor->status]);
                     $facts[] = "Words landed: {$actor->name} was ".($verb === 'calm' ? 'calmed' : 'won over').'.';
                 } else {
@@ -739,9 +810,20 @@ class TurnResolver
                 break;
 
             case 'lift':
-                $facts[] = $succeeded
-                    ? "They heaved {$targetName} aside."
-                    : "{$targetName} would not move.";
+                // A lift that lands ends with the thing HELD. It stops being
+                // ground the moment it leaves the floor: the composer will
+                // not offer it as scenery again until it is set down.
+                $feature = $scene->allFeatures()->firstWhere('id', $card['target']['id'] ?? 0);
+                $hands = Hands::handsFor((int) ($feature?->affordances['lift_weight'] ?? 0));
+                if ($succeeded && $feature !== null && Hands::take($character, $feature->name, $feature->id, $hands)) {
+                    $facts[] = $hands >= 2
+                        ? "They got {$feature->name} up off the ground and held it, both arms full."
+                        : "They took {$feature->name} up one-handed and kept hold of it.";
+                } elseif ($succeeded) {
+                    $facts[] = "They shifted {$targetName}, but had no hand free to keep hold of it.";
+                } else {
+                    $facts[] = "{$targetName} would not move.";
+                }
                 break;
 
             case 'ride':
@@ -888,9 +970,21 @@ class TurnResolver
                 break;
 
             case 'hurl':
+                // Two different things leave your hands this way, and the
+                // TARGET says which. A held captive is thrown as a captive;
+                // anything else aimed at while carrying something is the
+                // carried thing going through the air. Reading the hands
+                // first would have quietly turned every captive-throw into a
+                // crate-throw the moment the player happened to be holding one.
+                $captive = Actor::find($card['target']['id'] ?? 0);
+                if (($captive === null || $captive->status !== 'restrained')
+                    && Hands::held($character) !== []) {
+                    $facts = array_merge($facts, $this->hurlCarried($card, $character, $scene, $degree, $succeeded));
+                    break;
+                }
+
                 // Spending the captive as a weapon: however it lands, the
                 // hold is over — success downs them, failure frees them.
-                $captive = Actor::find($card['target']['id']);
                 $other = $captive === null ? null : $scene->actors()
                     ->where('status', 'active')->where('kind', 'enemy')
                     ->where('id', '!=', $captive->id)->first();
@@ -963,6 +1057,14 @@ class TurnResolver
                 continue;
             }
 
+            // A grudge under truce came to talk, not to swing. The truce
+            // holds until it is answered — or until blood breaks it.
+            if ($tags['truce'] ?? false) {
+                $facts[] = "{$enemy->name} held to the truce, waiting on an answer.";
+
+                continue;
+            }
+
             $intent = $tags['intent'] ?? 'press';
 
             // Guard and circle are turns the enemy spends NOT attacking —
@@ -987,20 +1089,40 @@ class TurnResolver
                 continue;
             }
 
-            $dodge = 12
-                + ($conditions['elevated'] ? 3 : 0)
-                + ($conditions['concealed'] ? 3 : 0)
-                + ($conditions['readied'] ? 2 : 0)
-                + ($conditions['shielded'] ? 2 : 0)
-                + ($blocked !== null && $blocked['id'] === $enemy->id ? 3 : 0);
+            // What the enemy has to beat is the player's own footing, and the
+            // player should be able to read which of their choices bought
+            // which point of it — same itemized ledger the player's own beats
+            // carry, from the other side of the swing.
+            $dodgeParts = [['label' => 'Your footing', 'amount' => 12]];
+            if ($conditions['elevated']) {
+                $dodgeParts[] = ['label' => 'You hold the high ground', 'amount' => 3];
+            }
+            if ($conditions['concealed']) {
+                $dodgeParts[] = ['label' => 'They cannot see you clearly', 'amount' => 3];
+            }
+            if ($conditions['readied']) {
+                $dodgeParts[] = ['label' => 'You were set for it', 'amount' => 2];
+            }
+            if ($conditions['shielded']) {
+                $dodgeParts[] = ['label' => 'Something is between you', 'amount' => 2];
+            }
+            if ($blocked !== null && $blocked['id'] === $enemy->id) {
+                $dodgeParts[] = ['label' => 'Your companion is in their way', 'amount' => 3];
+            }
+            $dodge = array_sum(array_column($dodgeParts, 'amount'));
 
             $roll = $dice->d20();
             if ($conditions['time_slowed']) {
                 $roll = min($roll, $dice->d20()); // the slowed world blunts them
             }
-            $bonus = (int) ($enemy->stats['attack'] ?? 1)
-                + (($tags['angle'] ?? false) ? 2 : 0)
-                + (($tags['ambush'] ?? false) ? 4 : 0);
+            $attackParts = [['label' => "{$enemy->name}'s reach", 'amount' => (int) ($enemy->stats['attack'] ?? 1)]];
+            if ($tags['angle'] ?? false) {
+                $attackParts[] = ['label' => 'They took their angle', 'amount' => 2];
+            }
+            if ($tags['ambush'] ?? false) {
+                $attackParts[] = ['label' => 'Out of nowhere', 'amount' => 4];
+            }
+            $bonus = array_sum(array_column($attackParts, 'amount'));
             $attack = $roll + $bonus;
 
             // The scene rolls under the same two rules the player does: the
@@ -1026,6 +1148,8 @@ class TurnResolver
                 'total' => $attack,
                 'difficulty' => $dodge,
                 'crit' => $crit,
+                'difficulty_parts' => $dodgeParts,
+                'bonus_parts' => $attackParts,
             ];
 
             if ($hit) {
@@ -1179,7 +1303,7 @@ class TurnResolver
 
         foreach ($enemies as $enemy) {
             $tags = $enemy->tags ?? [];
-            if ($tags['lurking'] ?? false) {
+            if (($tags['lurking'] ?? false) || ($tags['truce'] ?? false)) {
                 continue;
             }
 
@@ -1282,7 +1406,7 @@ class TurnResolver
      * with its own draw of the zone's features (some hidden, waiting to be
      * found) and its own inhabitants — never a copy of the ground just left.
      */
-    private function transitionScene(Scene $scene, Dice $dice): Scene
+    private function transitionScene(Scene $scene, Dice $dice, Turn $turn): Scene
     {
         $scene->update(['status' => 'past']);
 
@@ -1306,18 +1430,37 @@ class TurnResolver
             'state' => ['dressed' => true],
         ]);
 
-        $this->dresser->instantiateFeatures($next, $dice, 3, 5);
+        // Thin on purpose. Ground that arrives already crowded with five
+        // props and two strangers reads as a set rather than a place, and it
+        // leaves the world nowhere to go: things should be able to turn up
+        // over time, which they cannot if everything is there on arrival.
+        $this->dresser->instantiateFeatures($next, $dice, 1, 3);
 
         // A pursuit arrives where the trail ends: the tracked quarry stands
         // cornered in the new scene. Otherwise the ground rolls its own
-        // inhabitants — sometimes empty and quiet, sometimes not.
+        // inhabitants — most often nobody at all. An empty room is a real
+        // reading of a place, and the alarm clock and the wandering-threat
+        // roll both still bring company when the scene earns it.
         $quarry = Actor::find($scene->state['pursuit_actor_id'] ?? 0);
         if ($quarry !== null && $quarry->status === 'fled') {
             $tags = $quarry->tags ?? [];
             $tags['cornered'] = true;
             $quarry->update(['scene_id' => $next->id, 'status' => 'active', 'tags' => $tags]);
+            // A cornered quarry with a name the tale remembers IS the grudge
+            // returning — by the player's hand instead of the dice's.
+            Grudges::recordCornered($quarry, $next, $turn);
         } else {
-            $this->dresser->spawnActors($next, $dice, 0, 2);
+            if ($dice->chance(0.55)) {
+                $this->dresser->spawnActors($next, $dice, 1, 2);
+            }
+
+            // The tale's memory rolls for its moment: a simmering grudge may
+            // walk back in — vengeful in the open, wary from hiding, or
+            // scheming under truce. At most one per scene, and never on the
+            // heels of a pursuit that already delivered its figure.
+            if ($next->campaign !== null) {
+                Grudges::maybeReturn($next, $next->campaign, $dice, $turn);
+            }
         }
 
         // Companions walk the tale, not the scene: they come along.
@@ -1329,82 +1472,24 @@ class TurnResolver
 
     private function openNextTurn(Turn $turn, Character $character, Scene $scene, BranchTrigger $trigger): Turn
     {
-        $cards = $this->composer->compose($character->fresh(), $scene->fresh());
+        $character = $character->fresh();
+        $scene = $scene->fresh();
+        $cards = $this->composer->compose($character, $scene);
+
+        // One board, two readings: the grouped bullets the player reads and
+        // the paragraph the narrator reads are compiled from the same facts,
+        // so the page and the chapter can never disagree about who is here.
+        $board = SituationBoard::for($character, $scene, $trigger);
 
         return Turn::create([
             'campaign_id' => $turn->campaign_id,
             'scene_id' => $scene->id,
             'number' => $turn->number + 1,
             'status' => Turn::STATUS_AWAITING,
-            'situation' => $this->situationText($character, $scene, $trigger),
+            'situation' => SituationBoard::prose($board),
+            'situation_board' => $board,
             'cards' => $cards,
         ]);
-    }
-
-    private function situationText(Character $character, Scene $scene, BranchTrigger $trigger): string
-    {
-        $health = $character->fresh()->meters['health'];
-
-        // A lurking ambusher is not yet the player's to know.
-        $enemies = $scene->visibleActors()->filter(fn ($a) => $a->kind === 'enemy');
-
-        $parts = [$trigger->description()];
-        $parts[] = $enemies->isEmpty()
-            ? 'No open threat stands against you.'
-            : 'Facing you: '.$enemies->pluck('name')->join(', ').'.';
-
-        // Telegraphs: what each enemy has committed to is a visible fact.
-        foreach ($enemies as $enemy) {
-            $line = match ($enemy->tags['intent'] ?? null) {
-                'windup' => "{$enemy->name} is winding up something heavy.",
-                'guard' => "{$enemy->name} has settled behind a tight guard.",
-                'circle' => "{$enemy->name} is circling, hunting an angle.",
-                default => null,
-            };
-            if (($enemy->tags['angle'] ?? false) === true) {
-                $line = "{$enemy->name} has found an angle on you — move, or answer it.";
-            }
-            if ($enemy->tags['cornered'] ?? false) {
-                $line = "{$enemy->name} is cornered here, run to ground.";
-            }
-            if ($line !== null) {
-                $parts[] = $line;
-            }
-        }
-
-        if ((int) ($scene->state['alarm'] ?? 0) >= 2) {
-            $parts[] = 'Shouts carry across the district — more trouble is close.';
-        }
-
-        $captives = $scene->actors()->where('status', 'restrained')->pluck('name');
-        if ($captives->isNotEmpty()) {
-            $parts[] = 'In your grip: '.$captives->join(', ').'.';
-        }
-
-        $companions = $scene->actors()->where('status', 'active')->where('kind', 'companion')->pluck('name');
-        if ($companions->isNotEmpty()) {
-            $parts[] = 'At your side: '.$companions->join(', ').'.';
-        }
-
-        // Ground the offered options: name the bystanders and features the
-        // cards will reference, so nothing appears narratively unannounced.
-        $others = $scene->visibleActors()
-            ->reject(fn ($a) => in_array($a->kind, ['enemy', 'companion'], true))
-            ->pluck('name');
-        if ($others->isNotEmpty()) {
-            $parts[] = 'Also here: '.$others->join(', ').'.';
-        }
-        $features = $scene->visibleFeatures()->pluck('name')->take(6);
-        if ($features->isNotEmpty()) {
-            $parts[] = 'Around you: '.$features->join(', ').'.';
-        }
-
-        $parts[] = "Health {$health['current']}/{$health['max']}.";
-        if ($scene->state['elevated'] ?? false) {
-            $parts[] = 'You hold the high ground.';
-        }
-
-        return implode(' ', $parts);
     }
 
     private function sceneSummary(Scene $scene): string

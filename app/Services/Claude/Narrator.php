@@ -3,6 +3,7 @@
 namespace App\Services\Claude;
 
 use App\Game\Engine\ChapterEvents;
+use App\Game\Engine\Grudges;
 use App\Models\Chapter;
 use App\Models\Turn;
 use App\Notifications\TurnReadyNotification;
@@ -73,10 +74,22 @@ class Narrator
         $resolution = $turn->resolution;
         $submission = $turn->submission ?? [];
 
-        $previousChapters = $campaign->chapters()->reorder('number', 'desc')->limit(2)->get()
-            ->reverse()
-            ->map(fn (Chapter $c) => "### Chapter {$c->number}\n".mb_substr($c->plainBody(), -1200))
+        $recent = $campaign->chapters()->reorder('number', 'desc')->limit(2)->get()->reverse();
+        $previousChapters = $recent
+            ->map(fn (Chapter $c) => '### '.($c->kind === 'prologue' ? 'Prologue' : "Chapter {$c->number}")
+                ."\n".mb_substr($c->plainBody(), -1200))
             ->join("\n\n");
+
+        // The first chapter is the one that used to read as a different book.
+        // The prologue now ends standing in this exact scene, so this chapter
+        // has to pick the same moment up rather than arrive at it again — no
+        // second entrance, no re-describing ground the reader just walked in on.
+        $continuation = $recent->contains(fn (Chapter $c) => $c->kind === 'prologue')
+            ? "\n## This chapter continues directly from the prologue above\n"
+                .'The prologue ends in the same place and the same moment this chapter begins — the reader has just finished it. '
+                .'Pick the scene up mid-breath: no fresh arrival, no re-introducing the character, no describing this ground a second time. '
+                ."Whoever the prologue named is still standing where it left them, and they keep the names it gave them.\n"
+            : '';
 
         $events = collect(ChapterEvents::for($turn));
         $beats = $events->filter(fn ($e) => $e['verb'] !== null)->map(ChapterEvents::promptLine(...))->join("\n");
@@ -120,6 +133,12 @@ class Narrator
         // Long-range memory: the one-line-per-chapter record kept by earlier
         // narrations. Without it, anything older than the two recent chapters
         // below has simply never happened as far as the narrator knows.
+        // A returned grudge standing visible in the scene is a reunion, and
+        // the narrator must know it: name, disposition, and the history —
+        // already prose facts, never mechanics. Empty when no old score is
+        // here, and a lurking return stays as hidden from this as from cards.
+        $figures = Grudges::returningFigures($turn);
+
         $synopsis = trim((string) $campaign->synopsis);
         $storySoFar = $synopsis === '' ? '' : <<<SOFAR
 
@@ -154,7 +173,7 @@ Each listed event carries a bracketed token like [[e1]]. Copy every token into t
 {$storySoFar}
 ## Recent chapters (for continuity)
 {$previousChapters}
-
+{$continuation}
 {$intent}
 ## Voicing {$character->name} (the player's character)
 Quoted dialogue for {$character->name} belongs to the PLAYER. Write speech in quotes for them ONLY inside a beat that carries the player's own words, and stay close to those words. On beats without them, {$character->name} acts but does not speechify: at most a short functional line the action itself demands ("Hold the door."), never invented sentences of dialogue. Everyone else speaks freely — the register asks for it.
@@ -165,7 +184,7 @@ Some beats carry the player's own words for that moment. Those words are voice a
 
 ## How the scene answered
 {$reaction}
-{$criticals}
+{$figures}{$criticals}
 ## Where the vignette stops
 {$turn->branch_trigger}: the chapter must end on this note, at a clean decision point, leaving the situation open for the player's next choice. {$wordLow}-{$wordHigh} words.
 

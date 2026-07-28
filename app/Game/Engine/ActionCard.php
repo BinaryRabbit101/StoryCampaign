@@ -42,7 +42,12 @@ class ActionCard
         ])), 0, 16);
     }
 
-    public function toArray(): array
+    /**
+     * @param  array<string,mixed>  $conditions  What is already true of the
+     *                                           scene as this card is offered. The forecast
+     *                                           prices the card against it.
+     */
+    public function toArray(array $conditions = []): array
     {
         return [
             'id' => $this->id(),
@@ -56,6 +61,67 @@ class ActionCard
             'cost' => $this->cost,
             'modifiers' => $this->modifiers,
             'composed' => $this->composed,
+            'forecast' => $this->forecast($conditions),
+        ];
+    }
+
+    /**
+     * What this card costs in difficulty, quoted before it is chosen.
+     *
+     * A turn commits the instant it is submitted — there is no going back to
+     * re-pick once the number turns out to have been 18 — so a card that does
+     * not price itself is a card the player is guessing at. Every figure here
+     * comes from the same Odds ledger the resolver will read, per stance, so
+     * the forecast and the roll cannot drift apart.
+     *
+     * `conditions` is what is true RIGHT NOW: high ground already held counts,
+     * a set-up beat the player is about to choose does not — that one is
+     * quoted on its own card, as a grant, and the page adds it up as the plan
+     * is assembled.
+     *
+     * @return array{rolls:bool,difficulty:int,band:string,parts:list<array{label:string,amount:int}>,stances:array<string,int>,bonus:int,bonus_parts:list<array{label:string,amount:int}>,grant:?array}
+     */
+    private function forecast(array $conditions): array
+    {
+        $card = [
+            'verb' => $this->verb,
+            'risk' => $this->risk,
+            'target' => $this->target,
+            'slot' => $this->slot->value,
+        ];
+
+        $grant = Odds::grant($this->verb);
+
+        if (! Odds::rolls($this->verb)) {
+            return [
+                'rolls' => false,
+                'difficulty' => 0,
+                'band' => 'Certain',
+                'parts' => [],
+                'stances' => [],
+                'bonus' => 0,
+                'bonus_parts' => [],
+                'grant' => $grant,
+            ];
+        }
+
+        $stances = [];
+        foreach (['balanced', 'cautious', 'bold'] as $stance) {
+            $stances[$stance] = Odds::difficulty($card, $stance, $conditions)['value'];
+        }
+
+        $balanced = Odds::difficulty($card, 'balanced', $conditions);
+        $bonus = Odds::bonus($conditions, $this->verb, $this->slot->value);
+
+        return [
+            'rolls' => true,
+            'difficulty' => $balanced['value'],
+            'band' => Odds::band($balanced['value']),
+            'parts' => $balanced['parts'],
+            'stances' => $stances,
+            'bonus' => $bonus['value'],
+            'bonus_parts' => $bonus['parts'],
+            'grant' => $grant,
         ];
     }
 

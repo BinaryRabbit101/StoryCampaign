@@ -2,11 +2,13 @@
 
 namespace Tests\Feature;
 
+use App\Game\Capability;
 use App\Game\Engine\CardComposer;
 use App\Game\Engine\ChapterEntities;
 use App\Game\Engine\ChapterEvents;
 use App\Game\Engine\RollTable;
 use App\Game\Engine\TurnResolver;
+use App\Game\Hands;
 use App\Game\Meters;
 use App\Game\NameForge;
 use App\Game\StoryAspects;
@@ -394,7 +396,12 @@ class GameEngineTest extends TestCase
         $this->assertSame(['e1', 'e2', 'e3'], array_column($events, 'id'));
         $this->assertSame(['highground', 'attack', 'injury'], array_column($events, 'icon'));
         $this->assertSame('Wounded — 2 damage taken', $events[2]['label']);
-        $this->assertSame(['roll' => 18, 'total' => 20, 'difficulty' => 10, 'crit' => null], $events[1]['roll']);
+        // A beat resolved before the odds ledger existed still reads: the
+        // arithmetic is there, and the reasons behind it are simply empty.
+        $this->assertSame([
+            'roll' => 18, 'total' => 20, 'difficulty' => 10, 'crit' => null,
+            'difficulty_parts' => [], 'bonus_parts' => [],
+        ], $events[1]['roll']);
 
         // The anchors live only in the play page's edition; every other
         // consumer (book, push, prompts) reads the plain body.
@@ -743,9 +750,11 @@ class GameEngineTest extends TestCase
         $this->assertSame(3, $scene->actors()->where('source', 'stage')->count());
         $this->assertSame(0, $scene->actors()->where('source', 'seed')->count());
         $this->assertSame(4, $scene->features()->where('source', 'stage')->count());
-        // The zone still lends the stage some of its own ground (features
-        // only, never actors — the cast is the campaign's own).
-        $this->assertGreaterThanOrEqual(2, $scene->features()->where('source', '!=', 'stage')->count());
+        // The zone still lends the stage a little of its own ground (features
+        // only, never actors — the cast is the campaign's own). A light hand
+        // on purpose: the stage has already set four props here, and a scene
+        // that opens with everything at once leaves the world nowhere to go.
+        $this->assertGreaterThanOrEqual(1, $scene->features()->where('source', '!=', 'stage')->count());
         $this->assertSame(0, Actor::whereNull('scene_id')->where('source', 'stage')->count());
 
         // The situation names the stage-built cast, and cards intersect with
@@ -852,7 +861,10 @@ class GameEngineTest extends TestCase
         $this->assertTrue((bool) ($next->state['dressed'] ?? false));
         $locales = collect($next->zone->tags['locales'])->pluck('title');
         $this->assertTrue($locales->contains($next->title));
-        $this->assertGreaterThanOrEqual(3, $next->features()->count());
+        // Its own draw, and a thin one — new ground should have room left in
+        // it for something to arrive later.
+        $this->assertGreaterThanOrEqual(1, $next->features()->count());
+        $this->assertLessThanOrEqual(3, $next->features()->count());
     }
 
     public function test_hidden_features_wait_for_discovery()
@@ -2319,6 +2331,288 @@ class GameEngineTest extends TestCase
         $this->actingAs($campaign->user)
             ->get(route('play.show', $campaign))
             ->assertInertia(fn ($page) => $page->where('rollTable', null));
+    }
+
+    /**
+     * The card's promise and the die's measure must be the same number.
+     *
+     * This is the whole reason Odds exists as one class rather than two
+     * copies of the same ladder: turns commit on submit, so a difficulty
+     * quoted on a card the player cannot un-pick has to be the difficulty
+     * they are actually rolled against.
+     */
+    public function test_a_card_quotes_the_difficulty_the_dice_are_measured_against()
+    {
+        $campaign = $this->createCatCampaign();
+        $turn = app(TurnStarter::class)->openFirstTurn($campaign);
+        $scene = $campaign->activeScene;
+        $scene->features()->delete();
+        $scene->actors()->delete();
+        $tough = $this->placeActor($scene, 'a dockside tough');
+        $tough->update(['tags' => array_merge($tough->tags ?? [], ['intent' => 'guard'])]);
+        $turn = $this->refreshCards($turn);
+
+        $strike = collect($turn->cards['main'])->firstWhere('verb', 'strike');
+        $this->assertNotNull($strike);
+
+        // Risky (13) + the guard they are behind (16), and each stance moves
+        // it by exactly what the chip says it does.
+        $this->assertTrue($strike['forecast']['rolls']);
+        $this->assertSame(16, $strike['forecast']['difficulty']);
+        $this->assertSame(14, $strike['forecast']['stances']['cautious']);
+        $this->assertSame(18, $strike['forecast']['stances']['bold']);
+        $this->assertContains(
+            'a dockside tough is behind a tight guard',
+            array_column($strike['forecast']['parts'], 'label'),
+        );
+
+        $turn->update([
+            'status' => Turn::STATUS_LOCKED,
+            'submission' => ['main' => ['card_id' => $strike['id'], 'modifiers' => ['approach' => 'bold']]],
+            'submitted_at' => now(),
+        ]);
+        app(TurnResolver::class)->resolve($turn->fresh());
+
+        // What the card said, bold and all — and the reasons travel with it.
+        $beat = $turn->fresh()->resolution['beats'][0];
+        $this->assertSame(18, $beat['difficulty']);
+        $this->assertSame(
+            18,
+            array_sum(array_column($beat['difficulty_parts'], 'amount')),
+        );
+
+        // The dice table shows the arithmetic AND why: "2 vs 18" alone is a
+        // riddle, not a result.
+        $row = RollTable::for($turn->fresh())[0];
+        $this->assertSame($row['total'] - $row['roll'], $row['modifier']);
+        $this->assertNotEmpty($row['difficulty_parts']);
+    }
+
+    /** A set-up beat prices what it buys, in the units the roll is paid in. */
+    public function test_setup_cards_declare_the_bonus_they_hand_the_next_beat()
+    {
+        $campaign = $this->createCatCampaign();
+        $turn = app(TurnStarter::class)->openFirstTurn($campaign);
+        $turn = $this->refreshCards($turn);
+
+        $slow = collect($turn->cards['pre'])->firstWhere('verb', 'time_slow');
+        $this->assertNotNull($slow);
+        $this->assertFalse($slow['forecast']['rolls']); // spending a charge never misses
+        $this->assertSame(4, $slow['forecast']['grant']['amount']);
+        $this->assertTrue($slow['forecast']['grant']['certain']);
+
+        // Climbing buys height too — but only if the climb lands, and the
+        // card must not promise it as though it were already banked.
+        $this->placeFeature($campaign->activeScene, 'the warehouse roof');
+        $turn = $this->refreshCards($turn);
+        $ascend = collect($turn->cards['pre'])->firstWhere('verb', 'ascend');
+        $this->assertNotNull($ascend);
+        $this->assertFalse($ascend['forecast']['grant']['certain']);
+    }
+
+    /**
+     * Lifting ends with the thing HELD — a position, not an event — and the
+     * hands it fills are the same hands the next card wants.
+     */
+    public function test_lifting_fills_your_hands_until_you_put_it_down()
+    {
+        $campaign = $this->createCatCampaign();
+        $campaign->character->capabilities()->create([
+            'capability' => 'lift', 'magnitude' => 200, 'source' => 'creation',
+        ]);
+        $turn = app(TurnStarter::class)->openFirstTurn($campaign);
+        $scene = $campaign->activeScene;
+        $scene->features()->delete();
+        $scene->actors()->delete();
+        $gargoyle = $this->placeFeature($scene, 'a loose stone gargoyle');
+        $this->placeActor($scene, 'a dockside tough');
+        $turn = $this->refreshCards($turn);
+
+        $lift = collect($turn->cards['main'])->firstWhere('verb', 'lift');
+        $this->assertNotNull($lift);
+
+        $turn->update([
+            'status' => Turn::STATUS_LOCKED,
+            'submission' => ['main' => ['card_id' => $lift['id'], 'modifiers' => []]],
+            'submitted_at' => now(),
+        ]);
+        app(TurnResolver::class)->resolve($turn->fresh());
+
+        $character = $campaign->character->fresh();
+        $this->assertSame(['a loose stone gargoyle'], array_column($character->carrying, 'name'));
+        $this->assertSame(0, Hands::free($character)); // 120 lb needs both
+
+        $next = $this->refreshCards($campaign->fresh()->currentTurn);
+
+        // It is no longer ground: it does not come back as scenery, it comes
+        // back as a thing to throw and a thing to set down.
+        $this->assertFalse(collect($next->cards['main'])
+            ->contains(fn ($c) => ($c['target']['id'] ?? null) === $gargoyle->id
+                && $c['target']['type'] === 'feature'));
+        $this->assertTrue(collect($next->cards['main'])->contains('verb', 'hurl'));
+        $drop = collect($next->cards['post'])->firstWhere('verb', 'drop');
+        $this->assertNotNull($drop);
+
+        // Full hands never forbid a strike — they make it cost five points of
+        // difficulty, which is the honest weight of swinging one-armed.
+        $strike = collect($next->cards['main'])->firstWhere('verb', 'strike');
+        $this->assertSame('degraded', $strike['risk']);
+        $this->assertStringContainsString('hands are full', $strike['description']);
+
+        // And setting it down is free, certain, and always on offer.
+        $next->update([
+            'status' => Turn::STATUS_LOCKED,
+            'submission' => [
+                'main' => ['card_id' => $strike['id'], 'modifiers' => []],
+                'post' => ['card_id' => $drop['id'], 'modifiers' => []],
+            ],
+            'submitted_at' => now(),
+        ]);
+        app(TurnResolver::class)->resolve($next->fresh());
+
+        $this->assertSame([], $campaign->character->fresh()->carrying ?? []);
+    }
+
+    /**
+     * Holding a crate must not turn a captive-throw into a crate-throw. The
+     * target says which thing leaves your hands, never the hands themselves.
+     */
+    public function test_throwing_a_captive_is_not_confused_with_throwing_what_you_carry()
+    {
+        $campaign = $this->createCatCampaign();
+        $campaign->character->capabilities()->create([
+            'capability' => 'lift', 'magnitude' => 200, 'source' => 'creation',
+        ]);
+        $campaign->character->update(['carrying' => [
+            ['name' => 'a loose stone gargoyle', 'feature_id' => null, 'hands' => 2],
+        ]]);
+
+        $turn = app(TurnStarter::class)->openFirstTurn($campaign);
+        $scene = $campaign->activeScene;
+        $scene->features()->delete();
+        $scene->actors()->delete();
+        $captive = $this->placeActor($scene, 'a dockside tough');
+        $captive->update(['status' => 'restrained']);
+        $turn = $this->refreshCards($turn);
+
+        $hurl = collect($turn->cards['main'])
+            ->first(fn ($c) => $c['verb'] === 'hurl' && ($c['target']['id'] ?? null) === $captive->id);
+        $this->assertNotNull($hurl);
+
+        $turn->update([
+            'status' => Turn::STATUS_LOCKED,
+            'submission' => ['main' => ['card_id' => $hurl['id'], 'modifiers' => []]],
+            'submitted_at' => now(),
+        ]);
+        app(TurnResolver::class)->resolve($turn->fresh());
+
+        // The captive was spent; the gargoyle is still in their arms.
+        $this->assertNotSame('restrained', $captive->fresh()->status);
+        $this->assertSame(
+            ['a loose stone gargoyle'],
+            array_column($campaign->character->fresh()->carrying, 'name'),
+        );
+    }
+
+    /** The board is grouped, and a quiet place is allowed to read as quiet. */
+    public function test_the_situation_is_grouped_and_may_be_empty()
+    {
+        $campaign = $this->createCatCampaign();
+        app(TurnStarter::class)->openFirstTurn($campaign);
+        $scene = $campaign->activeScene;
+        $scene->features()->delete();
+        $scene->actors()->delete();
+        $this->placeActor($scene, 'a dockside tough');
+
+        $turn = $this->refreshCards($campaign->fresh()->currentTurn);
+        $turn->update([
+            'status' => Turn::STATUS_LOCKED,
+            'submission' => ['main' => ['card_id' => collect($turn->cards['main'])->first()['id'], 'modifiers' => []]],
+            'submitted_at' => now(),
+        ]);
+        app(TurnResolver::class)->resolve($turn->fresh());
+
+        $board = $campaign->fresh()->currentTurn->situation_board;
+        $titles = array_column($board, 'title');
+        $this->assertContains('Facing you', $titles);
+        $this->assertContains('You', $titles);
+
+        // Empty groups are absent, never padded out with reassurances: no
+        // "no open threat stands against you" on a board that has threats,
+        // and no "around you: nothing" on ground that is bare.
+        $this->assertNotContains('Around you', $titles);
+        foreach ($board as $group) {
+            $this->assertNotEmpty($group['items']);
+        }
+
+        // The narrator still reads it as prose, compiled from the same facts.
+        $this->assertStringContainsString('a dockside tough', $campaign->fresh()->currentTurn->situation);
+    }
+
+    /**
+     * A refused evolution and a granted one used to look identical on screen.
+     * The verdict comes from the SHEET, not from Claude's prose.
+     */
+    public function test_an_evolution_request_records_what_actually_changed()
+    {
+        $campaign = $this->createCatCampaign();
+        app(TurnStarter::class)->openFirstTurn($campaign);
+
+        $this->mock(ClaudeCli::class, function ($mock) {
+            $mock->shouldReceive('promptForJson')->andReturn([
+                'reply' => 'Your tail learns the weight of things.',
+                'granted' => true,
+                'changes' => [['capability' => 'reach', 'magnitude' => 15]],
+                'suggestions' => ['Could it hold two things at once?'],
+            ]);
+            $mock->shouldReceive('prompt')->andReturn('A tale begins.');
+        });
+
+        $this->actingAs($campaign->user)
+            ->post("/campaigns/{$campaign->id}/grow", ['body' => 'I want a longer reach.'])
+            ->assertRedirect();
+
+        $answer = $campaign->interviewMessages()->where('kind', 'growth')
+            ->where('role', 'narrator')->latest('id')->first();
+
+        $this->assertTrue($answer->granted);
+        $this->assertSame('reach', $answer->changes[0]['label']);
+        $this->assertSame('12 → 15', $answer->changes[0]['detail']);
+        $this->assertSame(15, $campaign->character->fresh()->magnitudeOf(Capability::Reach));
+
+        // And the conversation reaches the play screen, which is the whole
+        // point: an answer written to the database and shown to nobody is
+        // indistinguishable from nothing having happened.
+        $this->actingAs($campaign->user)
+            ->get(route('play.show', $campaign))
+            ->assertInertia(fn ($page) => $page->has('growth', 2)
+                ->where('growth.1.granted', true));
+    }
+
+    /** Claude may say yes and change nothing. The sheet decides. */
+    public function test_an_evolution_that_changes_nothing_is_not_recorded_as_granted()
+    {
+        $campaign = $this->createCatCampaign();
+        app(TurnStarter::class)->openFirstTurn($campaign);
+
+        $this->mock(ClaudeCli::class, function ($mock) {
+            $mock->shouldReceive('promptForJson')->andReturn([
+                'reply' => 'Not yet — carry what you have a while longer.',
+                'granted' => false,
+                'changes' => null,
+            ]);
+            $mock->shouldReceive('prompt')->andReturn('A tale begins.');
+        });
+
+        $this->actingAs($campaign->user)
+            ->post("/campaigns/{$campaign->id}/grow", ['body' => 'I want to fly.'])
+            ->assertRedirect();
+
+        $answer = $campaign->interviewMessages()->where('kind', 'growth')
+            ->where('role', 'narrator')->latest('id')->first();
+
+        $this->assertFalse($answer->granted);
+        $this->assertSame([], $answer->changes);
     }
 
     public function test_widget_endpoint_requires_a_valid_token()

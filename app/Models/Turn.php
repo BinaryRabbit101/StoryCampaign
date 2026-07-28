@@ -8,8 +8,8 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasOne;
 
 #[Fillable([
-    'campaign_id', 'scene_id', 'number', 'status', 'situation', 'cards',
-    'submission', 'resolution', 'branch_trigger', 'meters_snapshot',
+    'campaign_id', 'scene_id', 'number', 'status', 'situation', 'situation_board',
+    'cards', 'submission', 'resolution', 'branch_trigger', 'meters_snapshot',
     'submitted_at', 'resolved_at', 'narrated_at', 'rolls_seen_at',
 ])]
 class Turn extends Model
@@ -27,6 +27,7 @@ class Turn extends Model
     protected function casts(): array
     {
         return [
+            'situation_board' => 'array',
             'cards' => 'array',
             'submission' => 'array',
             'resolution' => 'array',

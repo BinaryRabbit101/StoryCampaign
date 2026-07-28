@@ -105,7 +105,9 @@ onMounted(async () => {
     // there is nothing to tumble, so cast() simply turns the number over —
     // the player still picks their own dice up either way.
     theirs.value.forEach((row, i) => {
-        timers.push(setTimeout(() => cast(row), webgl ? 350 + i * 480 : 250 + i * 300));
+        timers.push(
+            setTimeout(() => cast(row), webgl ? 350 + i * 480 : 250 + i * 300),
+        );
     });
 });
 
@@ -161,8 +163,36 @@ const ringClass = (row: RollRow) => {
     return 'border-sidebar-border/70';
 };
 
-const sideLabel = (row: RollRow) =>
-    row.side === 'player' ? 'You' : row.actor;
+const sideLabel = (row: RollRow) => (row.side === 'player' ? 'You' : row.actor);
+
+// ---- The arithmetic, spelled out ----
+//
+// "2 vs 18" is not a result, it is a riddle. A player who cannot see whether
+// anything was added to their roll cannot tell a hard fight from a bug, and
+// the modifier used to hide itself entirely whenever it happened to be zero —
+// which is exactly the case where its absence is the thing worth saying. So
+// the sum is always written in full, and the reasons behind both numbers are
+// one tap away.
+
+const signed = (amount: number) =>
+    `${amount > 0 ? '+' : '−'}${Math.abs(amount)}`;
+
+const expanded = ref<Set<string>>(new Set());
+
+function toggleWhy(id: string) {
+    const next = new Set(expanded.value);
+
+    if (next.has(id)) {
+        next.delete(id);
+    } else {
+        next.add(id);
+    }
+
+    expanded.value = next;
+}
+
+const hasReasons = (row: RollRow) =>
+    row.difficulty_parts.length > 0 || row.bonus_parts.length > 0;
 </script>
 
 <template>
@@ -211,7 +241,7 @@ const sideLabel = (row: RollRow) =>
                         row.side === 'player' &&
                         !revealed.has(row.id) &&
                         !rolling.has(row.id)
-                            ? 'cursor-pointer text-primary sc-waiting hover:bg-background/90'
+                            ? 'sc-waiting cursor-pointer text-primary hover:bg-background/90'
                             : '',
                     ]"
                     @click="row.side === 'player' ? cast(row) : undefined"
@@ -311,14 +341,18 @@ const sideLabel = (row: RollRow) =>
                                         : '☠ Natural 1 ☠'
                                 }}
                             </p>
-                            <p class="text-xs tabular-nums text-muted-foreground">
-                                d20 {{ row.roll }}
-                                <template v-if="row.modifier">
-                                    {{ row.modifier > 0 ? '+' : '−'
-                                    }}{{ Math.abs(row.modifier) }} =
-                                    {{ row.total }}
-                                </template>
-                                vs {{ row.difficulty }}
+                            <!-- Always the whole sum, including a +0. A
+                                 modifier that vanishes when it happens to be
+                                 zero is the one case where its absence is
+                                 worth stating out loud. -->
+                            <p
+                                class="text-xs text-muted-foreground tabular-nums"
+                            >
+                                d20 {{ row.roll }} {{ signed(row.modifier) }} =
+                                <span class="font-semibold text-foreground">{{
+                                    row.total
+                                }}</span>
+                                vs DC {{ row.difficulty }}
                             </p>
                             <p
                                 class="text-sm font-semibold"
@@ -332,6 +366,63 @@ const sideLabel = (row: RollRow) =>
                             >
                                 {{ row.outcome }}
                             </p>
+
+                            <button
+                                v-if="hasReasons(row)"
+                                type="button"
+                                class="mt-1.5 text-[10px] text-muted-foreground underline underline-offset-2 hover:text-foreground"
+                                @click.stop="toggleWhy(row.id)"
+                            >
+                                {{
+                                    expanded.has(row.id)
+                                        ? 'hide the maths'
+                                        : 'where these numbers came from'
+                                }}
+                            </button>
+
+                            <!-- The same ledger the card printed before the
+                                 commit, read back afterwards. -->
+                            <div
+                                v-if="expanded.has(row.id)"
+                                class="mt-1.5 space-y-0.5 rounded-md bg-muted/60 p-2 text-left text-[11px]"
+                            >
+                                <p
+                                    v-for="part in row.difficulty_parts"
+                                    :key="`d-${part.label}`"
+                                    class="flex justify-between gap-3"
+                                >
+                                    <span class="text-muted-foreground">{{
+                                        part.label
+                                    }}</span>
+                                    <span class="tabular-nums">{{
+                                        part.amount
+                                    }}</span>
+                                </p>
+                                <p
+                                    class="flex justify-between gap-3 border-t border-sidebar-border/50 pt-0.5 font-medium"
+                                >
+                                    <span>Had to beat</span>
+                                    <span class="tabular-nums">{{
+                                        row.difficulty
+                                    }}</span>
+                                </p>
+                                <p
+                                    v-for="part in row.bonus_parts"
+                                    :key="`b-${part.label}`"
+                                    class="flex justify-between gap-3 text-emerald-700 dark:text-emerald-400"
+                                >
+                                    <span>{{ part.label }}</span>
+                                    <span class="tabular-nums">{{
+                                        signed(part.amount)
+                                    }}</span>
+                                </p>
+                                <p
+                                    v-if="!row.bonus_parts.length"
+                                    class="text-muted-foreground"
+                                >
+                                    Nothing was added to this roll.
+                                </p>
+                            </div>
                         </div>
                     </Transition>
                 </div>
