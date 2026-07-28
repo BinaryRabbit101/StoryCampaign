@@ -49,6 +49,12 @@ class Odds
         'time_slow', 'haste', 'ready', 'examine', 'inspect', 'wait',
         'catch_breath', 'reposition', 'shield', 'brace', 'command', 'drop',
         'bargain',
+        // Taking on an endeavor, and setting it back down. A declaration is
+        // not something a die can adjudicate: a "failed" commitment would be
+        // the engine telling the player their own decision did not take, and
+        // a "failed" abandonment would leave them chained to a goal they had
+        // already walked away from.
+        'undertake', 'abandon',
         // Answering someone who has already asked. Both halves of the offer
         // pair are roll-free on purpose: the decision was theirs to make and
         // the other party has already made theirs, so there is nothing left for

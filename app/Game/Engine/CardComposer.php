@@ -128,6 +128,11 @@ class CardComposer
             'elevated' => (bool) ($scene->state['elevated'] ?? false),
             'ambient' => Ambient::of($scene),
             'scars' => Scars::names($character),
+            // The endeavor under way, if there is one: its name and the exact
+            // verbs that move it, read straight off the clock's own row. Every
+            // qualifying card quotes it in its forecast, so "advances the
+            // search of the long quay" is a promise the tick will honor.
+            'endeavor' => Clocks::forecast($scene),
         ];
 
         // Full hands never forbid an action — a held crate that locked the
@@ -145,10 +150,16 @@ class CardComposer
         // The deals, last of all — so a bargain inherits whatever the load
         // already did to its sibling, and so the plain version is always the
         // one standing first in the list.
-        $cards = $this->offerBargains(
-            $cards, $character, $scene,
-            $dice ?? new Dice($scene->id * 2654435761 % PHP_INT_MAX),
-        );
+        $stream = $dice ?? new Dice($scene->id * 2654435761 % PHP_INT_MAX);
+
+        $cards = $this->offerBargains($cards, $character, $scene, $stream);
+
+        // The endeavor, after the deals: it is roll-free and never carries a
+        // load, so nothing above bears on it — and drawing it last keeps the
+        // bargain pass reading exactly the stream it always has.
+        foreach (Clocks::cards($scene, $stream) as $card) {
+            $cards[$card->slot->value][] = $card;
+        }
 
         $composed = array_map(
             fn (array $slotCards) => array_map(fn (ActionCard $c) => $c->toArray($conditions), $slotCards),

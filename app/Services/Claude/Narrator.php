@@ -4,6 +4,7 @@ namespace App\Services\Claude;
 
 use App\Game\Engine\Ambient;
 use App\Game\Engine\ChapterEvents;
+use App\Game\Engine\Clocks;
 use App\Game\Engine\Companions;
 use App\Game\Engine\Grudges;
 use App\Game\Engine\Scars;
@@ -173,6 +174,12 @@ class Narrator
         // here, and a lurking return stays as hidden from this as from cards.
         $figures = Grudges::returningFigures($turn);
 
+        // The multi-turn goal the player committed a beat to: finished this
+        // chapter, or still being worked at. A plain goal in plain words and
+        // never a count — the tally is the board's, and a tally on the page is
+        // mechanics language wearing prose.
+        $endeavor = Clocks::narratorBlock($turn);
+
         // Who is walking beside them, and what passed between them this time.
         // The tier arrives as plain words about behaviour — never as a number,
         // and never as a status the chapter is allowed to announce.
@@ -287,7 +294,7 @@ Some beats carry the player's own words for that moment. Those words are voice a
 
 ## How the scene answered
 {$reaction}
-{$world}{$figures}{$company}{$fall}{$keepsake}{$criticals}
+{$world}{$endeavor}{$figures}{$company}{$fall}{$keepsake}{$criticals}
 ## Where the vignette stops
 {$turn->branch_trigger}: the chapter must end on this note, at a clean decision point, leaving the situation open for the player's next choice. {$wordLow}-{$wordHigh} words.
 

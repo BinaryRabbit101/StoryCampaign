@@ -46,6 +46,12 @@ export interface CardForecast {
         /** Bought outright, or only if the beat lands. */
         certain: boolean;
     } | null;
+    /**
+     * The endeavor this beat moves, when one is open and names this verb.
+     * Quoted off the clock's own row — the same list the engine's tick reads
+     * — so the promise on the card is the one the beat actually pays.
+     */
+    endeavor: string | null;
 }
 
 /**
@@ -261,6 +267,17 @@ export interface Memento {
     line: string;
     /** The chapter that tells it; null until that chapter has been written. */
     chapter: number | null;
+}
+
+/**
+ * The multi-turn goal the player committed a beat to. Segments, not a
+ * percentage: the whole point is that the player can count what is left and
+ * price the next beat against it.
+ */
+export interface Endeavor {
+    name: string;
+    filled: number;
+    segments: number;
 }
 
 /** Something physically in the character's hands. */

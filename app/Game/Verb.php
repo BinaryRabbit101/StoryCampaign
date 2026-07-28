@@ -93,8 +93,11 @@ enum Verb: string
     // ---- Wait: ceding the initiative on purpose ----
     case Wait = 'wait';
 
-    // ---- Do: the one card with no training behind it ----
+    // ---- Do: acts that answer to nothing else — the untrained gambit, and
+    //      the endeavors a player takes up and sets back down ----
     case Improvise = 'improvise';
+    case Undertake = 'undertake';
+    case Abandon = 'abandon';
 
     /**
      * The board word this verb sits under. Exactly one, always — a verb in two
@@ -133,7 +136,11 @@ enum Verb: string
 
             self::Wait => VerbFamily::Wait,
 
-            self::Improvise => VerbFamily::Do,
+            // Committing to a multi-turn endeavor is not looking, going,
+            // taking, fighting, talking, hiding, tending, or waiting: it is
+            // the plain act of setting yourself to something, and DO is the
+            // family for acts that answer to nothing else.
+            self::Improvise, self::Undertake, self::Abandon => VerbFamily::Do,
         };
     }
 
@@ -204,6 +211,8 @@ enum Verb: string
             self::Wait => 'Wait',
 
             self::Improvise => 'Improvise',
+            self::Undertake => 'Take it on',
+            self::Abandon => 'Let it go',
         };
     }
 

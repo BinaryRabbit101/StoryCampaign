@@ -340,6 +340,38 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Endeavor clocks (the goal the player is working toward)
+    |--------------------------------------------------------------------------
+    | The alarm clock above counts up AGAINST the player while they stand and
+    | fight. An endeavor is the same clock turned around: a multi-turn goal the
+    | engine offered, the player spent a whole beat committing to, and ordinary
+    | qualifying beats fill.
+    |
+    | The segment band is what makes one feel like a commitment rather than a
+    | chore. Under four and it fills inside one scene, which is not a goal, it
+    | is a delay; over six and it can never be finished before the ground
+    | changes underneath it.
+    |
+    | `offer_chance` is how often a scene that COULD support an endeavor
+    | actually puts one on the table. Deliberately occasional — the harder caps
+    | are structural and not tunable here: one endeavor per tale at a time, and
+    | at most one ever proposed per scene however that one ended.
+    |
+    | WHICH endeavors exist, which verbs move them, and what filling one pays
+    | are not tunable either: that is the closed table in
+    | App\Game\Engine\Clocks, and its payoffs route through machinery that
+    | already existed — the engine's own reveal, a feature's destroyed state,
+    | and one existing condition out of App\Game\Engine\Odds::CONDITIONS.
+    */
+
+    'clocks' => [
+        'min_segments' => 4,
+        'max_segments' => 6,
+        'offer_chance' => 0.5,
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
     | Pressure (the world moves when you don't)
     |--------------------------------------------------------------------------
     | A stall counter on the scene fills while a turn casts no die, the player

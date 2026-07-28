@@ -4,6 +4,7 @@ namespace App\Http\Controllers;
 
 use App\Game\Engine\ChapterEntities;
 use App\Game\Engine\ChapterEvents;
+use App\Game\Engine\Clocks;
 use App\Game\Engine\Downtime;
 use App\Game\Engine\RollTable;
 use App\Game\Engine\Scars;
@@ -107,6 +108,11 @@ class PlayController extends Controller
                 // offering something already gone.
                 'downtime' => $turn->isOpen() ? $this->downtimeOffer($turn) : null,
             ],
+            // The endeavor under way, if the player took one on: the goal in
+            // its own words and how far along it is. It stands beside the
+            // meters because it is the one thing on this page that carries
+            // across turns and has to be read before committing the next one.
+            'endeavor' => Clocks::page($campaign),
             // The shelf: what this tale has left behind, in the order it
             // happened. Inert in every direction — it is here to be read, and
             // there is nothing on it to spend.

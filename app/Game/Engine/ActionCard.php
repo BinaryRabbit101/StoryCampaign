@@ -101,7 +101,7 @@ class ActionCard
      * quoted on its own card, as a grant, and the page adds it up as the plan
      * is assembled.
      *
-     * @return array{rolls:bool,difficulty:int,band:string,parts:list<array{label:string,amount:int}>,stances:array<string,int>,bonus:int,bonus_parts:list<array{label:string,amount:int}>,grant:?array}
+     * @return array{rolls:bool,difficulty:int,band:string,parts:list<array{label:string,amount:int}>,stances:array<string,int>,bonus:int,bonus_parts:list<array{label:string,amount:int}>,grant:?array,endeavor:?string}
      */
     private function forecast(array $conditions): array
     {
@@ -123,6 +123,14 @@ class ActionCard
 
         $grant = Odds::grant($this->verb);
 
+        // What this beat moves toward, when an endeavor is open and names its
+        // verb. Same shape of promise as a grant: it is quoted before the
+        // commit, off the clock's own row — the very list the resolver's tick
+        // reads — so a card can never advertise progress the beat will not pay.
+        $endeavor = $conditions['endeavor'] ?? null;
+        $advances = ($endeavor !== null && in_array($this->verb, $endeavor['verbs'] ?? [], true))
+            ? $endeavor['name'] : null;
+
         if (! Odds::rolls($this->verb)) {
             return [
                 'rolls' => false,
@@ -133,6 +141,9 @@ class ActionCard
                 'bonus' => 0,
                 'bonus_parts' => [],
                 'grant' => $grant,
+                // A beat that casts no die can never tick a clock, so a
+                // roll-free card never promises one either.
+                'endeavor' => null,
             ];
         }
 
@@ -153,6 +164,7 @@ class ActionCard
             'bonus' => $bonus['value'],
             'bonus_parts' => $bonus['parts'],
             'grant' => $grant,
+            'endeavor' => $advances,
         ];
     }
 
