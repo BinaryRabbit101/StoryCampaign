@@ -97,6 +97,18 @@ adjudicates legality or outcomes — it is only ever handed resolved facts.
   weighted toward clear by `config/game.php` `ambient`; it reaches the
   arithmetic only through `Odds::AMBIENT`, shows as the board's `sky` line,
   and reaches Claude as one fact to render in the land's own weather),
+  `Hours` (the wheel the wait turns: ONE abstract phase on the campaign —
+  `dawn` / `day` / `dusk` / `night`, stored on `campaigns.hour_phase` +
+  `hour_progress` — stepped by the turns played (`turns_per_phase`, default 3)
+  and by the REAL minutes of the idle wait (`minutes_per_phase`, default 240),
+  capped at one full turn of the wheel per absence so a week away is a day
+  later. Same contract as ambient on a wheel: it reaches the arithmetic only
+  through `Odds::HOURS`, two-sided per phase and itemized BESIDE the air's
+  parts, joins the board's `sky` line, and reaches Claude as one plain fact to
+  render in whatever way the land keeps time. Where the air holds for a scene's
+  life, the light keeps moving inside it — so the step lands at the END of a
+  resolution, after the beats the cards were priced for, and the next turn's
+  cards are composed under the new phase. `config/game.php` `hours`),
   `Bargains` (a complication with a price tag: a seeded composer pass
   occasionally clones one card into a second, bargained twin offered BESIDE
   its plain sibling — five closed keys (`loud` / `reckless` / `two_hands` /
@@ -260,6 +272,24 @@ adjudicates legality or outcomes — it is only ever handed resolved facts.
   forecast and the die from that one table. Clear emits nothing anywhere. And
   ambient moves the ODDS of detection only: it may never reveal or conceal a
   `hidden` feature or a `lurking` actor by itself.
+- The hour is the same contract as the air, rolled along a wheel. Phases are
+  engine vocabulary that must work on an ash steppe and aboard a derelict
+  station alike — the engine never says sunrise and never names a clock time;
+  the narrator translates the phase through `worldBrief()`, once per chapter.
+  Genre, drive, tech level, and the land never influence the wheel: it advances
+  uniformly for every tale, by deterministic arithmetic with nothing to seed.
+  `day` emits nothing anywhere (the `clear` analogue). Every effect is an
+  itemized `Odds::HOURS` part, two-sided per phase, magnitudes smaller than
+  ambient's because the two STACK — a gloomy night must be darker than either
+  alone while the pair stays inside the ±4 spread of `Odds::CONDITIONS` — and
+  itemized separately from the air, so the player reads two named parts rather
+  than one number. The wheel moves the ODDS of detection only: it may never
+  reveal or conceal a `hidden` feature or a `lurking` actor by itself. It shares
+  the real clock with `Downtime` and nothing else: neither modifies the other,
+  and rest never works better in the dark. And because a turn's cards were
+  priced under the light they were offered in, the step lands AFTER the beats
+  resolve — a wheel that turned before the dice would charge a number the card
+  never quoted.
 - A bargain is priced up front and always paid. The complication happens
   whether the roll lands or not — wrenching a gate open is loud even when it
   works — which is what keeps the card priceable at choose-time and leaves

@@ -11,7 +11,7 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\Relations\HasOne;
 
-#[Fillable(['user_id', 'name', 'premise', 'opening', 'tone', 'world_flavor', 'setting', 'genre', 'drive', 'tech_level', 'starting_zone_id', 'next_zone_id', 'pending_sheet', 'status', 'title', 'back_cover', 'ended_early', 'started_at', 'ended_at', 'synopsis'])]
+#[Fillable(['user_id', 'name', 'premise', 'opening', 'tone', 'world_flavor', 'setting', 'genre', 'drive', 'tech_level', 'starting_zone_id', 'next_zone_id', 'pending_sheet', 'status', 'title', 'back_cover', 'ended_early', 'started_at', 'ended_at', 'synopsis', 'hour_phase', 'hour_progress'])]
 class Campaign extends Model
 {
     use HasFactory;

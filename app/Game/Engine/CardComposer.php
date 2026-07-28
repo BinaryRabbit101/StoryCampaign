@@ -127,6 +127,12 @@ class CardComposer
         $conditions = [
             'elevated' => (bool) ($scene->state['elevated'] ?? false),
             'ambient' => Ambient::of($scene),
+            // And the light it stands in. The air was rolled once for this
+            // ground and holds; the hour keeps turning under the same scene, so
+            // it is read fresh off the tale every time cards are composed —
+            // and priced onto the card the same way the air is, before the
+            // commit rather than after it.
+            'hour' => Hours::of($scene->campaign),
             'scars' => Scars::names($character),
             // The endeavor under way, if there is one: its name and the exact
             // verbs that move it, read straight off the clock's own row. Every

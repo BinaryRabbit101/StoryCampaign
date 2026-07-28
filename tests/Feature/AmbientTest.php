@@ -346,7 +346,9 @@ class AmbientTest extends TestCase
             $sky = collect($board)->firstWhere('key', 'sky');
 
             $this->assertNotNull($sky, "no sky group under {$key}");
-            $this->assertSame('The air', $sky['title']);
+            // One group carries the air and the light both; in plain day the
+            // light adds no item, so the air still stands alone here.
+            $this->assertSame('The air and the light', $sky['title']);
             $this->assertCount(1, $sky['items']);
             $this->assertSame(Ambient::line($key), $sky['items'][0]);
 

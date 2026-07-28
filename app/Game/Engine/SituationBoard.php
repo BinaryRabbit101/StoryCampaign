@@ -109,14 +109,22 @@ class SituationBoard
                 ->reject(fn ($f) => Hands::isHolding($character, $f->id))
                 ->pluck('name')->take(6)->all());
 
-        // The air this ground stands in. Abstract, because the engine's words
-        // have to work in a canopy town and on a derelict station alike — the
-        // chapter is where it becomes rain, or dust, or a deck venting. Clear
-        // air says nothing at all: the empty group is simply absent, the same
-        // rule that keeps "no open threat stands against you" off the page
-        // every quiet turn.
-        $groups[] = self::group('sky', 'The air', 'ground',
-            array_values(array_filter([Ambient::line(Ambient::of($scene))])));
+        // The air this ground stands in, and the light it stands in. Abstract,
+        // because the engine's words have to work in a canopy town and on a
+        // derelict station alike — the chapter is where it becomes rain, or
+        // dust, or a deck venting, and where the dark hours become a horizon or
+        // a dimmed shift. One group carries both: they are the same kind of
+        // fact about the place, and splitting them would put two one-line
+        // groups on the board saying nearly the same thing.
+        //
+        // Clear air and plain day each say nothing at all, so an ordinary scene
+        // in ordinary light drops the whole group — the same rule that keeps
+        // "no open threat stands against you" off the page every quiet turn.
+        $groups[] = self::group('sky', 'The air and the light', 'ground',
+            array_values(array_filter([
+                Ambient::line(Ambient::of($scene)),
+                Hours::line(Hours::of($scene->campaign)),
+            ])));
 
         $self = [];
         $health = $character->meters['health'];
