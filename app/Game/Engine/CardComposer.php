@@ -109,7 +109,13 @@ class CardComposer
         // What is already true as these cards are offered. Every card prices
         // itself against this, so "high ground, +2 to a strike" is on the card
         // before it is chosen rather than a surprise on the dice table.
-        $conditions = ['elevated' => (bool) ($scene->state['elevated'] ?? false)];
+        // The air is part of that: it was rolled once when this ground was
+        // dressed and it stands here, so it prices onto the card the same way
+        // high ground does — visible before the commit, never after it.
+        $conditions = [
+            'elevated' => (bool) ($scene->state['elevated'] ?? false),
+            'ambient' => Ambient::of($scene),
+        ];
 
         // Full hands never forbid an action — a held crate that locked the
         // screen would be a punishment, not a choice — but they make the

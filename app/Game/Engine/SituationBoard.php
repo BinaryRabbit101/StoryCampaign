@@ -85,6 +85,15 @@ class SituationBoard
                 ->reject(fn ($f) => Hands::isHolding($character, $f->id))
                 ->pluck('name')->take(6)->all());
 
+        // The air this ground stands in. Abstract, because the engine's words
+        // have to work in a canopy town and on a derelict station alike — the
+        // chapter is where it becomes rain, or dust, or a deck venting. Clear
+        // air says nothing at all: the empty group is simply absent, the same
+        // rule that keeps "no open threat stands against you" off the page
+        // every quiet turn.
+        $groups[] = self::group('sky', 'The air', 'ground',
+            array_values(array_filter([Ambient::line(Ambient::of($scene))])));
+
         $self = [];
         $health = $character->meters['health'];
         $self[] = "Health {$health['current']}/{$health['max']}";
@@ -121,7 +130,7 @@ class SituationBoard
             }
 
             $parts[] = match ($group['key']) {
-                'moment', 'alarm' => implode(' ', $items),
+                'moment', 'alarm', 'sky' => implode(' ', $items),
                 'self' => implode('. ', $items).'.',
                 default => "{$group['title']}: ".implode(', ', $items).'.',
             };

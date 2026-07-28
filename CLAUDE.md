@@ -90,7 +90,14 @@ adjudicates legality or outcomes — it is only ever handed resolved facts.
   ground — offered on `turns.downtime` when a turn opens, picked on the
   resolved-turn screen, and paid out at the top of the next resolution from
   the REAL elapsed minutes, clamped by `config/game.php` `downtime`
-  (floor/cap)), `ActionCard`, `BeatOutcome`.
+  (floor/cap)), `Ambient` (the air a scene stands in: ONE abstract key —
+  `gloom` low light / `haze` obscured air / `squall` violent air / `clear` —
+  rolled by `SceneDresser` from the scene's seeded dice when the ground is
+  dressed, stored on `scenes.state.ambient` and fixed for that scene's life,
+  weighted toward clear by `config/game.php` `ambient`; it reaches the
+  arithmetic only through `Odds::AMBIENT`, shows as the board's `sky` line,
+  and reaches Claude as one fact to render in the land's own weather),
+  `ActionCard`, `BeatOutcome`.
 - Anti-repetition systems (all engine-side, no LLM): every visible feature
   and actor carries capability-free `inspect`/`improvise`/`speak` cards, so
   ground the character's gifts don't fit is still actionable and the card
@@ -197,6 +204,17 @@ adjudicates legality or outcomes — it is only ever handed resolved facts.
   never a parallel buff; walk the ground is not offered when the scene hides
   nothing). Narration gets one plain sentence about the wait — no numbers, no
   stance names.
+- The air is abstract, priced in the open, and never a revealer. Ambient keys
+  are engine vocabulary that must work on an ash steppe and aboard a derelict
+  station alike — the engine never says "rain"; the narrator translates the key
+  through `worldBrief()`, once per chapter. Genre, drive, tech level, and the
+  land never influence WHICH air rolls (the roll is uniform). Every effect is
+  an itemized `Odds::AMBIENT` part, two-sided per key (each non-clear air helps
+  something and hinders something — a single-sided ambient is difficulty creep
+  in a costume), inside the ±4 spread of `Odds::CONDITIONS`, read by the
+  forecast and the die from that one table. Clear emits nothing anywhere. And
+  ambient moves the ODDS of detection only: it may never reveal or conceal a
+  `hidden` feature or a `lurking` actor by itself.
 - Companions are coordinated, never controlled: requests are cards in each
   companion's own slot (never the player's pre/main/post), the engine rolls
   the companion's attempt, and failure can cost the companion.

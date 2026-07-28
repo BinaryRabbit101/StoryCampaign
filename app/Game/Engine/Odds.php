@@ -71,6 +71,56 @@ class Odds
     ];
 
     /**
+     * What the air is worth, and to what.
+     *
+     * The scene's ambient (Ambient::of) is rolled once when the ground is
+     * dressed and then stands for that scene's life. It reaches the arithmetic
+     * only through here, itemized like everything else — a hidden two points
+     * because it happened to be dark is exactly the surprise the whole ledger
+     * exists to prevent.
+     *
+     * Every entry is two-sided at the ambient level: each non-clear air helps
+     * something and hinders something. A single-sided ambient is difficulty
+     * creep wearing a costume — the world would simply get harder on a roll the
+     * player did not make.
+     *
+     * A rule matches on the card's VERB or on the capability it is spent
+     * through, never both twice: `ascend` covers a climb, but a leap taken as a
+     * `cross` is the same body in the same wind and must be priced the same.
+     *
+     * Magnitudes stay inside the ±4 spread of CONDITIONS above (nothing here
+     * exceeds 2), so the weather can never outweigh something the player built.
+     *
+     * Note on the quiet verbs: `examine` and `inspect` are in QUIET and never
+     * roll, so gloom's cost to reading the ground lands on the perception verbs
+     * that DO roll — `detect` and `scout`. Listing verbs that cast no die would
+     * be a table entry the dice can never honor.
+     */
+    private const AMBIENT = [
+        // The baseline. No parts, no board line, nothing to price.
+        'clear' => [],
+
+        'gloom' => [
+            ['label' => 'Little light to be seen by', 'amount' => -2, 'verbs' => ['hide'], 'capabilities' => ['conceal', 'quiet_move']],
+            ['label' => 'Too little light to read the ground by', 'amount' => 2, 'verbs' => ['detect', 'scout']],
+            ['label' => 'A throw into the dark', 'amount' => 1, 'verbs' => ['hurl']],
+        ],
+
+        'haze' => [
+            ['label' => 'The air itself covers you', 'amount' => -2, 'verbs' => ['hide'], 'capabilities' => ['conceal']],
+            ['label' => 'Thick air to break away into', 'amount' => -1, 'verbs' => ['flee']],
+            ['label' => 'The air is thick — a throw must guess', 'amount' => 2, 'verbs' => ['hurl']],
+            ['label' => 'Nothing carries far through this air', 'amount' => 2, 'verbs' => ['detect', 'scout']],
+        ],
+
+        'squall' => [
+            ['label' => 'A trail holds in ground like this', 'amount' => -2, 'verbs' => ['track']],
+            ['label' => 'Nothing off the ground is steady', 'amount' => 2, 'verbs' => ['ascend', 'ride'], 'capabilities' => ['climb', 'swing', 'leap', 'glide']],
+            ['label' => 'The air throws off anything thrown', 'amount' => 2, 'verbs' => ['hurl']],
+        ],
+    ];
+
+    /**
      * Which condition a quiet set-up beat leaves behind. This is the forecast
      * side of the same table: it lets a card say what it BUYS before it is
      * chosen, in the exact terms the roll will later be paid in.
@@ -104,7 +154,7 @@ class Odds
     /**
      * What this card must beat, and why.
      *
-     * @param  array{risk?:string,verb:string,target?:?array}  $card
+     * @param  array{risk?:string,verb:string,capability?:?string,target?:?array}  $card
      * @return Ledger
      */
     public static function difficulty(array $card, string $approach, array $conditions = []): array
@@ -151,7 +201,36 @@ class Odds
             $parts[] = ['label' => ($card['target']['name'] ?? 'They').' is wound up and open', 'amount' => -2];
         }
 
+        // The air the scene stands in. Same table for the card's forecast and
+        // for the die — the ambient is read off the live conditions both halves
+        // are handed, so a card can never quote a DC the weather then changes.
+        foreach (self::ambientParts($conditions['ambient'] ?? null, $card['verb'], $card['capability'] ?? null) as $part) {
+            $parts[] = $part;
+        }
+
         return self::ledger($parts);
+    }
+
+    /**
+     * What this scene's air costs (or spares) a given card. Public because it
+     * is the one place the ambient table is read; nothing else may keep a copy.
+     *
+     * @return list<Part>
+     */
+    public static function ambientParts(?string $ambient, string $verb, ?string $capability = null): array
+    {
+        $parts = [];
+
+        foreach (self::AMBIENT[$ambient] ?? [] as $rule) {
+            $matched = in_array($verb, $rule['verbs'] ?? [], true)
+                || ($capability !== null && in_array($capability, $rule['capabilities'] ?? [], true));
+
+            if ($matched) {
+                $parts[] = ['label' => $rule['label'], 'amount' => $rule['amount']];
+            }
+        }
+
+        return $parts;
     }
 
     /**

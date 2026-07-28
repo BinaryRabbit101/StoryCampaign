@@ -83,9 +83,15 @@ class ActionCard
      */
     private function forecast(array $conditions): array
     {
+        // The capability travels with the forecast because some of the ledger
+        // prices the body, not the verb: a leap taken as a `cross` and a leap
+        // taken as an `ascend` meet the same wind, and the card has to quote
+        // what the resolver — which reads the stored card, capability and all —
+        // is going to charge.
         $card = [
             'verb' => $this->verb,
             'risk' => $this->risk,
+            'capability' => $this->capability,
             'target' => $this->target,
             'slot' => $this->slot->value,
         ];

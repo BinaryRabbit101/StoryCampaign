@@ -196,6 +196,34 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Ambient conditions (the air a scene stands in)
+    |--------------------------------------------------------------------------
+    | One weighted roll per dressed scene, from the scene's own seeded dice,
+    | fixed for that scene's life. The keys are abstract because the engine has
+    | to speak them on an ash steppe and aboard a derelict station alike:
+    | `gloom` is low light, `haze` is obscured air, `squall` is violent air,
+    | `clear` is the baseline. The narrator turns the key into this land's own
+    | weather; the engine never says "rain".
+    |
+    | Weighted hard toward clear on purpose — ambient is seasoning, and a world
+    | that is always dramatic is never dramatic. Squall is rarest because it is
+    | the most intrusive: it is the one that closes off the high ground.
+    |
+    | Prices for each key live in App\Game\Engine\Odds::AMBIENT. This block only
+    | decides how often the world reaches for one.
+    */
+
+    'ambient' => [
+        'weights' => [
+            'clear' => 50,
+            'gloom' => 22,
+            'haze' => 18,
+            'squall' => 10,
+        ],
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
     | Vignette shape
     |--------------------------------------------------------------------------
     */

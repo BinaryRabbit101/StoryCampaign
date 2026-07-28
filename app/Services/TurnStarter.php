@@ -58,6 +58,11 @@ class TurnStarter
             $this->dresser->spawnActors($scene, $dice, 0, 2);
         }
 
+        // The air the tale opens in, rolled once and kept. It has to land
+        // before the cards are composed: every one of them prices itself
+        // against it, and a forecast written under the wrong sky is a lie.
+        $this->dresser->rollAmbient($scene, $dice);
+
         $character = $campaign->character()->firstOrFail();
         $scene = $scene->fresh();
         $cards = $this->composer->compose($character, $scene);

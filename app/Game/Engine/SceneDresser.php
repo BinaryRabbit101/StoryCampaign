@@ -62,6 +62,32 @@ class SceneDresser
         }
     }
 
+    /**
+     * Roll the air this ground stands in, once, and remember it.
+     *
+     * Fixed for the scene's life on purpose: a place whose weather turns every
+     * few beats is a place the player cannot plan against, and re-rolling would
+     * mean a card priced last turn quietly costing something else this turn.
+     * New ground gets new air; this ground keeps what it was given.
+     *
+     * Called at the END of dressing rather than the start, because the draw
+     * above walks the same seeded stream — rolling first would shift every
+     * feature and actor a scene has ever drawn.
+     */
+    public function rollAmbient(Scene $scene, Dice $dice): string
+    {
+        $state = $scene->state ?? [];
+
+        if (isset($state['ambient'])) {
+            return Ambient::of($scene);
+        }
+
+        $ambient = Ambient::roll($dice);
+        $scene->update(['state' => array_merge($state, ['ambient' => $ambient])]);
+
+        return $ambient;
+    }
+
     /** Spawn a small draw of the zone's actor templates into the scene. */
     public function spawnActors(Scene $scene, Dice $dice, int $min, int $max): void
     {

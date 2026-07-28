@@ -2,6 +2,7 @@
 
 namespace App\Services\Claude;
 
+use App\Game\Engine\Ambient;
 use App\Game\Engine\ChapterEvents;
 use App\Game\Engine\Grudges;
 use App\Models\Chapter;
@@ -153,6 +154,21 @@ Let it colour at most the opening clause of the chapter, in your own words. Neve
 
 WAIT;
 
+        // The air the chapter closes in — the same key the situation board
+        // above is already saying abstractly, so the page and the chapter
+        // cannot describe two different skies. The engine says WHAT it is; the
+        // land says what it looks like here, and the land outranks every
+        // example in the bible. One mention: a chapter that files a weather
+        // report every few paragraphs has stopped being about its beats.
+        $ambient = Ambient::fact(Ambient::of($nextTurn?->scene ?? $turn->scene));
+        $air = $ambient === null ? '' : <<<AIR
+
+        ## The air this scene stands in (fixed fact)
+        {$ambient}
+        Render it exactly ONCE, in whatever form this land takes it, and let it ride inside the action — a clause on the way through a beat, never a paragraph and never the opening line. Do not return to it afterwards. What it is, is fixed; what it looks like here belongs to the land above.
+
+        AIR;
+
         $synopsis = trim((string) $campaign->synopsis);
         $storySoFar = $synopsis === '' ? '' : <<<SOFAR
 
@@ -184,7 +200,7 @@ Each listed event carries a bracketed token like [[e1]]. Copy every token into t
 ## The stage the player set (color and direction only — never force the goal closed; the player decides when it is met)
 {$stage}
 
-{$storySoFar}{$wait}
+{$storySoFar}{$wait}{$air}
 ## Recent chapters (for continuity)
 {$previousChapters}
 {$continuation}

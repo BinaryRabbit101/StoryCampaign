@@ -43,6 +43,10 @@ class TurnResolver
 
             $conditions = [
                 'elevated' => (bool) ($scene->state['elevated'] ?? false),
+                // The air this ground stands in, fixed when it was dressed.
+                // The cards were priced against it a turn ago; the dice read
+                // the same key off the same scene, so the quoted DC is paid.
+                'ambient' => Ambient::of($scene),
                 'concealed' => false,
                 'time_slowed' => false,
                 'hastened' => false,
@@ -1496,6 +1500,10 @@ class TurnResolver
         // Companions walk the tale, not the scene: they come along.
         $scene->actors()->where('kind', 'companion')->where('status', 'active')
             ->update(['scene_id' => $next->id]);
+
+        // New ground, new air — one roll, kept for as long as this scene lasts.
+        // Last, so the draws above keep the exact stream they have always had.
+        $this->dresser->rollAmbient($next, $dice);
 
         return $next;
     }
