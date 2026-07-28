@@ -118,6 +118,23 @@ adjudicates legality or outcomes — it is only ever handed resolved facts.
   fell otherwise — and the fall past `scars.max_before_end` ends the tale
   through `BookCompiler::close`'s coda path instead, closed by the Narrator
   behind the fall's own chapter),
+  `Companions` (what accumulates between you and whoever walks beside you: a
+  `tags.bond` int 0–6 on the companion's own actor row deriving
+  `stranger`/`fellow`/`sworn`, moved ONLY by engine events the resolver already
+  rolled — a request that landed, a block that turned a blow, a fire shared, a
+  border crossed together; −1 when a request got them hurt, never below 0, and
+  sworn is sticky. Fellow earns a SIGNATURE: one more request card in the
+  companion's own slot, engine-picked once with seeded dice from a closed table
+  keyed to what they were (`companion_harry` / `companion_distract` /
+  `companion_forage`). Sworn earns the INTERCEPTION: once per chapter, unbidden
+  and engine-triggered, a blow that would drop the player to 0 lands on them
+  instead — it fires inside the reaction, ahead of the scar path, so there is no
+  fall left to roll against. The world may also offer companions the player
+  never asked for (the grateful, after a rescue in the turn's own facts; the
+  stray, a rare `SceneDresser` spawn that keeps to the edge and walks
+  transitions), and both end in a consensual pair of ordinary main-slot cards.
+  Loss is decided at scene exit against the tier and mints the `companion_lost`
+  memento; the name never respawns. `config/game.php` `companions`),
   `ActionCard`, `BeatOutcome`.
 - Anti-repetition systems (all engine-side, no LLM): every visible feature
   and actor carries capability-free `inspect`/`improvise`/`speak` cards, so
@@ -281,9 +298,18 @@ adjudicates legality or outcomes — it is only ever handed resolved facts.
   stand) and the chapter stamp that completes its provenance. No push fires
   for one; the player finds it. And no mechanics language reaches the shelf,
   the book, or the widget.
-- Companions are coordinated, never controlled: requests are cards in each
-  companion's own slot (never the player's pre/main/post), the engine rolls
-  the companion's attempt, and failure can cost the companion.
+- Companions are coordinated, never controlled — at EVERY bond tier. Requests
+  are cards in each companion's own slot (never the player's pre/main/post), the
+  engine rolls the companion's attempt, and failure can cost the companion. A
+  deeper bond widens what may be ASKED (the fellow's signature is one more
+  request card) and adds THEIR OWN INITIATIVE (the sworn interception takes no
+  card and no player input); it never hands the player authorship of a
+  companion's beat. Bond movement is fact-driven only — notes, narration, genre,
+  and land never move it — and Claude is told the tier in plain words and never
+  the number. Joining is consensual on both sides: every path the world
+  initiates ends in an engine-offered accept/decline pair, sending someone on
+  their way is never a dead choice, and a third candidate's offer simply does
+  not fire while the party is at its cap of two.
 
 ## Widget
 

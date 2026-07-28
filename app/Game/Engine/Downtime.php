@@ -43,6 +43,14 @@ class Downtime
     public const WALK = 'walk';
 
     /**
+     * Company: half the sleep, and a night of it spent talking to whoever is
+     * walking with them. Offered only when somebody actually is. This is where
+     * the game earns its quiet pages — the only stance whose real payout is a
+     * paragraph rather than a number.
+     */
+    public const FIRE = 'fire';
+
+    /**
      * The offer written onto a turn as it opens.
      *
      * `walk` is filtered out when the scene hides nothing: an option that can
@@ -79,6 +87,19 @@ class Downtime
             ];
         }
 
+        // Only when there is somebody to share it with. A fire you sit at alone
+        // is just a worse night's sleep.
+        if (Companions::present($scene)->isNotEmpty()) {
+            $stances[] = [
+                'id' => self::FIRE,
+                'label' => 'Share the fire',
+                'terms' => 'Half the rest of a proper sleep, and hours of it spent talking to whoever is walking with you. It counts for something between you.',
+                // The one stance that takes words: what gets said at a fire is
+                // the player's, and it colours the page and nothing else.
+                'note' => 'Anything you want said at that fire (optional)',
+            ];
+        }
+
         return [
             'offer' => $stances,
             'stance' => null,
@@ -100,13 +121,17 @@ class Downtime
      * so a player who reads the chapter twice before choosing is not paid for
      * the reading.
      */
-    public static function choose(Turn $turn, string $stance, ?CarbonInterface $now = null): void
+    public static function choose(Turn $turn, string $stance, ?CarbonInterface $now = null, ?string $note = null): void
     {
         $turn->update(['downtime' => array_merge($turn->downtime ?? [], [
             'stance' => $stance,
             'chosen_at' => ($now ?? now())->toIso8601String(),
             'applied' => false,
             'payout' => null,
+            // The player's own words for the fire. Same class as a beat note:
+            // it colours the telling and is read long after every number in
+            // this class has already been decided.
+            'note' => $note,
         ])]);
     }
 
@@ -122,7 +147,7 @@ class Downtime
      *                                           `readied` through it — the same
      *                                           condition the `ready` beat grants,
      *                                           priced once in Odds::CONDITIONS.
-     * @return array{fact:?string,watchful:bool}
+     * @return array{fact:?string,watchful:bool,campfire:?array}
      */
     public static function apply(Turn $turn, Character $character, array &$conditions, ?CarbonInterface $now = null): array
     {
@@ -130,7 +155,7 @@ class Downtime
         $stance = $downtime['stance'] ?? null;
 
         if ($stance === null || ($downtime['applied'] ?? false) || ($downtime['chosen_at'] ?? null) === null) {
-            return ['fact' => null, 'watchful' => false];
+            return ['fact' => null, 'watchful' => false, 'campfire' => null];
         }
 
         $now ??= now();
@@ -140,6 +165,7 @@ class Downtime
         $payout = ['stance' => $stance, 'elapsed_minutes' => $elapsed, 'counted_minutes' => $minutes, 'granted' => false];
         $fact = null;
         $watchful = false;
+        $campfire = null;
 
         // Under the floor nothing accrues. A wait that short was not a wait,
         // and paying for it would make re-submitting in a loop the strongest
@@ -178,12 +204,35 @@ class Downtime
                         ? 'They spent the wait walking the ground, and it kept whatever it still had.'
                         : "They spent the wait walking the ground, and it gave up {$found}.";
                     break;
+
+                case self::FIRE:
+                    // Half the sleep, because the other half of the night went
+                    // on talking — and the point of it lands on the companion,
+                    // not on the meter.
+                    $scene = $turn->scene()->first();
+                    $healed = self::rest($character, $minutes, 0.5);
+                    $campfire = $scene === null ? null
+                        : Companions::campfire($scene, $turn, self::note($downtime));
+                    $payout['healed'] = $healed;
+                    $payout['shared_with'] = $campfire['companion'] ?? null;
+                    $fact = $campfire === null
+                        ? 'They spent the wait beside a fire, and nobody came to sit at it.'
+                        : 'They spent the wait beside a fire with company, and the talk went round it slowly.';
+                    break;
             }
         }
 
         $turn->update(['downtime' => array_merge($downtime, ['applied' => true, 'payout' => $payout])]);
 
-        return ['fact' => $fact, 'watchful' => $watchful];
+        return ['fact' => $fact, 'watchful' => $watchful, 'campfire' => $campfire];
+    }
+
+    /** The player's own words for the fire, trimmed to nothing-or-something. */
+    private static function note(array $downtime): ?string
+    {
+        $note = trim((string) ($downtime['note'] ?? ''));
+
+        return $note === '' ? null : $note;
     }
 
     /**
@@ -225,6 +274,7 @@ class Downtime
             self::WATCH => 'Keeping watch.',
             self::TEND => 'Tending their gear.',
             self::WALK => 'Walking the ground.',
+            self::FIRE => 'Sharing the fire.',
             default => null,
         };
     }
@@ -234,13 +284,13 @@ class Downtime
      * trading away the other three stances — and it never lifts anyone off
      * the floor: a character who went down stays down.
      */
-    private static function rest(Character $character, int $minutes): int
+    private static function rest(Character $character, int $minutes, float $fraction = 1.0): int
     {
         if ($character->status !== 'alive') {
             return 0;
         }
 
-        $heal = (int) floor($minutes / 60 * (float) config('game.downtime.rest_heal_per_hour'));
+        $heal = (int) floor($minutes / 60 * (float) config('game.downtime.rest_heal_per_hour') * $fraction);
         if ($heal < 1) {
             return 0;
         }

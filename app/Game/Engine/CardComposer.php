@@ -527,6 +527,49 @@ class CardComposer
         $tags = $actor->tags ?? [];
         $hostile = $actor->kind === 'enemy';
 
+        // Someone the world sent, waiting on an answer. The pair IS the whole
+        // conversation with them this turn: joining has to be consensual on
+        // both sides, and burying "yes" among nine other things to do with them
+        // would make the answer an accident rather than a decision. Ordinary
+        // main-slot cards, validated exactly as every other card is.
+        if (! $hostile && $actor->kind !== 'companion' && isset($tags['offering'])) {
+            $asked = $tags['offering'] === Companions::STRAY
+                ? "{$actor->name} has kept near you long enough to ask outright."
+                : "{$actor->name} owes you their skin, and has asked to walk with you.";
+
+            return [
+                new ActionCard(
+                    slot: TurnSlot::Main,
+                    verb: 'companion_welcome',
+                    label: "Welcome {$actor->name}",
+                    description: "{$asked} Say yes, and they leave this place at your side.",
+                    target: $target,
+                ),
+                new ActionCard(
+                    slot: TurnSlot::Main,
+                    verb: 'companion_dismiss',
+                    label: "Send {$actor->name} on their way",
+                    description: "{$asked} Part well instead — nobody walks off from you with nothing.",
+                    target: $target,
+                ),
+            ];
+        }
+
+        // A stray keeps to the edge. No recruitment, no craft worked on them —
+        // just the plain word anyone in the scene gets, until they decide for
+        // themselves that they want to be asked.
+        if (! $hostile && ($tags['following'] ?? false)) {
+            return [
+                new ActionCard(
+                    slot: TurnSlot::Main,
+                    verb: 'speak',
+                    label: "Speak with {$actor->name}",
+                    description: "{$actor->name} has been keeping near you without being asked. Say something to them.",
+                    target: $target,
+                ),
+            ];
+        }
+
         if ($hostile) {
             // A returned grudge under truce came carrying terms. Hearing them
             // out is a real choice standing beside the strike, not instead of
@@ -866,7 +909,67 @@ class CardComposer
             );
         }
 
+        // What this one, and only this one, does. Earned at fellow, engine-
+        // picked once, and still a REQUEST in their own slot — a deeper bond
+        // widens what you may ask for, never what you may command.
+        $signature = $this->signatureCard($companion, $enemies, $scene, $target);
+        if ($signature !== null) {
+            $cards[] = $signature;
+        }
+
         return $cards;
+    }
+
+    /**
+     * The fellow's signature request.
+     *
+     * Null while the bond is still shallow, and null when the thing it does
+     * could not happen here — a card that can accomplish nothing is a dead
+     * choice, and the one on a companion's short list would be conspicuous.
+     */
+    private function signatureCard(Actor $companion, $enemies, Scene $scene, array $target): ?ActionCard
+    {
+        $signature = Companions::signature($companion);
+        $threat = $enemies->first();
+
+        return match (true) {
+            $signature === Companions::HARRY && $threat !== null => new ActionCard(
+                slot: TurnSlot::Companion,
+                verb: Companions::HARRY,
+                label: "Harry {$threat->name}",
+                description: "{$companion->name} worries at {$threat->name} from the wrong side until whatever angle they were working comes off you. It puts them in reach of it.",
+                target: $target,
+                risk: 'risky',
+                composed: true,
+            ),
+
+            $signature === Companions::DISTRACT && $threat !== null => new ActionCard(
+                slot: TurnSlot::Companion,
+                verb: Companions::DISTRACT,
+                label: "Pull {$threat->name}'s attention",
+                description: "{$companion->name} gives {$threat->name} something they have to look at — whatever they were gathering for comes apart, and they go back to circling.",
+                target: $target,
+                composed: true,
+            ),
+
+            $signature === Companions::FORAGE && $this->sceneHides($scene) => new ActionCard(
+                slot: TurnSlot::Companion,
+                verb: Companions::FORAGE,
+                label: 'Send them over the ground',
+                description: "{$companion->name} walks the place on their own legs and comes back with whatever it was keeping to itself.",
+                target: $target,
+                composed: true,
+            ),
+
+            default => null,
+        };
+    }
+
+    private function sceneHides(Scene $scene): bool
+    {
+        return $scene->allFeatures()->contains(
+            fn (SceneFeature $f) => ($f->state['hidden'] ?? false) && ! ($f->state['destroyed'] ?? false),
+        );
     }
 
     /** @return list<ActionCard> */

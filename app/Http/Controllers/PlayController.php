@@ -198,6 +198,9 @@ class PlayController extends Controller
         $validated = $request->validate([
             'turn_id' => ['required', 'integer'],
             'stance' => ['required', 'string'],
+            // What the player wants said at the fire. Same class as a beat
+            // note: it colours the chapter and never reaches the arithmetic.
+            'note' => ['nullable', 'string', 'max:280'],
         ]);
 
         $turn = $campaign->turns()->whereKey($validated['turn_id'])->first();
@@ -218,7 +221,7 @@ class PlayController extends Controller
             ]);
         }
 
-        Downtime::choose($turn, $validated['stance']);
+        Downtime::choose($turn, $validated['stance'], note: $this->note($validated));
 
         return back();
     }

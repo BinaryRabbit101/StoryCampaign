@@ -97,7 +97,7 @@ class SceneDresser
             ->get();
 
         foreach ($this->draw($templates->all(), $dice, $min, $max) as $template) {
-            Actor::create([
+            $spawned = Actor::create([
                 'scene_id' => $scene->id,
                 'zone_id' => $scene->zone_id,
                 'name' => $template->name,
@@ -109,6 +109,13 @@ class SceneDresser
                 'source' => $template->source,
                 'evolution_run_id' => $template->evolution_run_id,
             ]);
+
+            // Rarely, one of them takes an interest. The roll is seeded off the
+            // spawned actor's own id rather than off the stream above, on
+            // purpose: that stream is the dressing draw, and spending a die per
+            // spawn inside it would shift every feature, inhabitant and sky
+            // every dressed scene in the game has ever produced.
+            Companions::markStray($spawned, $scene);
         }
     }
 

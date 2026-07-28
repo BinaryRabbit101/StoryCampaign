@@ -22,10 +22,18 @@ const props = defineProps<{
 
 const sending = ref(false);
 
+/** What the player wants said at the fire. Colour for the chapter, never a number. */
+const note = ref('');
+
 const chosen = computed(
     () =>
         props.downtime.offer.find((s) => s.id === props.downtime.stance) ??
         null,
+);
+
+/** The one stance that takes words, if it is on offer at all this turn. */
+const spoken = computed(
+    () => props.downtime.offer.find((s) => s.note) ?? null,
 );
 
 function choose(stance: string) {
@@ -38,7 +46,11 @@ function choose(stance: string) {
     sending.value = true;
     router.post(
         `/play/${props.campaignId}/downtime`,
-        { turn_id: props.turnId, stance },
+        {
+            turn_id: props.turnId,
+            stance,
+            note: stance === spoken.value?.id ? note.value : null,
+        },
         {
             preserveScroll: true,
             preserveState: true,
@@ -88,6 +100,14 @@ function choose(stance: string) {
                     </span>
                 </button>
             </div>
+            <textarea
+                v-if="spoken"
+                v-model="note"
+                rows="2"
+                maxlength="280"
+                :placeholder="spoken.note"
+                class="mt-2 w-full rounded-lg border border-sidebar-border/60 bg-background/50 p-2 text-xs"
+            />
             <p class="mt-1.5 text-[11px] text-muted-foreground">
                 Or say nothing — the wait passes on its own, as it always has.
             </p>

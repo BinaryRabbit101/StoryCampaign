@@ -69,13 +69,22 @@ class SituationBoard
         $groups[] = self::group('captives', 'In your grip', 'foe',
             $scene->actors()->where('status', 'restrained')->pluck('name')->all());
 
-        $groups[] = self::group('allies', 'At your side', 'ally',
-            $scene->actors()->where('status', 'active')->where('kind', 'companion')->pluck('name')->all());
+        // What each of them is to the player, in plain words — and the ones on
+        // the floor, who are still at their side until the scene turns. The
+        // bond's number never appears here: a board that printed it would teach
+        // the player to farm it instead of to notice it.
+        $groups[] = self::group('allies', 'At your side', 'ally', Companions::boardLines($scene));
 
-        $groups[] = self::group('others', 'Also here', 'person',
+        // Bystanders, plus whoever has quietly attached themselves to the
+        // player without being asked — and whoever is waiting on an answer.
+        $strays = Companions::bystanderLines($scene);
+        $named = collect($strays)->map(fn (string $l) => explode(' — ', $l)[0])->all();
+
+        $groups[] = self::group('others', 'Also here', 'person', array_merge($strays,
             $scene->visibleActors()
                 ->reject(fn ($a) => in_array($a->kind, ['enemy', 'companion'], true))
-                ->pluck('name')->all());
+                ->reject(fn ($a) => in_array($a->name, $named, true))
+                ->pluck('name')->all()));
 
         // Ground the offered options: name the features the cards reference,
         // so nothing the player can act on appears unannounced. What is in

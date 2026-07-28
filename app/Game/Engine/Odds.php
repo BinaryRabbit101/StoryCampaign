@@ -49,6 +49,12 @@ class Odds
         'time_slow', 'haste', 'ready', 'examine', 'inspect', 'wait',
         'catch_breath', 'reposition', 'shield', 'brace', 'command', 'drop',
         'bargain',
+        // Answering someone who has already asked. Both halves of the offer
+        // pair are roll-free on purpose: the decision was theirs to make and
+        // the other party has already made theirs, so there is nothing left for
+        // a die to adjudicate. A "failed" welcome would be the engine telling
+        // the player their yes did not take.
+        'companion_welcome', 'companion_dismiss',
     ];
 
     /**

@@ -39,14 +39,18 @@ class Mementos
      * The closed trigger list, RAREST FIRST — this order IS the priority rule
      * when several fire in one chapter.
      *
-     * Two entries have no engine source yet and are deliberately listed
-     * anyway: `endeavor_filled` waits on clocks, and the same shape holds for
-     * anything later (a companion lost, say). Arriving means adding the key
-     * here and one detection block in the resolver — a pure addition, with
-     * nothing downstream to change.
+     * One entry has no engine source yet and is deliberately listed anyway:
+     * `endeavor_filled` waits on clocks. Arriving means adding the key here and
+     * one detection block in the resolver — a pure addition, with nothing
+     * downstream to change. That is exactly how `companion_lost` arrived.
+     *
+     * `companion_lost` sits second because losing somebody who was walking with
+     * you is rarer than anything below it and costs more than all of it: the
+     * shelf is where that stops being a status on an actor row.
      */
     public const TRIGGERS = [
         'rival_settled',
+        'companion_lost',
         'scar_taken',
         'endeavor_filled',
         'elite_beaten',
@@ -72,6 +76,11 @@ class Mementos
             ['name' => 'What {subject} left behind', 'line' => 'Kept from {place}, the day the score with {subject} closed for good.'],
             ['name' => "{subject}'s token", 'line' => 'Taken off {subject} at {place}, with nothing further left to settle.'],
             ['name' => 'The last of {subject}', 'line' => 'Carried out of {place} once {subject} was finished with.'],
+        ],
+        'companion_lost' => [
+            ['name' => 'What {subject} carried', 'line' => 'It was {subject}\'s, and after {place} there was nobody left to give it back to.'],
+            ['name' => "{subject}'s share", 'line' => 'Kept from {place}, where {subject} stopped walking with them.'],
+            ['name' => 'The last of {subject}', 'line' => 'All that came away from {place} of {subject}, who did not.'],
         ],
         'scar_taken' => [
             ['name' => 'What was in their hand', 'line' => 'They were holding it when {subject} put them down at {place}.'],

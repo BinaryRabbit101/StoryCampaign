@@ -310,6 +310,14 @@ class Scars
         $companions = $scene->actors()->where('kind', 'companion')->where('status', 'active')->get();
         $outcome = $companions->isNotEmpty() ? self::DRAGGED_CLEAR : self::LEFT_WHERE_THEY_FELL;
 
+        // Whoever was on their feet decides how the waking is told; whoever is
+        // on the floor comes along regardless. A downed companion left behind
+        // in the scene they fell in would simply never be heard of again, which
+        // is the one thing losing somebody must never be quiet about — the
+        // exit roll that decides their fate happens at the NEXT transition.
+        $carried = $scene->actors()->where('kind', 'companion')
+            ->whereIn('status', ['active', 'downed'])->get();
+
         $locale = $dresser->locale($scene->zone, $dice, exclude: $scene->title);
 
         $woke = Scene::create([
@@ -327,7 +335,7 @@ class Scars
         // roll are how company shows up again — not the moment they wake.
         $dresser->instantiateFeatures($woke, $dice, 1, 2);
 
-        foreach ($companions as $companion) {
+        foreach ($carried as $companion) {
             $companion->update(['scene_id' => $woke->id]);
         }
 

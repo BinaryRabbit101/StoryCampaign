@@ -73,6 +73,12 @@ class TurnResolver
             $lurkingBefore = Downtime::lurkingIds($scene);
             $downtime = Downtime::apply($turn, $character, $conditions);
 
+            // Everything about who is walking beside them that this turn ends
+            // up having to say: the fire before it, a blow somebody stepped in
+            // front of, a joining, a parting, a loss. Collected as it happens
+            // and handed to the narrator as plain facts — never as a number.
+            $companionEvents = array_filter(['campfire' => $downtime['campfire']]);
+
             // Captives held before this turn may struggle free at its end —
             // a fresh grip always survives the turn it was won.
             $heldBefore = $scene->actors()->where('status', 'restrained')->pluck('id')->all();
@@ -90,6 +96,11 @@ class TurnResolver
                 ->whereIn('status', ['active', 'fled'])->pluck('id')->all();
             $captivesBefore = $scene->actors()->where('status', 'restrained')
                 ->where('kind', '!=', 'enemy')->pluck('id')->all();
+
+            // And whoever was walking beside them when the turn began. Read the
+            // same way: compared at the end, and a name that is not on their
+            // feet or on the floor any more was lost for good somewhere in it.
+            $companionsBefore = Companions::beside($scene)->pluck('id')->all();
 
             $outcomes = [];
             $trigger = null;
@@ -156,6 +167,14 @@ class TurnResolver
                 }
             }
 
+            // A soul keeping to the edge of the scene has now watched something
+            // of theirs actually work. That is the only thing that turns a
+            // stray into somebody who might ask to stay — a stranger who has
+            // seen you fail at everything has no reason to.
+            Companions::witness($scene, collect($outcomes)->contains(
+                fn (BeatOutcome $o) => $o->slot === 'main' && ! $o->skipped && $o->succeeded(),
+            ));
+
             // An ambush laid on an earlier turn springs before the scene
             // answers — unless detect already dragged it into the light.
             [$sprung, $springFacts] = $this->springAmbushes($scene, $turn);
@@ -166,7 +185,7 @@ class TurnResolver
             // table shows the player what the world rolled against them, and
             // a die nobody can see is a die the player has to take on faith.
             $reactionRolls = [];
-            $enemyFacts = array_merge($springFacts, $this->enemyReaction($character, $scene, $dice, $conditions, $moved, $reactionRolls));
+            $enemyFacts = array_merge($springFacts, $this->enemyReaction($character, $scene, $dice, $conditions, $moved, $reactionRolls, $turn, $companionEvents));
             $enemyFacts = array_merge($enemyFacts, $this->captiveStruggle($scene, $dice, $heldBefore, $reactionRolls));
 
             // The tale remembers: an enemy who newly broke and ran this turn
@@ -233,7 +252,7 @@ class TurnResolver
                     $moved = true;
                 }
             } elseif ($moved) {
-                $scene = $this->transitionScene($scene, $dice, $turn);
+                $scene = $this->transitionScene($scene, $dice, $turn, $companionEvents);
             } else {
                 $this->rollEnemyIntents($scene, $dice);
             }
@@ -257,6 +276,34 @@ class TurnResolver
                 Grudges::recordDowning($sceneBefore, $turn);
             }
 
+            // Companions the road provided, rather than ones the player asked
+            // for. Both paths end the same way — a consensual offer pair on the
+            // next turn's cards — and both stay silent while the party is full.
+            // The grateful path reads a genuine rescue out of the turn's own
+            // facts; the stray path reads a soul who has now walked far enough
+            // and seen enough to ask.
+            Companions::maybeOfferGrateful($scene, $dice, $this->rescuedThisTurn($captivesBefore))
+                ?? Companions::maybeOfferStray($scene);
+
+            // The signature, picked once, the moment a bond first reaches
+            // fellow — with this turn's own seeded stream, so a re-resolved
+            // turn hands the same companion the same trick.
+            foreach (Companions::present($scene) as $companion) {
+                Companions::ensureSignature($companion, $dice);
+            }
+
+            // What the player's own beats settled about who walks with them.
+            foreach ($outcomes as $outcome) {
+                $key = match ($outcome->skipped ? null : $outcome->verb) {
+                    'companion_welcome' => 'joined',
+                    'companion_dismiss' => 'parted',
+                    default => null,
+                };
+                if ($key !== null) {
+                    $companionEvents[$key] = array_merge($companionEvents[$key] ?? [], $outcome->facts);
+                }
+            }
+
             $turn->update([
                 'status' => Turn::STATUS_COMPLETE,
                 'resolution' => [
@@ -276,6 +323,11 @@ class TurnResolver
                     // ordinary chapter carries no instructions about a body
                     // that is fine.
                     'fall' => $fall['record'] ?? null,
+                    // What passed between them and whoever walks beside them —
+                    // the fire before this vignette, a blow somebody stepped in
+                    // front of, a joining, a parting, a loss. Null on the many
+                    // turns none of that happened, and never a number.
+                    'companions' => $companionEvents === [] ? null : $companionEvents,
                 ],
                 'branch_trigger' => $trigger->value,
                 'meters_snapshot' => $character->meters,
@@ -291,7 +343,7 @@ class TurnResolver
             // reference to what came back, because a memento is memory and
             // must never be able to reach the mechanics that made it.
             Mementos::mint($turn, $this->mementoTriggers(
-                $turn, $sceneBefore, $scene, $elitesBefore, $captivesBefore, $fall, $reactionRolls,
+                $turn, $sceneBefore, $scene, $elitesBefore, $captivesBefore, $companionsBefore, $fall, $reactionRolls,
             ));
 
             // The tale that ran out of body. No next turn is opened — there is
@@ -338,8 +390,22 @@ class TurnResolver
             }
 
             $playerFailure = $conditions['prior_failure'];
-            $outcomes[] = $this->resolveBeat($card, $choice, $character, $scene, $dice, $conditions, $turn);
+            $health = (int) ($companion->stats['health']['current'] ?? 0);
+
+            $outcome = $this->resolveBeat($card, $choice, $character, $scene, $dice, $conditions, $turn);
+            $outcomes[] = $outcome;
             $conditions['prior_failure'] = $playerFailure;
+
+            // The bond moves on the facts this beat just fixed, and on nothing
+            // else. A request that landed is one more reason to trust them; a
+            // request that got them hurt is a dent, not a break — and the dent
+            // is never keyed, because getting them hurt costs every time.
+            $companion = $companion->fresh();
+            if ((int) ($companion->stats['health']['current'] ?? 0) < $health) {
+                Companions::nudge($companion, -1);
+            } elseif ($outcome->succeeded()) {
+                Companions::nudge($companion, 1, $turn, 'assist');
+            }
         }
 
         return $outcomes;
@@ -594,6 +660,41 @@ class TurnResolver
                 $conditions['shield_actor_id'] = $card['target']['id'] ?? null;
                 $facts[] = 'They kept their captive between themselves and the danger.';
                 break;
+            case 'companion_welcome':
+                // The answer to somebody who already asked. Roll-free, and it
+                // has to be: the other half of the consent has been given, and
+                // a die that could refuse a yes would be the engine overruling
+                // both parties at once.
+                $asker = Actor::find($card['target']['id'] ?? 0);
+                if ($asker === null || $asker->status !== 'active' || ! isset($asker->tags['offering'])) {
+                    $facts[] = 'Whoever was asking had already moved on.';
+                    break;
+                }
+                if (Companions::atCap($scene)) {
+                    $facts[] = "There was no room beside them for {$asker->name}, and both of them knew it.";
+                    break;
+                }
+                $via = $asker->tags['offering'];
+                Companions::join($asker, $via);
+                $facts[] = "{$asker->name} fell in beside them — a companion now, walking the same tale.";
+                break;
+
+            case 'companion_dismiss':
+                // Parting is never a dead choice: they go, and they leave one
+                // true thing behind. Colour, and nothing the engine will ever
+                // charge or credit anyone for.
+                $leaving = Actor::find($card['target']['id'] ?? 0);
+                if ($leaving === null || $leaving->status !== 'active') {
+                    $facts[] = 'Whoever was asking had already moved on.';
+                    break;
+                }
+                $tags = $leaving->tags ?? [];
+                unset($tags['offering'], $tags['following'], $tags['stray_scenes'], $tags['witnessed']);
+                $leaving->update(['status' => 'departed', 'tags' => $tags]);
+                $facts[] = "They thanked {$leaving->name} and sent them on their way.";
+                $facts[] = Companions::partingGift($leaving);
+                break;
+
             case 'drop':
                 // Putting a thing down is never in doubt, and it must never
                 // be: a player who picks something up has to be able to get
@@ -984,10 +1085,13 @@ class TurnResolver
 
             case 'recruit':
                 $actor = Actor::find($card['target']['id']);
-                if ($succeeded && $actor !== null) {
-                    $tags = ($actor->tags ?? []) + ['loyalty' => 1];
-                    $actor->update(['kind' => 'companion', 'tags' => $tags]);
+                if ($succeeded && $actor !== null && ! Companions::atCap($scene)) {
+                    // The asked path into the same one door every companion
+                    // comes through, so the bond ladder has exactly one entrance.
+                    Companions::join($actor, Companions::ASKED);
                     $facts[] = "{$actor->name} fell in beside them — a companion now, walking the same tale.";
+                } elseif ($succeeded && $actor !== null) {
+                    $facts[] = "{$actor->name} was willing enough — but there was no room beside them for another, and both of them could see it.";
                 } elseif ($degree === BeatOutcome::PARTIAL && $actor !== null) {
                     $tags = $actor->tags ?? [];
                     $tags['disposition'] = 'swayed';
@@ -1006,10 +1110,10 @@ class TurnResolver
                     break;
                 }
                 if ($succeeded) {
-                    $conditions['blocked'] = ['id' => $threat->id, 'full' => true];
+                    $conditions['blocked'] = ['id' => $threat->id, 'full' => true, 'companion_id' => $companion->id];
                     $facts[] = "{$companion->name} planted themselves in {$threat->name}'s path — the way is held.";
                 } elseif ($degree === BeatOutcome::PARTIAL) {
-                    $conditions['blocked'] = ['id' => $threat->id, 'full' => false];
+                    $conditions['blocked'] = ['id' => $threat->id, 'full' => false, 'companion_id' => $companion->id];
                     $facts[] = "{$companion->name} slowed {$threat->name}, but couldn't hold the line clean.";
                 } else {
                     // The failed block costs the companion, not the player.
@@ -1082,6 +1186,82 @@ class TurnResolver
                 }
                 break;
 
+            case 'companion_harry':
+                // The fellow's own trick: drag the angle a foe was working off
+                // the player and onto themselves. It reuses the block's own
+                // vocabulary rather than inventing a second one — a partial
+                // hold, priced by the same dodge part the block already earns.
+                $companion = Actor::find($card['target']['id']);
+                $quarry = $scene->visibleActors()->first(fn (Actor $a) => $a->kind === 'enemy');
+                if ($companion === null || $quarry === null) {
+                    $facts[] = 'There was nobody left to worry at.';
+                    break;
+                }
+                if ($succeeded) {
+                    $tags = $quarry->tags ?? [];
+                    $had = (bool) ($tags['angle'] ?? false);
+                    unset($tags['angle']);
+                    $quarry->update(['tags' => $tags]);
+                    $conditions['blocked'] = ['id' => $quarry->id, 'full' => false, 'companion_id' => $companion->id];
+                    $facts[] = $had
+                        ? "{$companion->name} came at {$quarry->name} from the wrong side, and the angle they had worked for came off."
+                        : "{$companion->name} worried at {$quarry->name} from the wrong side, and kept them turned away.";
+                } else {
+                    // Getting in reach of it is the whole cost of the card.
+                    $stats = $companion->stats;
+                    $stats['health']['current'] = max(0, (int) ($stats['health']['current'] ?? 1) - 1);
+                    $companion->update(['stats' => $stats]);
+                    if ($stats['health']['current'] === 0) {
+                        $companion->update(['status' => 'downed']);
+                        $facts[] = "{$quarry->name} caught {$companion->name} coming in, and the companion went down under it.";
+                    } else {
+                        $facts[] = "{$companion->name} came in too close and {$quarry->name} made them pay for it.";
+                    }
+                }
+                break;
+
+            case 'companion_distract':
+                // Pull the attention off whatever it was gathering for. The
+                // windup dies and they go back to circling — the existing
+                // telegraph vocabulary, moved, never a new state.
+                $companion = Actor::find($card['target']['id']);
+                $mark = $scene->visibleActors()
+                    ->first(fn (Actor $a) => $a->kind === 'enemy' && ($a->tags['intent'] ?? null) === 'windup')
+                    ?? $scene->visibleActors()->first(fn (Actor $a) => $a->kind === 'enemy');
+                if ($companion === null || $mark === null) {
+                    $facts[] = 'There was nobody left to pull off anything.';
+                    break;
+                }
+                if ($succeeded) {
+                    $tags = $mark->tags ?? [];
+                    $wound = ($tags['intent'] ?? null) === 'windup';
+                    $tags['intent'] = 'circle';
+                    unset($tags['angle']);
+                    $mark->update(['tags' => $tags]);
+                    $facts[] = $wound
+                        ? "{$companion->name} gave {$mark->name} something they had to answer, and the heavy blow came apart half-made."
+                        : "{$companion->name} pulled {$mark->name}'s attention wide, and they went back to circling.";
+                } else {
+                    $facts[] = "{$mark->name} did not so much as look at {$companion->name}.";
+                }
+                break;
+
+            case 'companion_forage':
+                // Walking the ground, on their legs instead of yours.
+                $companion = Actor::find($card['target']['id']);
+                $kept = $scene->features()->get()->first(
+                    fn ($f) => ($f->state['hidden'] ?? false) && ! ($f->state['destroyed'] ?? false),
+                );
+                if ($succeeded && $kept !== null) {
+                    $kept->update(['state' => array_merge($kept->state ?? [], ['hidden' => false])]);
+                    $facts[] = ($companion?->name ?? 'The companion')." came back with what this place was keeping to itself: {$kept->name}.";
+                } elseif ($succeeded) {
+                    $facts[] = ($companion?->name ?? 'The companion').' walked the whole of it and found nothing anybody had missed.';
+                } else {
+                    $facts[] = ($companion?->name ?? 'The companion').' quartered the ground and came back with nothing to show for it.';
+                }
+                break;
+
             case 'hurl':
                 // Two different things leave your hands this way, and the
                 // TARGET says which. A held captive is thrown as a captive;
@@ -1151,9 +1331,12 @@ class TurnResolver
      *                              scene actually cast, so the dice table can
      *                              show the enemy's roll instead of leaving
      *                              the player to infer it from the prose.
+     * @param  array  $companionEvents  Out: anything the people beside them did
+     *                                  about the answer — a line held, a blow
+     *                                  stepped in front of.
      * @return list<string>
      */
-    private function enemyReaction(Character $character, Scene $scene, Dice $dice, array $conditions, bool $playerEscaped, array &$rolls): array
+    private function enemyReaction(Character $character, Scene $scene, Dice $dice, array $conditions, bool $playerEscaped, array &$rolls, Turn $turn, array &$companionEvents): array
     {
         if ($playerEscaped || $character->fresh()->status !== 'alive') {
             return [];
@@ -1198,6 +1381,14 @@ class TurnResolver
             $blocked = $conditions['blocked'] ?? null;
             if ($blocked !== null && $blocked['id'] === $enemy->id && $blocked['full']) {
                 $facts[] = "{$enemy->name} was held at bay and never reached them.";
+
+                // A line that actually held is the clearest thing a companion
+                // can do for someone, and the bond reads it directly off the
+                // fact rather than off the request that asked for it.
+                $holder = Actor::find($conditions['blocked']['companion_id'] ?? 0);
+                if ($holder !== null) {
+                    Companions::nudge($holder, 1, $turn, 'assist');
+                }
 
                 continue;
             }
@@ -1285,6 +1476,26 @@ class TurnResolver
                     continue;
                 }
                 $crown = $crit === BeatOutcome::CRIT_SUCCESS ? 'CRITICAL HIT: ' : '';
+
+                // The fall that did not happen because of who was beside them.
+                // Unbidden, engine-triggered, no card and no player input — and
+                // it fires HERE, before the damage lands, which is what puts it
+                // ahead of the scar path: there is no fall left for Scars to
+                // roll against once the blow has been taken by somebody else.
+                $intercepted = ($companionEvents['interception'] ?? null) === null
+                    ? Companions::intercept($character, $scene, $turn, $damage)
+                    : null;
+                if ($intercepted !== null) {
+                    $companionEvents['interception'] = $intercepted;
+                    $facts[] = $crown.$intercepted['fact'];
+                    $rolls[] = $record + [
+                        'degree' => BeatOutcome::SUCCESS,
+                        'outcome' => "{$intercepted['companion']} took the blow — {$damage} damage",
+                    ];
+
+                    continue;
+                }
+
                 $shield = $conditions['shielded'] ? Actor::find($conditions['shield_actor_id'] ?? 0) : null;
                 if ($shield !== null && $shield->status === 'restrained') {
                     // The captive absorbs the blow meant for the player.
@@ -1493,18 +1704,19 @@ class TurnResolver
      * and what (if anything) becomes an object on the shelf is decided
      * entirely outside the engine, by App\Services\Mementos.
      *
-     * The list is closed and its priority order lives with the service. Two
-     * entries are not detected here yet: `endeavor_filled` waits on a clock
-     * system, and anything later (a companion lost) arrives the same way —
-     * one more block in this method, and nothing else anywhere.
+     * The list is closed and its priority order lives with the service. One
+     * entry is not detected here yet: `endeavor_filled` waits on a clock
+     * system, and anything later arrives the same way — one more block in this
+     * method, and nothing else anywhere.
      *
      * @param  list<int>  $elitesBefore
      * @param  list<int>  $captivesBefore
+     * @param  list<int>  $companionsBefore
      * @param  array{scene:?Scene, record:array}|null  $fall
      * @param  list<array>  $reactionRolls
      * @return list<array{trigger:string, subject:string, place:string}>
      */
-    private function mementoTriggers(Turn $turn, Scene $before, Scene $after, array $elitesBefore, array $captivesBefore, ?array $fall, array $reactionRolls): array
+    private function mementoTriggers(Turn $turn, Scene $before, Scene $after, array $elitesBefore, array $captivesBefore, array $companionsBefore, ?array $fall, array $reactionRolls): array
     {
         $candidates = [];
         $place = $before->title;
@@ -1531,6 +1743,16 @@ class TurnResolver
             ];
         }
 
+        // Somebody who was walking beside them at the top of the turn and is
+        // not walking anywhere any more. Rarer than everything below it and
+        // rightly so: a companion lost is the most expensive thing in the
+        // system, and the shelf is where that cost stops being a status.
+        foreach (Actor::whereIn('id', $companionsBefore)->get() as $companion) {
+            if (in_array($companion->status, Companions::LOST_STATUSES, true)) {
+                $candidates[] = ['trigger' => 'companion_lost', 'subject' => $companion->name, 'place' => $place];
+            }
+        }
+
         // An elite who was on their feet at the top of the turn and is down
         // or bound at the end of it.
         foreach (Actor::whereIn('id', $elitesBefore)->get() as $elite) {
@@ -1555,6 +1777,25 @@ class TurnResolver
         }
 
         return $candidates;
+    }
+
+    /**
+     * The rescues in this turn's own facts: somebody who was in a grip when it
+     * began, is loose and whole now, and was never an enemy. It is the one
+     * rescue the engine can read without guessing, and it is what the grateful
+     * path is allowed to fire off.
+     *
+     * @param  list<int>  $captivesBefore
+     * @return list<int>
+     */
+    private function rescuedThisTurn(array $captivesBefore): array
+    {
+        if ($captivesBefore === []) {
+            return [];
+        }
+
+        return Actor::whereIn('id', $captivesBefore)->where('status', 'active')
+            ->where('kind', '!=', 'enemy')->pluck('id')->all();
     }
 
     private function evaluateTrigger(Character $character, Scene $scene, array $outcomes, bool $moved, ?Actor $newThreat, bool $wasInDanger): BranchTrigger
@@ -1592,8 +1833,20 @@ class TurnResolver
      * with its own draw of the zone's features (some hidden, waiting to be
      * found) and its own inhabitants — never a copy of the ground just left.
      */
-    private function transitionScene(Scene $scene, Dice $dice, Turn $turn): Scene
+    private function transitionScene(Scene $scene, Dice $dice, Turn $turn, array &$companionEvents = []): Scene
     {
+        // Scene exit decides what became of whoever went down in it. Rolled
+        // against the bond and nothing else, and only ever here: a companion on
+        // the floor stays on the floor, visible and breathing, for as long as
+        // the scene they fell in lasts.
+        $loss = Companions::resolveDowned(
+            $scene, $dice,
+            fightLost: $scene->actors()->where('status', 'active')->where('kind', 'enemy')->exists(),
+        );
+        if ($loss['facts'] !== []) {
+            $companionEvents['loss'] = array_merge($companionEvents['loss'] ?? [], $loss['facts']);
+        }
+
         $scene->update(['status' => 'past']);
 
         // A venture crosses into the pre-forged frontier zone; ordinary
@@ -1652,6 +1905,18 @@ class TurnResolver
         // Companions walk the tale, not the scene: they come along.
         $scene->actors()->where('kind', 'companion')->where('status', 'active')
             ->update(['scene_id' => $next->id]);
+
+        // And so does anyone who has taken to following without being asked.
+        Companions::walkStrays($scene, $next);
+
+        // New country walked together is worth a point on its own. The road
+        // itself is one of the four things that move a bond, and it is the only
+        // one nobody has to survive anything for.
+        if ($next->zone_id !== $scene->zone_id) {
+            foreach (Companions::present($next) as $companion) {
+                Companions::nudge($companion, 1, $turn, 'road');
+            }
+        }
 
         // New ground, new air — one roll, kept for as long as this scene lasts.
         // Last, so the draws above keep the exact stream they have always had.

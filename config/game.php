@@ -300,6 +300,46 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Companions (what accumulates between you and whoever walks beside you)
+    |--------------------------------------------------------------------------
+    | A bond is one small integer on the companion's own actor row, moved ONLY
+    | by engine events the resolver already rolled — a request that landed, a
+    | block that took the blow meant for the player, a night at a fire, a border
+    | crossed together. Narration never moves it, and Claude is only ever told
+    | the tier in plain words.
+    |
+    | The thresholds are the whole shape of the arc. `fellow` at two means the
+    | signature request arrives inside the first fight or two — early enough to
+    | feel like the companion becoming themselves rather than a reward unlocked.
+    | `sworn` at five is deliberately several chapters out: the interception is
+    | the emotional payload of the feature and it has to be earned, or the fall
+    | that did not happen means nothing.
+    |
+    | `cap` is two because coordinating a third is a spreadsheet, not a party —
+    | while full, a candidate's offer simply never fires.
+    |
+    | The two finding odds are the world's side of it. `grateful` is generous
+    | (a rescue is rare and the offer is refusable) and `stray` is deliberately
+    | tiny: it fires per spawned soul, and a scene where every bystander tags
+    | along is a scene with no bystanders in it.
+    |
+    | `sworn_final` is the one place a companion can be lost for good to an
+    | interception. Rare, and only in a fight the player did not win.
+    */
+
+    'companions' => [
+        'cap' => 2,
+        'bond_max' => 6,
+        'tiers' => ['fellow' => 2, 'sworn' => 5],
+        'grateful_chance' => 0.40,
+        'stray_chance' => 0.08,
+        // Scenes a stray must walk before it will ask to stay.
+        'stray_scenes' => 2,
+        'sworn_final_chance' => 0.25,
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
     | Vignette shape
     |--------------------------------------------------------------------------
     */

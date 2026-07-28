@@ -109,6 +109,12 @@ export interface DowntimeStance {
     id: string;
     label: string;
     terms: string;
+    /**
+     * Present only on the stances that take words — today, the campfire. The
+     * line is colour for the chapter and never touches a number, exactly like
+     * a per-beat note.
+     */
+    note?: string;
 }
 
 /** The wait ahead: what is offered, and what has already been chosen for it. */

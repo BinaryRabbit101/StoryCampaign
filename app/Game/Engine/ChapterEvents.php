@@ -58,6 +58,11 @@ class ChapterEvents
         'companion_flank' => 'ally',
         'companion_scout' => 'ally',
         'companion_strike' => 'ally',
+        'companion_harry' => 'ally',
+        'companion_distract' => 'ally',
+        'companion_forage' => 'ally',
+        'companion_welcome' => 'ally',
+        'companion_dismiss' => 'parley',
         // The scene's own verbs — they never appear on a card, but the dice
         // table shows the enemy's roll beside the player's.
         'attack' => 'enemy',
