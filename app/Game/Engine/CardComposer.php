@@ -134,6 +134,11 @@ class CardComposer
             // commit rather than after it.
             'hour' => Hours::of($scene->campaign),
             'scars' => Scars::names($character),
+            // And what this ground remembers about them. It prices the social
+            // cards before the commit exactly as the air prices a climb — a
+            // town that spits their name is a fact the player can read off the
+            // card, not a number that turns up once the die is already cast.
+            'standing' => Standings::of($scene),
             // The endeavor under way, if there is one: its name and the exact
             // verbs that move it, read straight off the clock's own row. Every
             // qualifying card quotes it in its forecast, so "advances the
