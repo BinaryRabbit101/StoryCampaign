@@ -437,6 +437,28 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Previously On (the returning-player recap)
+    |--------------------------------------------------------------------------
+    | A short, dismissible panel above the form, compiled from strings the
+    | engine already persisted — never generated, never a Claude call.
+    |
+    | `absence_hours` is the whole gate: below it the player has not been away
+    | long enough to have lost the thread, and a recap of a turn they took over
+    | breakfast is noise. Twelve hours is one night, which is the absence this
+    | game is actually built around.
+    |
+    | `fact_lines` keeps the middle section skimmable. Four lines is a glance;
+    | ten is the chapter again, badly, and a player who has to read the recap
+    | properly would rather have read the chapter.
+    */
+
+    'recap' => [
+        'absence_hours' => 12,
+        'fact_lines' => 4,
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
     | Vignette shape
     |--------------------------------------------------------------------------
     */

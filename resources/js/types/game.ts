@@ -263,6 +263,24 @@ export interface SituationGroup {
     items: string[];
 }
 
+/** One heading of the returning-player recap, and the lines under it. */
+export interface RecapSection {
+    key: string;
+    title: string;
+    lines: string[];
+}
+
+/**
+ * Previously, on this tale. Compiled server-side from strings the engine
+ * already wrote — never generated, and null unless the player has actually
+ * been away. Dismissal is per open turn and lives in localStorage, so the
+ * server re-offers it on its own after the next long absence.
+ */
+export interface RecapPanel {
+    turn_id: number;
+    sections: RecapSection[];
+}
+
 /**
  * A keepsake a notable moment left behind. Memory, not equipment: it grants
  * nothing, costs nothing, and cannot be spent — it is here to be read, and to
