@@ -20,6 +20,7 @@ import type {
     CharacterMeters,
     DowntimeOffer,
     GrowthMessage,
+    Memento,
     RollTable,
     SituationGroup,
     SlotChoice,
@@ -76,6 +77,11 @@ const props = defineProps<{
          */
         downtime: DowntimeOffer | null;
     } | null;
+    /**
+     * The shelf. What notable moments left behind, oldest first — read-only
+     * in the strictest sense: there is nothing here to equip, spend, or use.
+     */
+    mementos: Memento[];
     /** The evolution conversation: what was asked, and how the world answered. */
     growth: GrowthMessage[];
     /**
@@ -1018,6 +1024,42 @@ const healthPct = computed(
                     </form>
                 </div>
             </Transition>
+        </div>
+
+        <!-- The shelf.
+             Objects, not an achievement list: each one is a thing the tale
+             left behind, said in the tale's own words, with the chapter it
+             came out of. Nothing here is equipment and nothing here can be
+             spent — it exists to be read now and bound into the book later.
+             An empty shelf draws nothing at all. -->
+        <div
+            v-if="mementos.length"
+            class="sc-rise rounded-xl border border-sidebar-border/70 bg-background/60 p-4 backdrop-blur-sm dark:border-sidebar-border"
+            style="animation-delay: 40ms"
+        >
+            <p
+                class="mb-2 text-[10px] tracking-widest text-muted-foreground uppercase"
+            >
+                What you are carrying home
+            </p>
+            <ul class="space-y-2">
+                <li
+                    v-for="(keepsake, i) in mementos"
+                    :key="`${keepsake.name}-${i}`"
+                >
+                    <p class="font-serif text-sm">{{ keepsake.name }}</p>
+                    <p class="text-xs text-muted-foreground">
+                        <span class="italic">{{ keepsake.line }}</span>
+                        <a
+                            v-if="keepsake.chapter !== null"
+                            :href="`/campaigns/${campaign.id}/book#chapter-${keepsake.chapter}`"
+                            class="ml-1 underline decoration-dotted underline-offset-4 hover:text-foreground"
+                        >
+                            — chapter {{ keepsake.chapter }}
+                        </a>
+                    </p>
+                </li>
+            </ul>
         </div>
 
         <!-- Latest chapter — hidden while the world turns. Once a choice is

@@ -397,6 +397,28 @@ class Grudges
     }
 
     /**
+     * Every score this turn closed for good, by name.
+     *
+     * Read off the append-only history rather than a flag, so it answers for
+     * all three ways a grudge ends — killed, kept, or bargained out — without
+     * any of them having to remember to announce it. Nothing in the engine
+     * consumes this; it exists so the turn's own facts can say a rival was
+     * settled, which is one of the moments the tale keeps a keepsake from.
+     *
+     * @return list<string>
+     */
+    public static function settledNames(Turn $turn): array
+    {
+        return Grudge::where('campaign_id', $turn->campaign_id)
+            ->where('status', 'resolved')->orderBy('id')->get()
+            ->filter(fn (Grudge $grudge) => collect($grudge->history)->contains(
+                fn (array $entry) => ($entry['event'] ?? null) === 'resolved'
+                    && ($entry['turn_id'] ?? null) === $turn->id,
+            ))
+            ->pluck('actor_name')->values()->all();
+    }
+
+    /**
      * The board's line for a returned grudge the player can see: the fact
      * that they have met, and where the last parting happened.
      *

@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Api;
 use App\Game\Engine\Downtime;
 use App\Http\Controllers\Controller;
 use App\Models\User;
+use App\Services\Mementos;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Str;
@@ -55,6 +56,10 @@ class WidgetController extends Controller
                 ? Downtime::flavor($turn->downtime['stance'])
                 : null,
             'narrating' => $narrating,
+            // The newest thing on the shelf, by name. Flavor only, like the
+            // downtime line: the widget reports what the tale is carrying,
+            // and there is nothing to do with it here or anywhere.
+            'memento' => Mementos::latestName($campaign),
             'turn_number' => $turn?->number,
             'chapter_count' => $campaign->chapters()->count(),
             'companions' => $scene?->actors()

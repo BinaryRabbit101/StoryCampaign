@@ -27,6 +27,14 @@
         .chronicle-mark { text-align: center; color: #999; letter-spacing: 0.5em; margin-bottom: 1rem; }
         .body p { text-indent: 1.5em; margin: 0 0 0.2rem; }
         .body p:first-child { text-indent: 0; }
+        .shelf { margin-top: 4rem; page-break-before: always; }
+        .shelf h2 {
+            font-size: 1rem; font-weight: normal; letter-spacing: 0.25em;
+            text-transform: uppercase; color: #888; text-align: center;
+        }
+        .shelf .keepsake { margin-top: 2rem; text-align: center; page-break-inside: avoid; }
+        .shelf .keepsake .line { font-style: italic; color: #444; margin-top: 0.25rem; }
+        .shelf .keepsake .cite { font-size: 0.85rem; color: #888; margin-top: 0.25rem; }
     </style>
 </head>
 <body>
@@ -67,5 +75,22 @@
             </div>
         </div>
     @endforeach
+
+    {{-- What you carried home. Compiled, not written: the words were set down
+         when each moment happened. Nothing at all when the shelf is empty. --}}
+    @if (!empty($book['mementos']))
+        <div class="shelf">
+            <h2>What you carried home</h2>
+            @foreach ($book['mementos'] as $memento)
+                <div class="keepsake">
+                    <div class="name">{{ $memento['name'] }}</div>
+                    <div class="line">{{ $memento['line'] }}</div>
+                    @if ($memento['chapter'])
+                        <div class="cite">— chapter {{ $memento['chapter'] }}</div>
+                    @endif
+                </div>
+            @endforeach
+        </div>
+    @endif
 </body>
 </html>

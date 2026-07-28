@@ -9,6 +9,13 @@ interface BookChapter {
     body: string;
 }
 
+/** A keepsake the tale left behind — inert, and here only to be read. */
+interface BookMemento {
+    name: string;
+    line: string;
+    chapter: number | null;
+}
+
 const props = defineProps<{
     campaign: { id: number; name: string; status: string };
     book: {
@@ -19,6 +26,7 @@ const props = defineProps<{
         ended_early: boolean;
         character: string | null;
         chapters: BookChapter[];
+        mementos: BookMemento[];
     };
 }>();
 
@@ -79,8 +87,9 @@ function heading(chapter: BookChapter): string | null {
         <!-- Chapters -->
         <article
             v-for="chapter in book.chapters"
+            :id="`chapter-${chapter.number}`"
             :key="`${chapter.kind}-${chapter.number}`"
-            class="mt-14"
+            class="mt-14 scroll-mt-8"
         >
             <h2
                 v-if="heading(chapter)"
@@ -108,6 +117,37 @@ function heading(chapter: BookChapter): string | null {
                 {{ chapter.body }}
             </div>
         </article>
+
+        <!-- The closing section: what the tale left behind, in the order it
+             happened, each pointing back at the chapter it came out of. An
+             empty shelf gets no section at all — a heading over nothing is
+             worse than silence. -->
+        <section v-if="book.mementos.length" class="mt-20">
+            <h2
+                class="text-center text-sm tracking-[0.25em] text-muted-foreground uppercase"
+            >
+                What you carried home
+            </h2>
+            <ul class="mt-6 space-y-5">
+                <li
+                    v-for="(keepsake, i) in book.mementos"
+                    :key="`${keepsake.name}-${i}`"
+                    class="text-center"
+                >
+                    <p class="font-serif">{{ keepsake.name }}</p>
+                    <p class="mt-1 text-sm text-muted-foreground italic">
+                        {{ keepsake.line }}
+                    </p>
+                    <a
+                        v-if="keepsake.chapter !== null"
+                        :href="`#chapter-${keepsake.chapter}`"
+                        class="mt-1 inline-block text-xs text-muted-foreground underline decoration-dotted underline-offset-4"
+                    >
+                        — chapter {{ keepsake.chapter }}
+                    </a>
+                </li>
+            </ul>
+        </section>
 
         <p
             v-if="!book.chapters.length"

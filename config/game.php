@@ -276,6 +276,30 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Mementos (what you carried home)
+    |--------------------------------------------------------------------------
+    | Notable resolved moments leave a keepsake behind, and the shelf compiles
+    | into the finished book as its closing section. They grant nothing, ever —
+    | which is why play may mint them at all, where items still enter a world
+    | only through evolution.
+    |
+    | Both numbers exist to keep the shelf SPARSE. A chapter may leave at most
+    | one thing behind (when several moments qualify, the rarest wins — the
+    | priority order is the trigger list in App\Services\Mementos), and a tale
+    | leaves about a dozen. Forty trinkets is an inventory; nine is a life, and
+    | a keepsake that turns up every turn stops being a keepsake by the third one.
+    |
+    | WHICH moments qualify is not tunable here: that is the closed trigger
+    | list, detected by the resolver from facts it has already fixed.
+    */
+
+    'mementos' => [
+        'per_chapter' => 1,
+        'per_campaign' => 12,
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
     | Vignette shape
     |--------------------------------------------------------------------------
     */

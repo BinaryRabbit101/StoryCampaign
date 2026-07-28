@@ -13,6 +13,7 @@ use App\Game\TurnSlot;
 use App\Models\Campaign;
 use App\Models\Turn;
 use App\Services\Claude\Narrator;
+use App\Services\Mementos;
 use App\Services\PlayerPresence;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
@@ -105,6 +106,10 @@ class PlayController extends Controller
                 // offering something already gone.
                 'downtime' => $turn->isOpen() ? $this->downtimeOffer($turn) : null,
             ],
+            // The shelf: what this tale has left behind, in the order it
+            // happened. Inert in every direction — it is here to be read, and
+            // there is nothing on it to spend.
+            'mementos' => Mementos::shelf($campaign),
             // The evolution conversation, so a request and the world's answer
             // to it stay on screen together. Without this the answer was
             // written to the database and shown to nobody.

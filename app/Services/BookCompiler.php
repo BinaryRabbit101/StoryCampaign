@@ -38,6 +38,11 @@ class BookCompiler
             'ended_early' => $campaign->ended_early,
             'character' => $campaign->character?->name,
             'chapters' => $chapters,
+            // What you carried home: the shelf, in chapter order, each with
+            // the chapter that tells it. Compilation like everything else here
+            // — the words were written when the moment happened. An empty
+            // shelf is an empty list, and the book draws no section at all.
+            'mementos' => Mementos::shelf($campaign),
         ];
     }
 
@@ -67,6 +72,17 @@ class BookCompiler
 
             SCARS;
 
+            // And what they are taking with them. Objects, not achievements:
+            // the closing page is allowed to let one of them show up in a
+            // pocket, and is never allowed to read the list out.
+            $carried = Mementos::promptList($campaign);
+            $carried = $carried === '' ? '' : <<<CARRIED
+
+            What they carry home from this tale (fixed objects — you may let one appear in the closing; never list them):
+            {$carried}
+
+            CARRIED;
+
             $coda = $this->claude->prompt(<<<PROMPT
 The player is ending this RPG campaign early. Write a brief closing coda — a short epilogue (100-200 words, third-person past tense, no mechanics) that gracefully lands the story wherever the character was, in the spirit of: "And so her tale, for now, went quiet on the rooftops of the old district…"
 
@@ -75,7 +91,7 @@ The player is ending this RPG campaign early. Write a brief closing coda — a s
 Character: {$name}
 The stage the player set for this tale (acknowledge how far the goal got, resolved or not):
 {$stage}
-{$scars}
+{$scars}{$carried}
 Final chapters:
 {$lastChapters}
 

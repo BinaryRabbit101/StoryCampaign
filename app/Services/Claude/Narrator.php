@@ -10,6 +10,7 @@ use App\Models\Chapter;
 use App\Models\Turn;
 use App\Notifications\TurnReadyNotification;
 use App\Services\BookCompiler;
+use App\Services\Mementos;
 use App\Services\PlayerPresence;
 use Illuminate\Support\Facades\File;
 
@@ -49,6 +50,18 @@ class Narrator
         // the next narration reads so promises and grudges outlive the
         // two-chapter window. A missing line costs only that chapter's entry.
         $campaign->appendSynopsis($chapter->number, $response['synopsis_line'] ?? null);
+
+        // The keepsake this chapter leaves behind already exists — the engine
+        // minted it during resolution, with its own words, and it stands on the
+        // shelf whether this call ever happened. All that lands here is better
+        // wording (clamped, and refused whole if it strays) and the stamp of
+        // the chapter it belongs to, so the book can cite the page. A failure
+        // costs the wording and nothing else.
+        try {
+            Mementos::reword($turn, $chapter, $response['memento'] ?? null);
+        } catch (\Throwable $e) {
+            report($e);
+        }
 
         // The tale of someone who spent everything. The fall past the scar cap
         // ends the campaign — and it closes HERE, behind the chapter that tells
@@ -168,6 +181,17 @@ class Narrator
         $fall = Scars::narratorBlock($turn);
         $marks = $fall === '' ? Scars::marksBlock($character) : '';
 
+        // The one thing this chapter left on the shelf, if it left anything.
+        // The object is fixed and already written down; the invitation is only
+        // to word it better than the engine could, inside a clamp. Empty on
+        // every ordinary chapter, so nothing asks for a keepsake that is not there.
+        $keepsake = Mementos::narratorBlock($turn);
+        $mementoField = $keepsake === ''
+            ? ''
+            : ', "memento": {"name": "<the keepsake\'s name, at most '.Mementos::MAX_NAME_WORDS
+                .' words>", "line": "<one plain sentence about it, at most '.Mementos::MAX_LINE_WORDS
+                .' words — or repeat the given words exactly>"}';
+
         // How the wait before this vignette was spent: one engine-written
         // sentence, plain and factual, carrying no numbers and no name for
         // what the player chose. It is a clause of colour at the open, not a
@@ -242,7 +266,7 @@ Some beats carry the player's own words for that moment. Those words are voice a
 
 ## How the scene answered
 {$reaction}
-{$figures}{$fall}{$criticals}
+{$figures}{$fall}{$keepsake}{$criticals}
 ## Where the vignette stops
 {$turn->branch_trigger}: the chapter must end on this note, at a clean decision point, leaving the situation open for the player's next choice. {$wordLow}-{$wordHigh} words.
 
@@ -252,7 +276,7 @@ Some beats carry the player's own words for that moment. Those words are voice a
 The reader makes their next choice from the page itself: close the chapter inside this moment, with the people and surroundings named above present in the prose, so nothing the player can act on appears unannounced. Do not summarize or list them — let the scene hold them naturally.
 
 Respond with ONLY a JSON object:
-{"intent_line": "<the chapter's italic epigraph — the ONE place a turned phrase is welcome; a compact line in the spirit of 'She chose to take the rooftops.' or 'They read the shack before they read the woman.' The prose register's image limit does not bind this single line. Or null.>", "chapter": "<the chapter prose>", "synopsis_line": "<ONE factual line for the campaign's running record: what this chapter changed — names met, promises made, injuries taken, debts owed. Plain record-keeping, no style.>"}
+{"intent_line": "<the chapter's italic epigraph — the ONE place a turned phrase is welcome; a compact line in the spirit of 'She chose to take the rooftops.' or 'They read the shack before they read the woman.' The prose register's image limit does not bind this single line. Or null.>", "chapter": "<the chapter prose>", "synopsis_line": "<ONE factual line for the campaign's running record: what this chapter changed — names met, promises made, injuries taken, debts owed. Plain record-keeping, no style.>"{$mementoField}}
 PROMPT;
     }
 

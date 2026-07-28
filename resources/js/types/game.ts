@@ -221,6 +221,18 @@ export interface SituationGroup {
     items: string[];
 }
 
+/**
+ * A keepsake a notable moment left behind. Memory, not equipment: it grants
+ * nothing, costs nothing, and cannot be spent — it is here to be read, and to
+ * be bound into the closing pages of the book.
+ */
+export interface Memento {
+    name: string;
+    line: string;
+    /** The chapter that tells it; null until that chapter has been written. */
+    chapter: number | null;
+}
+
 /** Something physically in the character's hands. */
 export interface CarriedThing {
     name: string;

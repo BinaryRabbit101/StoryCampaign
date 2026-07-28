@@ -141,7 +141,14 @@ adjudicates legality or outcomes — it is only ever handed resolved facts.
   `WorldEvolver` (per-campaign
   budgeted evolution + Chronicle), `Interviewer` (creation/growth interviews).
 - `app/Services/` — `CapabilityClamp` (bible bounds + constraint re-coupling),
-  `TurnStarter`, `BookCompiler` (compilation, not generation; coda on early end).
+  `TurnStarter`, `BookCompiler` (compilation, not generation; coda on early end),
+  `Mementos` (the trophy shelf: a closed, engine-detected trigger list
+  (`rival_settled` > `scar_taken` > `endeavor_filled` > `elite_beaten` >
+  `captive_freed` > `first_ground` — that order IS the priority rule) mints at
+  most one keepsake per chapter and ~12 per tale (`config/game.php`
+  `mementos`), with engine-templated words written the instant the turn
+  resolves; the narrator may only reword name/line inside a clamp, and the
+  shelf compiles into the book's closing section).
 - Affordances are JSON tags on `scene_features` (e.g.
   `{"reachable_via":["climb","swing"],"height":11}`). Zone-level features
   (`scene_id` null) are templates: dressed scenes (`state.dressed`) draw a
@@ -262,6 +269,18 @@ adjudicates legality or outcomes — it is only ever handed resolved facts.
   and it never becomes a `SituationBoard` group — the board is for the scene.
   Rest still never lifts a downed character off the floor; only the fall's own
   recovery beat does, and it charges a permanent mark to do it.
+- A memento is memory, never mechanics. It is not an `Item`, grants nothing,
+  occupies no hands, and never appears in a card, an odds part, or a resolver
+  path — which is precisely why play itself may mint one while items still
+  enter only through evolution. Enforced by direction as well as by type:
+  nothing under `app/Game/` may import `App\Models\Memento` (there is a test),
+  so the resolver only ever detects the MOMENT from facts it already has and
+  hands the minting outward. Append-only like chapters: once minted, the only
+  writes are the narrator's clamped rewording of name/line (≤ 8 words, ≤ 20
+  words, still about the same subject — any violation and the engine's words
+  stand) and the chapter stamp that completes its provenance. No push fires
+  for one; the player finds it. And no mechanics language reaches the shelf,
+  the book, or the widget.
 - Companions are coordinated, never controlled: requests are cards in each
   companion's own slot (never the player's pre/main/post), the engine rolls
   the companion's attempt, and failure can cost the companion.

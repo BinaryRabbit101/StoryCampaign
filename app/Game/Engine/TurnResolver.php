@@ -10,6 +10,7 @@ use App\Models\Character;
 use App\Models\Scene;
 use App\Models\Turn;
 use App\Models\Zone;
+use App\Services\Mementos;
 use Illuminate\Support\Facades\DB;
 
 /**
@@ -79,6 +80,16 @@ class TurnResolver
             // Whoever was already gone when the turn began: only a flight
             // that happens THIS turn writes into the tale's memory.
             $fledBefore = $scene->actors()->where('status', 'fled')->pluck('id')->all();
+
+            // Two of the moments the tale keeps a keepsake from are read from
+            // nothing but a status that changed across this turn: the elites
+            // standing at the top of it, and anyone in a grip who is not an
+            // enemy — a captive, held. Both are captured here and compared at
+            // the end; neither is read by anything mechanical.
+            $elitesBefore = $scene->actors()->where('kind', 'enemy')->where('tier', 'elite')
+                ->whereIn('status', ['active', 'fled'])->pluck('id')->all();
+            $captivesBefore = $scene->actors()->where('status', 'restrained')
+                ->where('kind', '!=', 'enemy')->pluck('id')->all();
 
             $outcomes = [];
             $trigger = null;
@@ -270,6 +281,18 @@ class TurnResolver
                 'meters_snapshot' => $character->meters,
                 'resolved_at' => now(),
             ]);
+
+            // What this turn leaves on the shelf.
+            //
+            // The facts are final above, so the moment is settled: the engine
+            // reads the notable ones straight out of them and hands them
+            // outward. It is minted NOW, not at narration, so the keepsake
+            // survives an evening Claude is down — and the engine keeps no
+            // reference to what came back, because a memento is memory and
+            // must never be able to reach the mechanics that made it.
+            Mementos::mint($turn, $this->mementoTriggers(
+                $turn, $sceneBefore, $scene, $elitesBefore, $captivesBefore, $fall, $reactionRolls,
+            ));
 
             // The tale that ran out of body. No next turn is opened — there is
             // nothing left to choose — and the book closes behind the fall's
@@ -1459,6 +1482,79 @@ class TurnResolver
             'source' => $template->source,
             'evolution_run_id' => $template->evolution_run_id,
         ]);
+    }
+
+    /**
+     * The notable moments this turn left behind, as plain candidate records.
+     *
+     * DETECTION ONLY. The engine never holds a memento, prices one, or reads
+     * one back — nothing under app/Game may even name the model. Every
+     * candidate below is read from facts this resolution has already fixed,
+     * and what (if anything) becomes an object on the shelf is decided
+     * entirely outside the engine, by App\Services\Mementos.
+     *
+     * The list is closed and its priority order lives with the service. Two
+     * entries are not detected here yet: `endeavor_filled` waits on a clock
+     * system, and anything later (a companion lost) arrives the same way —
+     * one more block in this method, and nothing else anywhere.
+     *
+     * @param  list<int>  $elitesBefore
+     * @param  list<int>  $captivesBefore
+     * @param  array{scene:?Scene, record:array}|null  $fall
+     * @param  list<array>  $reactionRolls
+     * @return list<array{trigger:string, subject:string, place:string}>
+     */
+    private function mementoTriggers(Turn $turn, Scene $before, Scene $after, array $elitesBefore, array $captivesBefore, ?array $fall, array $reactionRolls): array
+    {
+        $candidates = [];
+        $place = $before->title;
+
+        // An old score closed for good — killed, kept, or bargained out.
+        foreach (Grudges::settledNames($turn) as $name) {
+            $candidates[] = ['trigger' => 'rival_settled', 'subject' => $name, 'place' => $place];
+        }
+
+        // The fall that marked them keeps whatever put them there: the blow
+        // that finished it if the scene threw one, and the ground itself if
+        // they went down on their own.
+        if (($fall['record']['scar'] ?? null) !== null) {
+            $struckBy = null;
+            foreach ($reactionRolls as $roll) {
+                if (($roll['kind'] ?? null) === 'enemy' && str_contains((string) ($roll['outcome'] ?? ''), 'Drew blood')) {
+                    $struckBy = $roll['actor'];
+                }
+            }
+            $candidates[] = [
+                'trigger' => 'scar_taken',
+                'subject' => $struckBy ?? $fall['record']['fell_at'],
+                'place' => $fall['record']['fell_at'],
+            ];
+        }
+
+        // An elite who was on their feet at the top of the turn and is down
+        // or bound at the end of it.
+        foreach (Actor::whereIn('id', $elitesBefore)->get() as $elite) {
+            if (in_array($elite->status, ['defeated', 'dead', 'restrained'], true)) {
+                $candidates[] = ['trigger' => 'elite_beaten', 'subject' => $elite->name, 'place' => $place];
+            }
+        }
+
+        // Someone who was in a grip and is not any more, and is not an enemy:
+        // a captive out of it and whole. (An enemy wrenching free of the
+        // player's own hold is the grapple clock, not a rescue.)
+        foreach (Actor::whereIn('id', $captivesBefore)->get() as $captive) {
+            if (in_array($captive->status, ['active'], true)) {
+                $candidates[] = ['trigger' => 'captive_freed', 'subject' => $captive->name, 'place' => $place];
+            }
+        }
+
+        // New country. A pressed flower from the far side of the frontier,
+        // the first time this tale ever stood in that zone.
+        if ($after->zone_id !== $before->zone_id && $after->zone !== null) {
+            $candidates[] = ['trigger' => 'first_ground', 'subject' => $after->zone->name, 'place' => $after->title];
+        }
+
+        return $candidates;
     }
 
     private function evaluateTrigger(Character $character, Scene $scene, array $outcomes, bool $moved, ?Actor $newThreat, bool $wasInDanger): BranchTrigger
