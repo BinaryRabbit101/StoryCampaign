@@ -10,6 +10,7 @@ import {
 import AmbientBackdrop from '@/components/game/AmbientBackdrop.vue';
 import DowntimePicker from '@/components/game/DowntimePicker.vue';
 import HowPanel from '@/components/game/HowPanel.vue';
+import RecapPanel from '@/components/game/RecapPanel.vue';
 import RiderList from '@/components/game/RiderList.vue';
 import TargetStrip from '@/components/game/TargetStrip.vue';
 import VerbBoard from '@/components/game/VerbBoard.vue';
@@ -26,6 +27,7 @@ import type {
     Endeavor,
     GrowthMessage,
     Memento,
+    RecapPanel as RecapPanelData,
     RollTable,
     SituationGroup,
     SlotChoice,
@@ -94,6 +96,12 @@ const props = defineProps<{
     mementos: Memento[];
     /** The evolution conversation: what was asked, and how the world answered. */
     growth: GrowthMessage[];
+    /**
+     * Previously, on this tale. Null unless the player has genuinely been
+     * away — and informational even then: it sits above the form, closes on a
+     * word, and gates nothing.
+     */
+    recap: RecapPanelData | null;
     /**
      * A turn is resolved but Claude has not written its chapter yet. Turns
      * resolve inline now, so this is the only wait left in the game.
@@ -1454,6 +1462,17 @@ const healthPct = computed(
                     will appear here on its own once the narrator answers again.
                 </p>
             </div>
+
+            <!-- The thread regained. Above the wait and above the form, and
+                 in front of neither: it is four lines the engine already
+                 wrote, for a player who has been gone long enough to have
+                 lost the shape of them. -->
+            <RecapPanel
+                v-if="recap && !rollTable"
+                :key="recap.turn_id"
+                class="mb-4"
+                :recap="recap"
+            />
 
             <!-- The wait ahead. It stands above the form rather than inside
                  it: the pick is not part of the turn, costs no slot, and is

@@ -17,6 +17,7 @@ use App\Models\Turn;
 use App\Services\Claude\Narrator;
 use App\Services\Mementos;
 use App\Services\PlayerPresence;
+use App\Services\Recap;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Validation\ValidationException;
@@ -117,6 +118,11 @@ class PlayController extends Controller
             // happened. Inert in every direction — it is here to be read, and
             // there is nothing on it to spend.
             'mementos' => Mementos::shelf($campaign),
+            // Previously, on this tale. Null unless the player has genuinely
+            // been away — compiled from lines the engine already wrote, and
+            // dismissed on the client, so it costs this request one read and
+            // never stands between anybody and the form.
+            'recap' => Recap::for($campaign),
             // The evolution conversation, so a request and the world's answer
             // to it stay on screen together. Without this the answer was
             // written to the database and shown to nobody.
