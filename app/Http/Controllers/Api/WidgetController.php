@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers\Api;
 
+use App\Game\Engine\Downtime;
 use App\Http\Controllers\Controller;
 use App\Models\User;
 use Illuminate\Http\JsonResponse;
@@ -48,6 +49,11 @@ class WidgetController extends Controller
             // The widget draws a real health bar; the meter sentence is noise.
             'situation' => Str::limit(trim(preg_replace('/\s*Health \d+\/\d+\./', '', $turn?->situation ?? '')), 220),
             'awaiting_player' => $turn?->isOpen() ?? false,
+            // How the character is spending the wait, if the player said.
+            // Flavor only — the widget never offers the choice, it reports it.
+            'downtime' => $turn?->isOpen() && ($turn->downtime['stance'] ?? null) !== null
+                ? Downtime::flavor($turn->downtime['stance'])
+                : null,
             'narrating' => $narrating,
             'turn_number' => $turn?->number,
             'chapter_count' => $campaign->chapters()->count(),

@@ -139,6 +139,20 @@ class Narrator
         // here, and a lurking return stays as hidden from this as from cards.
         $figures = Grudges::returningFigures($turn);
 
+        // How the wait before this vignette was spent: one engine-written
+        // sentence, plain and factual, carrying no numbers and no name for
+        // what the player chose. It is a clause of colour at the open, not a
+        // scene — a chapter that spends a paragraph on a night's sleep has
+        // buried the beats it is actually about.
+        $wait = trim((string) ($resolution['downtime'] ?? ''));
+        $wait = $wait === '' ? '' : <<<WAIT
+
+## How the stretch before this chapter passed (fixed fact)
+{$wait}
+Let it colour at most the opening clause of the chapter, in your own words. Never a paragraph of its own, and never the chapter's subject.
+
+WAIT;
+
         $synopsis = trim((string) $campaign->synopsis);
         $storySoFar = $synopsis === '' ? '' : <<<SOFAR
 
@@ -170,7 +184,7 @@ Each listed event carries a bracketed token like [[e1]]. Copy every token into t
 ## The stage the player set (color and direction only — never force the goal closed; the player decides when it is met)
 {$stage}
 
-{$storySoFar}
+{$storySoFar}{$wait}
 ## Recent chapters (for continuity)
 {$previousChapters}
 {$continuation}

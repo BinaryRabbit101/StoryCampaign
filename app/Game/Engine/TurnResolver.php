@@ -56,6 +56,14 @@ class TurnResolver
                 'prior_failure' => false,
             ];
 
+            // The wait, spent. Whatever the player chose to do with the idle
+            // stretch before this turn pays out here, beside the tempo regen
+            // it rides along with: engine-priced from the real elapsed minutes,
+            // clamped both ways, and stamped so one wait is never spent twice.
+            // No pick means today's behavior exactly — regen and nothing else.
+            $lurkingBefore = Downtime::lurkingIds($scene);
+            $downtime = Downtime::apply($turn, $character, $conditions);
+
             // Captives held before this turn may struggle free at its end —
             // a fresh grip always survives the turn it was won.
             $heldBefore = $scene->actors()->where('status', 'restrained')->pluck('id')->all();
@@ -164,6 +172,15 @@ class TurnResolver
                 $newcomer = $this->maybeIntroduceThreat($scene, $dice, $turn, $forced);
             }
 
+            // A wait spent watching is cashed in before anyone reads the
+            // scene: what slipped in during it stands in the open instead, so
+            // the branch trigger, the cards, and the chapter all see the same
+            // arrival the player paid to see.
+            if ($downtime['watchful']) {
+                Downtime::revealNewArrivals($lurkingBefore, $scene);
+                $newcomer = $newcomer?->fresh();
+            }
+
             // A lurker is not yet a fact the player (or narrator) may know.
             $newThreat = $sprung ?? (($newcomer !== null && ! ($newcomer->tags['lurking'] ?? false)) ? $newcomer : null);
 
@@ -179,6 +196,13 @@ class TurnResolver
                 $this->rollEnemyIntents($scene, $dice);
             }
 
+            // New ground the transition just dressed can arrive with its own
+            // hidden company. A watch kept through the wait reads that entry
+            // too — it is still the entry path, not a standing ambush.
+            if ($downtime['watchful']) {
+                Downtime::revealNewArrivals($lurkingBefore, $scene);
+            }
+
             // Settle every returning grudge against what this turn actually
             // did to them: killed or kept closes the score; a player who
             // walked away leaves it simmering for another day.
@@ -192,6 +216,12 @@ class TurnResolver
                     'reaction_rolls' => $reactionRolls,
                     'new_threat' => $newThreat?->only(['id', 'name', 'kind', 'tier']),
                     'conditions' => $conditions,
+                    // One plain sentence about how the wait before this
+                    // vignette passed — colour for the narrator, and the only
+                    // thing about downtime that ever reaches a prompt. Null
+                    // when the wait bought nothing, so an ordinary turn
+                    // carries no instructions about a night that did not matter.
+                    'downtime' => $downtime['fact'],
                 ],
                 'branch_trigger' => $trigger->value,
                 'meters_snapshot' => $character->meters,
@@ -1489,6 +1519,10 @@ class TurnResolver
             'situation' => SituationBoard::prose($board),
             'situation_board' => $board,
             'cards' => $cards,
+            // How the wait ahead may be spent. Offered here and chosen after,
+            // on the resolved-turn screen: the pick can never gate or delay a
+            // resolution, because the turn it belongs to is already open.
+            'downtime' => Downtime::offer($scene),
         ]);
     }
 

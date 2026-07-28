@@ -10,7 +10,7 @@ use Illuminate\Database\Eloquent\Relations\HasOne;
 #[Fillable([
     'campaign_id', 'scene_id', 'number', 'status', 'situation', 'situation_board',
     'cards', 'submission', 'resolution', 'branch_trigger', 'meters_snapshot',
-    'submitted_at', 'resolved_at', 'narrated_at', 'rolls_seen_at',
+    'downtime', 'submitted_at', 'resolved_at', 'narrated_at', 'rolls_seen_at',
 ])]
 class Turn extends Model
 {
@@ -32,6 +32,10 @@ class Turn extends Model
             'submission' => 'array',
             'resolution' => 'array',
             'meters_snapshot' => 'array',
+            // The offer, the pick, and what the wait paid out. Written as the
+            // turn opens, chosen on the resolved-turn screen, cashed in at the
+            // top of this turn's own resolution.
+            'downtime' => 'array',
             'submitted_at' => 'datetime',
             'resolved_at' => 'datetime',
             'narrated_at' => 'datetime',

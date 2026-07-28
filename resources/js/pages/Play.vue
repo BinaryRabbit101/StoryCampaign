@@ -8,6 +8,7 @@ import {
     ref,
 } from 'vue';
 import AmbientBackdrop from '@/components/game/AmbientBackdrop.vue';
+import DowntimePicker from '@/components/game/DowntimePicker.vue';
 import SlotPicker from '@/components/game/SlotPicker.vue';
 import { enablePush } from '@/lib/push';
 import type {
@@ -17,6 +18,7 @@ import type {
     ChapterEvent,
     CharacterItem,
     CharacterMeters,
+    DowntimeOffer,
     GrowthMessage,
     RollTable,
     SituationGroup,
@@ -56,6 +58,12 @@ const props = defineProps<{
         /** The same facts as `situation`, grouped. Null on pre-board turns. */
         board: SituationGroup[] | null;
         cards: TurnCards | null;
+        /**
+         * How the idle stretch before this turn is played may be spent.
+         * Null on turns opened before downtime existed — the picker simply
+         * does not appear, and the wait passes as it always did.
+         */
+        downtime: DowntimeOffer | null;
     } | null;
     /** The evolution conversation: what was asked, and how the world answered. */
     growth: GrowthMessage[];
@@ -128,6 +136,12 @@ const stalled = computed(() => props.narrationStalled && !locked.value);
 // the opposite of help. Empty groups are simply absent, so a quiet place
 // shows a short board rather than a list of reassurances nobody asked for.
 const board = computed<SituationGroup[]>(() => props.turn?.board ?? []);
+
+// The wait ahead, offered while the turn is open. Optional by construction:
+// nothing on this page waits for it, and no answer is a legal answer.
+const downtime = computed<DowntimeOffer | null>(
+    () => props.turn?.downtime ?? null,
+);
 
 // Turns opened before the board existed still carry the prose they were
 // written with. Nothing is lost on an old save; it just reads as one line.
@@ -599,7 +613,16 @@ const healthPct = computed(
         :turn-number="rollTable.turn_number"
         :rows="rollTable.rows"
         @continue="rollsSeen"
-    />
+    >
+        <template #downtime>
+            <DowntimePicker
+                v-if="downtime && turn"
+                :campaign-id="campaign.id"
+                :turn-id="turn.id"
+                :downtime="downtime"
+            />
+        </template>
+    </DiceTable>
 
     <div
         class="relative isolate mx-auto flex w-full max-w-2xl flex-1 flex-col gap-5 p-4 pb-16"
@@ -1215,6 +1238,17 @@ const healthPct = computed(
                     will appear here on its own once the narrator answers again.
                 </p>
             </div>
+
+            <!-- The wait ahead. It stands above the form rather than inside
+                 it: the pick is not part of the turn, costs no slot, and is
+                 recorded on its own the moment it is made. -->
+            <DowntimePicker
+                v-if="downtime && turn && !rollTable"
+                class="mb-4"
+                :campaign-id="campaign.id"
+                :turn-id="turn.id"
+                :downtime="downtime"
+            />
 
             <div
                 v-if="waiting"

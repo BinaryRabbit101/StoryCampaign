@@ -174,6 +174,28 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Downtime (the idle wait, spent)
+    |--------------------------------------------------------------------------
+    | Closing the app is a move. When a turn resolves the engine offers a small
+    | closed set of stances for the wait ahead, and the pick pays out from the
+    | REAL elapsed minutes when the player comes back.
+    |
+    | The two bounds are the whole economy. The floor stops benefit-farming by
+    | rapid re-submits: a wait shorter than this was not a wait, and pays
+    | nothing. The cap stops the game rewarding absence: past it, nothing more
+    | accrues, so an idle game never punishes coming back sooner. One health an
+    | hour means a night's sleep restores most of the default ten-point pool
+    | and a coffee break restores none of it.
+    */
+
+    'downtime' => [
+        'floor_minutes' => 20,
+        'cap_minutes' => 480,
+        'rest_heal_per_hour' => 1,
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
     | Vignette shape
     |--------------------------------------------------------------------------
     */

@@ -428,6 +428,14 @@ const hasReasons = (row: RollRow) =>
                 </div>
             </div>
 
+            <!-- The wait ahead, offered where the player already is. The
+                 table is the one screen they sit on between turns, so the
+                 choice about the stretch after it belongs here — quiet,
+                 optional, and never in the way of reading the chapter. -->
+            <div class="mt-5">
+                <slot name="downtime" />
+            </div>
+
             <div class="mt-6 flex flex-col items-center gap-3">
                 <button
                     v-if="waitingOnPlayer && mine.length > 1"

@@ -84,6 +84,24 @@ export interface TurnCards {
     companions?: CompanionCards[];
 }
 
+/**
+ * One way to spend the idle stretch ahead. The terms are the whole point:
+ * the payout is priced on the option before it is picked, the same way a
+ * card prints its difficulty before it is committed to.
+ */
+export interface DowntimeStance {
+    id: string;
+    label: string;
+    terms: string;
+}
+
+/** The wait ahead: what is offered, and what has already been chosen for it. */
+export interface DowntimeOffer {
+    offer: DowntimeStance[];
+    /** Chosen once and only once — null until the player says. */
+    stance: string | null;
+}
+
 export interface HealthMeter {
     current: number;
     max: number;

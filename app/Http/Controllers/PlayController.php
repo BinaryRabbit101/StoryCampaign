@@ -4,6 +4,7 @@ namespace App\Http\Controllers;
 
 use App\Game\Engine\ChapterEntities;
 use App\Game\Engine\ChapterEvents;
+use App\Game\Engine\Downtime;
 use App\Game\Engine\RollTable;
 use App\Game\Engine\TurnResolver;
 use App\Game\Hands;
@@ -92,6 +93,11 @@ class PlayController extends Controller
                 // the prose those turns were written with.
                 'board' => $turn->situation_board,
                 'cards' => $turn->isOpen() ? $turn->cards : null,
+                // The wait ahead, and whether it has been spoken for. Only
+                // while the turn is open: once it is submitted the wait it
+                // offered is over, and a picker on a locked turn would be
+                // offering something already gone.
+                'downtime' => $turn->isOpen() ? $this->downtimeOffer($turn) : null,
             ],
             // The evolution conversation, so a request and the world's answer
             // to it stay on screen together. Without this the answer was
@@ -145,6 +151,65 @@ class PlayController extends Controller
             'turn_number' => $turn->number,
             'rows' => $rows,
         ];
+    }
+
+    /**
+     * The stances offered for the wait ahead, and the one already taken.
+     * Turns opened before downtime existed carry none, and the picker simply
+     * does not appear for them.
+     *
+     * @return array{offer:list<array{id:string,label:string,terms:string}>,stance:?string}|null
+     */
+    private function downtimeOffer(Turn $turn): ?array
+    {
+        $downtime = $turn->downtime ?? [];
+        $offer = $downtime['offer'] ?? [];
+
+        return $offer === [] ? null : [
+            'offer' => array_values($offer),
+            'stance' => $downtime['stance'] ?? null,
+        ];
+    }
+
+    /**
+     * How the character spends the wait before this turn is played.
+     *
+     * A normal engine-offered choice: submitted by id and checked against the
+     * closed set stored on the turn, exactly as a card is. It is recorded and
+     * nothing else — the payout is the engine's, computed from the real
+     * elapsed minutes at the top of the next resolution, so a pick can never
+     * make the resolution itself wait on anything.
+     */
+    public function downtime(Request $request, Campaign $campaign): RedirectResponse
+    {
+        abort_unless($campaign->user_id === $request->user()->id, 403);
+
+        $validated = $request->validate([
+            'turn_id' => ['required', 'integer'],
+            'stance' => ['required', 'string'],
+        ]);
+
+        $turn = $campaign->turns()->whereKey($validated['turn_id'])->first();
+        abort_if($turn === null, 404);
+
+        // The wait belongs to a turn not yet played. Once it is submitted the
+        // stretch it offered has already been spent.
+        abort_unless($turn->isOpen(), 409, 'That wait is already over.');
+
+        // Once only: the clock starts at the pick, and re-picking would restart
+        // it — an idle payout that can be re-armed is an idle payout that pays
+        // whatever the player asks it to.
+        abort_if(($turn->downtime['stance'] ?? null) !== null, 409, 'The wait is already spoken for.');
+
+        if (! in_array($validated['stance'], Downtime::offeredStances($turn), true)) {
+            throw ValidationException::withMessages([
+                'stance' => 'That was not among the ways offered to spend the wait.',
+            ]);
+        }
+
+        Downtime::choose($turn, $validated['stance']);
+
+        return back();
     }
 
     /**

@@ -85,7 +85,12 @@ adjudicates legality or outcomes — it is only ever handed resolved facts.
   wary arrives `lurking`, scheming arrives under `truce` with an engine-picked
   deal the roll-free `bargain` verb accepts); the evolver only tends simmering
   grudges within actor clamps and +1 heat/run; killed/kept/bargained is
-  `resolved` and terminal), `ActionCard`, `BeatOutcome`.
+  `resolved` and terminal), `Downtime` (the idle wait as a choice: a closed,
+  engine-composed set of stances — rest / keep watch / tend gear / walk the
+  ground — offered on `turns.downtime` when a turn opens, picked on the
+  resolved-turn screen, and paid out at the top of the next resolution from
+  the REAL elapsed minutes, clamped by `config/game.php` `downtime`
+  (floor/cap)), `ActionCard`, `BeatOutcome`.
 - Anti-repetition systems (all engine-side, no LLM): every visible feature
   and actor carries capability-free `inspect`/`improvise`/`speak` cards, so
   ground the character's gifts don't fit is still actionable and the card
@@ -183,6 +188,15 @@ adjudicates legality or outcomes — it is only ever handed resolved facts.
   world-level content directly. `campaigns.opening` is where the player asked
   the first scene to find them — it rides in `stageBrief()`, so the stage
   builder must open ON that moment, not approach it.
+- Downtime is optional and defaults to none: a player who submits and closes
+  the app gets tempo regen and nothing else. The pick happens AFTER a turn
+  resolves and never gates or delays resolution; a wait shorter than the floor
+  pays nothing and one past the cap pays no more; each stance costs the other
+  three (rest heals but keeps no watch; watch reveals only ENTRY-time lurkers;
+  tend gear grants the existing `readied` condition from `Odds::CONDITIONS`,
+  never a parallel buff; walk the ground is not offered when the scene hides
+  nothing). Narration gets one plain sentence about the wait — no numbers, no
+  stance names.
 - Companions are coordinated, never controlled: requests are cards in each
   companion's own slot (never the player's pre/main/post), the engine rolls
   the companion's attempt, and failure can cost the companion.
