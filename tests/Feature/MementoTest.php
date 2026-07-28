@@ -548,8 +548,12 @@ class MementoTest extends TestCase
      * Nothing under app/Game — cards, odds, hands, dice, the resolver — may so
      * much as name the model, which is what makes "it can never grant
      * anything" a property of the code instead of a promise in a comment.
+     *
+     * A rumor lives by exactly the same rule and is checked by exactly the
+     * same sweep: it is news about elsewhere, it grants nothing, and the
+     * engine may only ever detect the MOMENT and hand the pick outward.
      */
-    public function test_the_shelf_never_reaches_the_engine()
+    public function test_the_shelf_and_the_hearsay_never_reach_the_engine()
     {
         $offenders = [];
 
@@ -561,13 +565,20 @@ class MementoTest extends TestCase
             if ($file->getExtension() !== 'php') {
                 continue;
             }
-            if (preg_match('/\bMemento\b/', (string) file_get_contents($file->getPathname()))) {
-                $offenders[] = $file->getPathname();
+
+            $source = (string) file_get_contents($file->getPathname());
+
+            // `Rumors` (the service the resolver calls) is fine; `Rumor` (the
+            // model) is not — the word boundary is what tells them apart.
+            foreach (['Memento', 'Rumor'] as $model) {
+                if (preg_match("/\\b{$model}\\b/", $source)) {
+                    $offenders[] = "{$file->getPathname()} ({$model})";
+                }
             }
         }
 
         $this->assertSame([], $offenders,
-            'app/Game reached for the memento model — mementos must stay mechanically inert');
+            'app/Game reached for an inert model — mementos and rumors must stay mechanically inert');
     }
 
     /**

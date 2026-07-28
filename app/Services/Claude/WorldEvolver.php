@@ -12,6 +12,7 @@ use App\Models\SceneFeature;
 use App\Models\Zone;
 use App\Notifications\ChronicleNotification;
 use App\Services\CapabilityClamp;
+use App\Services\Rumors;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\File;
 use Illuminate\Support\Str;
@@ -76,6 +77,19 @@ class WorldEvolver
                 'chronicle' => $chronicle,
                 'finished_at' => now(),
             ]);
+
+            // What the character might plausibly hear about tonight's work,
+            // extracted from the CLAMPED change set — so nothing the engine
+            // refused can be gossiped about. Written before the Chronicle
+            // publishes, and deliberately not gated against it: the Chronicle
+            // is the reader's omniscient digest and this is what reaches the
+            // character weeks later, which is dramatic irony rather than
+            // duplication. A failure here costs the news and nothing else.
+            try {
+                Rumors::fromEvolution($campaign, $run, $applied);
+            } catch (Throwable $e) {
+                report($e);
+            }
 
             $this->publishChronicle($campaign, $chronicle);
         } catch (Throwable $e) {

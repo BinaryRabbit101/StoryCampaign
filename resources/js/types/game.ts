@@ -218,6 +218,12 @@ export interface RollTable {
     turn_id: number;
     turn_number: number;
     rows: RollRow[];
+    /**
+     * News from elsewhere the character picked up this turn — off the road,
+     * from somebody they were talking to, or during the wait. Null on nearly
+     * every turn. Quiet by design: there is nothing here to answer.
+     */
+    heard: string | null;
 }
 
 /**

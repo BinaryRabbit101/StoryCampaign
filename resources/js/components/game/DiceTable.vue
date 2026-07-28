@@ -16,6 +16,12 @@ import type { RollRow } from '@/types/game';
 const props = defineProps<{
     turnNumber: number;
     rows: RollRow[];
+    /**
+     * Something heard about somewhere else — off the road, from whoever they
+     * were talking to, or during the wait. Quiet on purpose: it is news, not a
+     * result, and there is nothing on this screen to do about it.
+     */
+    heard?: string | null;
 }>();
 
 const emit = defineEmits<{ continue: [] }>();
@@ -427,6 +433,17 @@ const hasReasons = (row: RollRow) =>
                     </Transition>
                 </div>
             </div>
+
+            <!-- Word from elsewhere, at the same weight as the wait below it:
+                 no badge, no colour, nothing to answer. The world has been
+                 moving while they were busy, and this is the first time the
+                 character rather than the reader gets to hear about it. -->
+            <p
+                v-if="heard"
+                class="mt-5 text-center text-sm text-muted-foreground italic"
+            >
+                {{ heard }}
+            </p>
 
             <!-- The wait ahead, offered where the player already is. The
                  table is the one screen they sit on between turns, so the

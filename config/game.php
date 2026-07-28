@@ -340,6 +340,33 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Rumors (the world's news, reaching the character)
+    |--------------------------------------------------------------------------
+    | The evolver tends each tale's world overnight and the Chronicle tells the
+    | READER about it. These are the same facts reaching the CHARACTER — days
+    | late, one at a time, through channels the turn already produced.
+    |
+    | All three numbers exist to keep it RARE. `per_run` is how many pieces of
+    | gossip one night's tending is worth: a run is a night in a tavern, not a
+    | gazette. `queue` is how much unheard news the world will hold on to
+    | before the oldest of it simply goes stale — without it the character
+    | would still be hearing about last month at the end of the tale.
+    | `per_chapter` is one, and a chapter is one turn's telling: two pieces of
+    | news in a page is a briefing, not a conversation.
+    |
+    | WHICH moments deliver is not tunable: that is the closed channel list in
+    | App\Services\Rumors, detected by the resolver from facts it has already
+    | fixed. And nothing here can make one up — an empty queue is silence.
+    */
+
+    'rumors' => [
+        'per_run' => 3,
+        'queue' => 12,
+        'per_chapter' => 1,
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
     | Endeavor clocks (the goal the player is working toward)
     |--------------------------------------------------------------------------
     | The alarm clock above counts up AGAINST the player while they stand and

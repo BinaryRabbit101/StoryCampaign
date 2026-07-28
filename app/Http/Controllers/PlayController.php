@@ -204,6 +204,11 @@ class PlayController extends Controller
             'turn_id' => $turn->id,
             'turn_number' => $turn->number,
             'rows' => $rows,
+            // Something the character heard about somewhere else. It sits on
+            // this screen with the same quiet weight as the wait below it —
+            // no badge, no push, nothing to answer. The player finds it, the
+            // way they find a keepsake.
+            'heard' => $turn->resolution['rumor']['line'] ?? null,
         ];
     }
 

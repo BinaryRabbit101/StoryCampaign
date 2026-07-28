@@ -6,12 +6,14 @@ use App\Game\BranchTrigger;
 use App\Game\Hands;
 use App\Game\Meters;
 use App\Game\Verb;
+use App\Game\VerbFamily;
 use App\Models\Actor;
 use App\Models\Character;
 use App\Models\Scene;
 use App\Models\Turn;
 use App\Models\Zone;
 use App\Services\Mementos;
+use App\Services\Rumors;
 use Illuminate\Support\Facades\DB;
 
 /**
@@ -366,6 +368,21 @@ class TurnResolver
                 }
             }
 
+            // What the world has been doing while nobody was watching, finally
+            // reaching the person it is happening around.
+            //
+            // DETECTION ONLY. The engine reads one of three moments off facts
+            // this resolution has already fixed and hands the pick outward —
+            // nothing under app/Game may so much as name the rumor model, the
+            // same rule the shelf lives by. Which piece of news it turns out
+            // to be is decided entirely outside the engine, and an empty queue
+            // simply says nothing: Claude is never asked to invent any.
+            $heard = Rumors::deliver(
+                $turn,
+                $this->rumorChannel($outcomes, $sceneBefore, $scene, $moved, $turn),
+                $turn->campaign->fresh()->next_zone_id,
+            );
+
             $turn->update([
                 'status' => Turn::STATUS_COMPLETE,
                 'resolution' => [
@@ -401,6 +418,11 @@ class TurnResolver
                     // and the narrator carries the goal, and a chapter told to
                     // announce a tally every page has stopped being a chapter.
                     'endeavor' => $endeavor === [] ? null : $endeavor,
+                    // Something heard about somewhere else entirely. Null on
+                    // every turn nothing was, which is most of them — the
+                    // world does not produce news faster than the character
+                    // runs into people to hear it from.
+                    'rumor' => $heard,
                 ],
                 'branch_trigger' => $trigger->value,
                 'meters_snapshot' => $character->meters,
@@ -1877,6 +1899,64 @@ class TurnResolver
         }
 
         return $candidates;
+    }
+
+    /**
+     * Which of the three moments this turn produced, if it produced one.
+     *
+     * Every channel is a thing the turn already did — the resolver adds no new
+     * mechanics to serve them, and none of them may be reached for. Checked in
+     * the closed list's own order; the first that qualifies is the one.
+     *
+     * Combat silences all three, and that check comes first: nobody trades
+     * news with a fight still standing, and a chapter that stopped mid-swing
+     * to pass on gossip about another county would read as a bug. Lurkers do
+     * not count — a fight nobody knows about yet is not a fight.
+     *
+     * @param  list<BeatOutcome>  $outcomes
+     */
+    private function rumorChannel(array $outcomes, Scene $before, Scene $after, bool $moved, Turn $turn): ?string
+    {
+        $fighting = fn (Scene $scene) => $scene->fresh()?->visibleActors()
+            ->contains(fn (Actor $a) => $a->kind === 'enemy') ?? false;
+
+        if ($fighting($before) || ($after->id !== $before->id && $fighting($after))) {
+            return null;
+        }
+
+        // Met on the road: the ground changed under them, whether that was one
+        // more locale or the whole country.
+        if ($moved) {
+            return Rumors::CROSSING;
+        }
+
+        // They pass on what they heard. A social beat that got somewhere with
+        // somebody who was not fighting them and was not holding to terms —
+        // an enemy under truce came to deal, not to chat.
+        foreach ($outcomes as $outcome) {
+            if ($outcome->skipped || $outcome->degree === BeatOutcome::FAILURE) {
+                continue;
+            }
+            if (Verb::familyOf($outcome->verb) !== VerbFamily::Speak
+                || str_starts_with($outcome->verb, 'companion_')) {
+                continue;
+            }
+
+            $actor = Actor::find($outcome->target['id'] ?? 0);
+            if ($actor !== null && $actor->kind !== 'enemy' && ! ($actor->tags['truce'] ?? false)) {
+                return Rumors::TALK;
+            }
+        }
+
+        // Overheard, found posted, read in the ashes of somebody else's camp:
+        // a wait actually spent out in it, and one that actually paid.
+        $payout = $turn->downtime['payout'] ?? [];
+        if (($payout['granted'] ?? false)
+            && in_array($payout['stance'] ?? null, [Downtime::WALK, Downtime::WATCH], true)) {
+            return Rumors::FIRESIDE;
+        }
+
+        return null;
     }
 
     /**
