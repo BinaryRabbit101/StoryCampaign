@@ -9,7 +9,11 @@ import {
 } from 'vue';
 import AmbientBackdrop from '@/components/game/AmbientBackdrop.vue';
 import DowntimePicker from '@/components/game/DowntimePicker.vue';
-import SlotPicker from '@/components/game/SlotPicker.vue';
+import HowPanel from '@/components/game/HowPanel.vue';
+import RiderList from '@/components/game/RiderList.vue';
+import TargetStrip from '@/components/game/TargetStrip.vue';
+import VerbBoard from '@/components/game/VerbBoard.vue';
+import { difficultyAt, signed, targetKey, type TargetOption } from '@/lib/odds';
 import { enablePush } from '@/lib/push';
 import type {
     ActionCard,
@@ -289,10 +293,6 @@ function dismissOnEscape(e: KeyboardEvent) {
     if (e.key === 'Escape') detail.value = null;
 }
 
-/** Always signed, +0 included — see the roll block in the detail card. */
-const signed = (amount: number) =>
-    `${amount > 0 ? '+' : '−'}${Math.abs(amount)}`;
-
 const degreeClass = (event: ChapterEvent) =>
     event.skipped
         ? 'text-muted-foreground'
@@ -476,6 +476,97 @@ const setupGrants = computed(() => {
             slot: grant.slot,
         }));
 });
+
+// ---- The sentence ----
+//
+// VERB, then WHAT, then HOW. Every step is a lens over the cards the engine
+// already offered: the board lights a word only when a card sits under it, and
+// every tap here terminates in one of those card ids. Nothing on this page
+// composes anything, and the payload leaving it is the same shape it always
+// was — {pre?, main, post?, companions} of ids, modifiers, and notes.
+
+const mainCards = computed<ActionCard[]>(() => props.turn?.cards?.main ?? []);
+
+const mainCard = computed<ActionCard | null>(
+    () => mainCards.value.find((c) => c.id === main.value?.card_id) ?? null,
+);
+
+/** Every card standing under the verb currently chosen. */
+const verbCards = computed(() =>
+    mainCard.value === null
+        ? []
+        : mainCards.value.filter((c) => c.verb === mainCard.value!.verb),
+);
+
+const chosenTargetKey = computed(() =>
+    mainCard.value === null ? null : targetKey(mainCard.value),
+);
+
+const stanceFor = (card: ActionCard) =>
+    card.id === main.value?.card_id
+        ? (main.value.modifiers.approach ?? 'balanced')
+        : 'balanced';
+
+/** WHAT: one chip per thing this verb can be aimed at, each with its own DC. */
+const mainTargets = computed<TargetOption[]>(() => {
+    const grouped = new Map<string, ActionCard[]>();
+
+    for (const card of verbCards.value) {
+        const key = targetKey(card);
+        grouped.set(key, [...(grouped.get(key) ?? []), card]);
+    }
+
+    return [...grouped.entries()].map(([key, cards]) => {
+        const shown =
+            cards.find((c) => c.id === main.value?.card_id) ?? cards[0];
+
+        return {
+            key,
+            name: shown.target?.name ?? shown.label,
+            difficulty: shown.forecast.rolls
+                ? difficultyAt(shown, stanceFor(shown))
+                : null,
+            risk: shown.risk,
+        };
+    });
+});
+
+/** HOW: the manners and the deal available on the target now chosen. */
+const mainVariants = computed(() =>
+    verbCards.value.filter((c) => targetKey(c) === chosenTargetKey.value),
+);
+
+function choiceFor(card: ActionCard, note = ''): SlotChoice {
+    const modifiers: Record<string, string> = {};
+
+    for (const modifier of card.modifiers) {
+        modifiers[modifier.key] = modifier.options[0]?.value ?? '';
+    }
+
+    return { card_id: card.id, modifiers, note };
+}
+
+/** A new verb is a new beat, so the words written for the old one go with it. */
+function pickVerb(card: ActionCard) {
+    main.value = choiceFor(card);
+}
+
+/** A new target or manner is the same beat re-aimed — the note survives it. */
+function pickVariant(card: ActionCard) {
+    if (card.id !== main.value?.card_id) {
+        main.value = choiceFor(card, main.value?.note ?? '');
+    }
+}
+
+function pickTarget(key: string) {
+    const cards = verbCards.value.filter((c) => targetKey(c) === key);
+    // The honest version first: a deal is never what a tap lands on by default.
+    const card = cards.find((c) => c.bargain === null) ?? cards[0];
+
+    if (card) {
+        pickVariant(card);
+    }
+}
 
 // Staged, visible resource commitment: the running cost of the whole chain.
 const runningCost = computed(() => {
@@ -1382,55 +1473,85 @@ const healthPct = computed(
                 </p>
             </div>
 
-            <!-- Each beat is its own fold. Only the required one starts
-                 open: three fully expanded lists made the player scroll a
-                 page and a half to reach the single choice they had to make,
-                 and length is what turned a set of options into a chore. -->
+            <!-- One form, one sentence: a word off the board, the thing it is
+                 aimed at, the manner of it — and then the beats that hang off
+                 the act, quoting what each one actually buys it. -->
             <form
                 v-else-if="turn.cards"
-                class="space-y-2"
+                class="space-y-4"
                 @submit.prevent="submit"
             >
-                <SlotPicker
-                    v-model="pre"
-                    title="Set up"
-                    hint="positioning & tempo before the act"
-                    :cards="turn.cards.pre"
-                    :optional="true"
-                />
+                <div class="space-y-2">
+                    <p
+                        class="text-[10px] tracking-widest text-muted-foreground uppercase"
+                    >
+                        What you do
+                    </p>
+
+                    <VerbBoard
+                        :cards="turn.cards.main"
+                        :selected-id="main?.card_id ?? null"
+                        @pick="pickVerb"
+                    />
+
+                    <TargetStrip
+                        label="On what"
+                        :options="mainTargets"
+                        :selected-key="chosenTargetKey"
+                        @pick="pickTarget"
+                    />
+
+                    <HowPanel
+                        v-if="mainCard && main"
+                        :card="mainCard"
+                        :variants="mainVariants"
+                        :choice="main"
+                        :carried="setupGrants"
+                        @pick-card="pickVariant"
+                        @update:choice="main = $event"
+                    />
+                    <p v-else class="text-xs text-muted-foreground italic">
+                        Pick a word to begin. Dim words are things this ground
+                        offers no way to do.
+                    </p>
+                </div>
+
+                <!-- The riders, once there is an act for them to hang off. -->
+                <template v-if="mainCard">
+                    <RiderList
+                        v-model="pre"
+                        title="First…"
+                        hint="before the act"
+                        :cards="turn.cards.pre"
+                        :act-verb="mainCard.verb"
+                        :fold-others="true"
+                    />
+                    <RiderList
+                        v-model="post"
+                        title="Afterward…"
+                        hint="if the moment allows it"
+                        :cards="turn.cards.post"
+                        :act-verb="mainCard.verb"
+                        :carried="setupGrants"
+                    />
+                </template>
 
                 <!-- Each companion carries their own beat: a request costs
-                     none of the player's three slots, and the companion's
-                     own roll decides how it goes. -->
-                <SlotPicker
+                     none of the player's three slots, it is never an order,
+                     and the companion's own roll decides how it goes. Parallel
+                     to the sentence rather than part of it. -->
+                <RiderList
                     v-for="companion in turn.cards.companions ?? []"
                     :key="companion.id"
                     :model-value="companionChoices[companion.id] ?? null"
                     :title="companion.name"
                     hint="a request, not an order — they answer for it"
                     :cards="companion.cards"
-                    :optional="true"
+                    :act-verb="mainCard?.verb ?? null"
+                    :carried="setupGrants"
                     @update:model-value="
                         (choice) => (companionChoices[companion.id] = choice)
                     "
-                />
-
-                <SlotPicker
-                    v-model="main"
-                    title="The act"
-                    hint="the beat that matters"
-                    :cards="turn.cards.main"
-                    :optional="false"
-                    :open-by-default="true"
-                    :carried-bonus="setupGrants"
-                />
-                <SlotPicker
-                    v-model="post"
-                    title="Afterward"
-                    hint="if the moment allows it"
-                    :cards="turn.cards.post"
-                    :optional="true"
-                    :carried-bonus="setupGrants"
                 />
 
                 <div class="flex items-center justify-between gap-3 pt-3">
