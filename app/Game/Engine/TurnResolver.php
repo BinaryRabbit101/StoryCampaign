@@ -203,10 +203,48 @@ class TurnResolver
             }
             $scene->update(['state' => array_merge($scene->state ?? [], ['alarm' => $alarm])]);
 
+            // The world's own impatience with stillness.
+            //
+            // The alarm above owns escalation while a fight is on; this owns the
+            // quiet, which is where a player who reads a telegraph correctly and
+            // holds still used to be met with nothing at all, twice running. It
+            // reads the room the way the PLAYER reads it — nothing standing in
+            // the open — because a lurker is not a fight, and a scene holding one
+            // is exactly the withheld world that ought to be able to spend itself.
+            $openThreat = $scene->visibleActors()->contains(fn (Actor $a) => $a->kind === 'enemy');
+            $stall = Pressure::tick(
+                $scene,
+                quiet: ! $openThreat && ! $moved
+                    && collect($outcomes)->every(fn (BeatOutcome $o) => $o->roll === 0),
+                waited: collect($outcomes)->contains(
+                    fn (BeatOutcome $o) => $o->slot === 'main' && ! $o->skipped && $o->verb === 'wait',
+                ),
+            );
+
+            $omen = Pressure::omen($stall);
+            $world = $omen === null ? null : [$omen];
+            $pressed = null;
+
+            if (Pressure::armed($stall)) {
+                // A beat that cannot land here is never in the pool, and an empty
+                // pool holds the counter where it is: the world waits for a turn
+                // it has something real to spend, rather than inventing one.
+                $pressed = Pressure::fire($scene, $character, $turn, $dice,
+                    fn () => $this->maybeIntroduceThreat($scene, $dice, $turn, forced: true));
+
+                if ($pressed !== null) {
+                    Pressure::spend($scene);
+                    $world = $pressed['facts'];
+                }
+            }
+
             // Living-world texture: a zone-level actor may join mid-scene —
-            // in the open, or lurking until detect or its own moment.
-            $newcomer = null;
-            if (! $moved && ($trigger === null || $forced)) {
+            // in the open, or lurking until detect or its own moment. Whoever
+            // pressure just walked through the door counts as that arrival, so
+            // the trigger ladder below reads it as a new threat rather than as
+            // a quiet turn that timed out.
+            $newcomer = $pressed['arrival'] ?? null;
+            if ($newcomer === null && ! $moved && ($trigger === null || $forced)) {
                 $newcomer = $this->maybeIntroduceThreat($scene, $dice, $turn, $forced);
             }
 
@@ -328,6 +366,12 @@ class TurnResolver
                     // front of, a joining, a parting, a loss. Null on the many
                     // turns none of that happened, and never a number.
                     'companions' => $companionEvents === [] ? null : $companionEvents,
+                    // What this place did while nobody made it do anything — an
+                    // arrival, an accident, something it had been keeping back.
+                    // Null on every turn the stillness was not building toward
+                    // one, so an ordinary chapter carries no instructions about
+                    // a world that stayed where it was.
+                    'world' => $world,
                 ],
                 'branch_trigger' => $trigger->value,
                 'meters_snapshot' => $character->meters,

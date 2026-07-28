@@ -227,6 +227,21 @@ WAIT;
 
         AIR;
 
+        // What this place did while nobody made it do anything. The character
+        // held still, and the world took the initiative they declined — an
+        // arrival, an accident, something the ground had been keeping back.
+        // Fixed facts like any other, and they belong INSIDE the vignette: a
+        // chapter that files them as a closing note has quietly told the player
+        // their stillness cost nothing.
+        $moves = collect($resolution['world'] ?? [])->map(fn (string $f) => "- {$f}")->join("\n");
+        $world = $moves === '' ? '' : <<<WORLD
+
+        ## What this place did while they held still (fixed facts)
+        {$moves}
+        Nobody made these happen. Write them as the scene moving on its own, once each, in this land's own terms, and let them land inside the action rather than as a closing note.
+
+        WORLD;
+
         $synopsis = trim((string) $campaign->synopsis);
         $storySoFar = $synopsis === '' ? '' : <<<SOFAR
 
@@ -272,7 +287,7 @@ Some beats carry the player's own words for that moment. Those words are voice a
 
 ## How the scene answered
 {$reaction}
-{$figures}{$company}{$fall}{$keepsake}{$criticals}
+{$world}{$figures}{$company}{$fall}{$keepsake}{$criticals}
 ## Where the vignette stops
 {$turn->branch_trigger}: the chapter must end on this note, at a clean decision point, leaving the situation open for the player's next choice. {$wordLow}-{$wordHigh} words.
 

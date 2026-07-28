@@ -200,23 +200,37 @@ class Grudges
      */
     public static function maybeReturn(Scene $next, Campaign $campaign, Dice $dice, Turn $turn): ?Actor
     {
-        $chapterNow = (int) $campaign->chapters()->max('number');
-
-        $candidates = Grudge::where('campaign_id', $campaign->id)
-            ->where('status', 'simmering')->orderBy('id')->get()
-            ->filter(function (Grudge $grudge) use ($chapterNow) {
-                $lastSeen = (int) ($grudge->lastSeenChapter?->number ?? 0);
-
-                return $chapterNow - $lastSeen >= self::RETURN_CHAPTER_FLOOR;
-            });
-
-        foreach ($candidates as $grudge) {
+        foreach (self::candidates($campaign) as $grudge) {
             if ($dice->chance(min(self::MAX_HEAT, $grudge->heat) * self::RETURN_CHANCE_PER_HEAT)) {
                 return self::spawnReturn($grudge, $next, $dice, $turn);
             }
         }
 
         return null;
+    }
+
+    /**
+     * The scores a return may honestly draw from: simmering, and far enough
+     * back that walking round the corner could not feel instant.
+     *
+     * Public because a caller that only wants to know whether a return is
+     * POSSIBLE here — the pressure beat's applicability filter — must not have
+     * to re-type the chapter floor to find out. Two copies of that rule is how
+     * one of them quietly stops being the rule.
+     *
+     * @return Collection<int, Grudge>
+     */
+    public static function candidates(Campaign $campaign)
+    {
+        $chapterNow = (int) $campaign->chapters()->max('number');
+
+        return Grudge::where('campaign_id', $campaign->id)
+            ->where('status', 'simmering')->orderBy('id')->get()
+            ->filter(function (Grudge $grudge) use ($chapterNow) {
+                $lastSeen = (int) ($grudge->lastSeenChapter?->number ?? 0);
+
+                return $chapterNow - $lastSeen >= self::RETURN_CHAPTER_FLOOR;
+            });
     }
 
     /**
