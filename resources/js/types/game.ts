@@ -230,6 +230,13 @@ export interface RollTable {
      * every turn. Quiet by design: there is nothing here to answer.
      */
     heard: string | null;
+    /**
+     * A line out of one of this player's own finished tales, surfacing because
+     * this moment rhymed with the moment that preserved it. Rarer still than
+     * the news above, and silent forever on a player's first tale. Quotation,
+     * never invention — and nothing here to answer either.
+     */
+    remembered: string | null;
 }
 
 /**

@@ -16,6 +16,7 @@ use App\Models\Chapter;
 use App\Models\Turn;
 use App\Notifications\TurnReadyNotification;
 use App\Services\BookCompiler;
+use App\Services\Echoes;
 use App\Services\Mementos;
 use App\Services\PlayerPresence;
 use App\Services\Rumors;
@@ -75,6 +76,16 @@ class Narrator
         // wording inside a clamp, plus the stamp of the chapter that heard it.
         try {
             Rumors::reword($turn, $chapter, $response['rumor'] ?? null);
+        } catch (\Throwable $e) {
+            report($e);
+        }
+
+        // And the same bargain again for the memory a finished tale sent
+        // across. Narrower than either of the two above: only the wrapper is
+        // writable, because the words inside it are a quotation of something
+        // the player actually lived and a reworded quotation is a fabrication.
+        try {
+            Echoes::reword($turn, $chapter, $response['echo'] ?? null);
         } catch (\Throwable $e) {
             report($e);
         }
@@ -264,6 +275,18 @@ class Narrator
             : ', "rumor": "<the same piece of news in this land\'s own words, one plain sentence of at most '
                 .Rumors::MAX_LINE_WORDS.' words — or repeat the given words exactly>"';
 
+        // A line out of one of this player's finished books, surfacing because
+        // this moment rhymed with the moment that preserved it. The quoted
+        // words are a quotation and stay one — the invitation is only to reword
+        // the wrapper. Empty on every ordinary chapter, and empty forever for a
+        // player with nothing behind them, so Claude is never asked to remember
+        // on their behalf.
+        $remembering = Echoes::narratorBlock($turn);
+        $echoField = $remembering === ''
+            ? ''
+            : ', "echo": "<the same memory with the wrapper in this land\'s voice — at most '
+                .Echoes::MAX_FRAME_WORDS.' words of wrapper, the quoted words and the tale\'s name exactly as given — or repeat the whole line exactly>"';
+
         // How the wait before this vignette was spent: one engine-written
         // sentence, plain and factual, carrying no numbers and no name for
         // what the player chose. It is a clause of colour at the open, not a
@@ -376,7 +399,7 @@ Some beats carry the player's own words for that moment. Those words are voice a
 
 ## How the scene answered
 {$reaction}
-{$world}{$endeavor}{$figures}{$company}{$standing}{$sideStory}{$fall}{$closing}{$news}{$keepsake}{$criticals}
+{$world}{$endeavor}{$figures}{$company}{$standing}{$sideStory}{$fall}{$closing}{$news}{$remembering}{$keepsake}{$criticals}
 ## Where the vignette stops
 {$turn->branch_trigger}: the chapter must end on this note, at a clean decision point, leaving the situation open for the player's next choice. {$wordLow}-{$wordHigh} words.
 
@@ -386,7 +409,7 @@ Some beats carry the player's own words for that moment. Those words are voice a
 The reader makes their next choice from the page itself: close the chapter inside this moment, with the people and surroundings named above present in the prose, so nothing the player can act on appears unannounced. Do not summarize or list them — let the scene hold them naturally.
 
 Respond with ONLY a JSON object:
-{"intent_line": "<the chapter's italic epigraph — the ONE place a turned phrase is welcome; a compact line in the spirit of 'She chose to take the rooftops.' or 'They read the shack before they read the woman.' The prose register's image limit does not bind this single line. Or null.>", "chapter": "<the chapter prose>", "synopsis_line": "<ONE factual line for the campaign's running record: what this chapter changed — names met, promises made, injuries taken, debts owed. Plain record-keeping, no style.>"{$mementoField}{$rumorField}}
+{"intent_line": "<the chapter's italic epigraph — the ONE place a turned phrase is welcome; a compact line in the spirit of 'She chose to take the rooftops.' or 'They read the shack before they read the woman.' The prose register's image limit does not bind this single line. Or null.>", "chapter": "<the chapter prose>", "synopsis_line": "<ONE factual line for the campaign's running record: what this chapter changed — names met, promises made, injuries taken, debts owed. Plain record-keeping, no style.>"{$mementoField}{$rumorField}{$echoField}}
 PROMPT;
     }
 

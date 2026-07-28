@@ -13,6 +13,7 @@ use App\Models\Grudge;
 use App\Models\Scene;
 use App\Models\Turn;
 use App\Models\Zone;
+use App\Services\Echoes;
 use App\Services\Mementos;
 use App\Services\Rumors;
 use Illuminate\Support\Facades\DB;
@@ -116,6 +117,14 @@ class TurnResolver
             // same way: compared at the end, and a name that is not on their
             // feet or on the floor any more was lost for good somewhere in it.
             $companionsBefore = Companions::beside($scene)->pluck('id')->all();
+
+            // And how deep each of those bonds ran at the top of it. Read the
+            // same way and for the same kind of reason: a bond that crossed
+            // into sworn during this turn is a moment, and a moment is the only
+            // thing an echo is ever allowed to be triggered by. Plain words,
+            // never the number, and nothing mechanical ever reads this back.
+            $companionTiersBefore = Companions::beside($scene)
+                ->mapWithKeys(fn (Actor $companion) => [$companion->id => Companions::tier($companion)])->all();
 
             // And what this ground was still keeping back. Somebody else's
             // search moves only on a beat that genuinely turned something up,
@@ -463,6 +472,31 @@ class TurnResolver
             // and the board that goes with them — are composed under the new one.
             $hourChange = Hours::advance($campaign, $turn->created_at);
 
+            // What this turn leaves on the shelf.
+            //
+            // The facts are final above, so the moment is settled: the engine
+            // reads the notable ones straight out of them and hands them
+            // outward. It is minted NOW, not at narration, so the keepsake
+            // survives an evening Claude is down — and the engine keeps no
+            // reference to what came back, because a memento is memory and
+            // must never be able to reach the mechanics that made it.
+            Mementos::mint($turn, $this->mementoTriggers(
+                $turn, $sceneBefore, $scene, $elitesBefore, $captivesBefore, $companionsBefore,
+                $fall, $reactionRolls, $endeavorFilled,
+            ));
+
+            // And what a tale that is already finished has to say about it.
+            //
+            // Same discipline again, pointed at the past: the engine reads the
+            // RHYME off facts it has already fixed — including the kind of
+            // keepsake just minted, which comes back as a plain word — and
+            // hands it outward. Which closed book answers, and whether one is
+            // allowed to at all, is decided entirely outside the engine. A
+            // player with no finished tales behind them simply never hears one.
+            $echo = Echoes::consider($turn, $this->echoRhymes(
+                $turn, $sceneBefore, $scene, $companionTiersBefore, $finale,
+            ), $dice);
+
             $turn->update([
                 'status' => Turn::STATUS_COMPLETE,
                 'resolution' => [
@@ -528,24 +562,19 @@ class TurnResolver
                     // is nearly all of them — and the plain facts of it when it
                     // did, in the words the chapter will be written from.
                     'finale' => $finale,
+
+                    // One line out of a book of theirs that is already closed,
+                    // surfacing because this moment rhymed with the moment that
+                    // preserved it. Null on nearly every turn of every tale,
+                    // and null forever on a player's first one — a shelf with
+                    // nothing on it is silence, never an invitation to invent a
+                    // memory the player did not live.
+                    'echo' => $echo,
                 ],
                 'branch_trigger' => $trigger->value,
                 'meters_snapshot' => $character->meters,
                 'resolved_at' => now(),
             ]);
-
-            // What this turn leaves on the shelf.
-            //
-            // The facts are final above, so the moment is settled: the engine
-            // reads the notable ones straight out of them and hands them
-            // outward. It is minted NOW, not at narration, so the keepsake
-            // survives an evening Claude is down — and the engine keeps no
-            // reference to what came back, because a memento is memory and
-            // must never be able to reach the mechanics that made it.
-            Mementos::mint($turn, $this->mementoTriggers(
-                $turn, $sceneBefore, $scene, $elitesBefore, $captivesBefore, $companionsBefore,
-                $fall, $reactionRolls, $endeavorFilled,
-            ));
 
             // The tale that ran out of body. No next turn is opened — there is
             // nothing left to choose — and the book closes behind the fall's
@@ -2042,6 +2071,65 @@ class TurnResolver
         }
 
         return $candidates;
+    }
+
+    /**
+     * What this turn rhymed with, if it rhymed with anything.
+     *
+     * DETECTION ONLY, and the same discipline the memento triggers live by:
+     * every line below reads a fact this resolution has already fixed, nothing
+     * here rolls, and nothing here so much as names the echo model. Whether any
+     * of it is answered — and by which closed book — is decided outside the
+     * engine, by App\Services\Echoes.
+     *
+     * The kind of keepsake just minted arrives as a plain word, which is the
+     * only thing the engine is ever told about a memento: it says WHICH moment
+     * happened and grants nothing.
+     *
+     * @param  array<int, string>  $tiersBefore  Bond tiers at the top of the turn.
+     * @param  array<string,mixed>|null  $finale
+     * @return list<string>
+     */
+    private function echoRhymes(Turn $turn, Scene $before, Scene $after, array $tiersBefore, ?array $finale): array
+    {
+        $rhymes = [];
+        $minted = Mementos::mintedTrigger($turn);
+
+        // A mark taken, and a score closed. Both read off the moment the shelf
+        // already judged notable enough to keep something from.
+        if ($minted === 'scar_taken') {
+            $rhymes[] = Echoes::THE_MARK;
+        }
+        if ($minted === 'rival_settled') {
+            $rhymes[] = Echoes::THE_RIVAL;
+        }
+
+        // Somebody who crossed into sworn during this turn — or somebody who
+        // is not walking anywhere any more. The two ends of the same thing,
+        // and the only two points on a bond worth remembering another life over.
+        $sworn = Companions::beside($after)->contains(
+            fn (Actor $companion) => Companions::tier($companion) === Companions::SWORN
+                && ($tiersBefore[$companion->id] ?? null) !== Companions::SWORN,
+        );
+
+        if ($sworn || $minted === 'companion_lost') {
+            $rhymes[] = Echoes::THE_COMPANY;
+        }
+
+        // Ground opening under them: the first ground of the tale, or new
+        // ground crossed into. The land itself is fixed for a campaign's life,
+        // so the match is made outside; this only says that a place just opened.
+        if ($turn->number === 1 || $after->id !== $before->id) {
+            $rhymes[] = Echoes::OLD_GROUND;
+        }
+
+        // An ending gathering. Only the turn it ARMS on — a card sitting on the
+        // table for ten chapters is not a moment.
+        if (($finale['event'] ?? null) === 'armed') {
+            $rhymes[] = Echoes::THE_GATHERING;
+        }
+
+        return $rhymes;
     }
 
     /**

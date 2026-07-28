@@ -580,6 +580,36 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Echoes (the shelf of finished books becomes one library)
+    |--------------------------------------------------------------------------
+    | Every tale used to begin in total amnesia. When a moment in the current
+    | one rhymes with a moment a CLOSED book already preserved — a mark taken
+    | where a mark was once taken, a score settled, familiar land underfoot —
+    | the engine may surface that preserved line as a memory. Quotation, never
+    | invention: an empty shelf of finished tales is simply silence, and Claude
+    | is never asked to remember on the player's behalf.
+    |
+    | All three numbers exist to keep it FOUND rather than announced. `chance`
+    | is how often a qualifying rhyme actually speaks up — a memory that
+    | surfaces every time the trigger fires is a notification, not a memory.
+    | `campaign_cap` is the ceiling on a whole tale: four is a handful of
+    | moments where the shelf leans in, and a fifth would start reading as a
+    | mechanic. `cooldown_chapters` keeps two of them out of the same stretch;
+    | a chapter is one turn's telling, so the wait is counted in turns.
+    |
+    | WHICH moments rhyme and WHICH column each draws from are not tunable
+    | here: that is the closed rhyme table in App\Services\Echoes, detected by
+    | the resolver from facts it has already fixed.
+    */
+
+    'echoes' => [
+        'chance' => 0.25,
+        'campaign_cap' => 4,
+        'cooldown_chapters' => 3,
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
     | Vignette shape
     |--------------------------------------------------------------------------
     */
