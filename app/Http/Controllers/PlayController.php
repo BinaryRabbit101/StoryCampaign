@@ -215,6 +215,11 @@ class PlayController extends Controller
             // no badge, no push, nothing to answer. The player finds it, the
             // way they find a keepsake.
             'heard' => $turn->resolution['rumor']['line'] ?? null,
+            // And a line out of one of their own finished books, when this
+            // moment rhymed with the moment that preserved it. Same weight as
+            // the news above and for the same reason: it is memory, not a
+            // result, and there is nothing on this screen to do about it.
+            'remembered' => $turn->resolution['echo']['line'] ?? null,
         ];
     }
 

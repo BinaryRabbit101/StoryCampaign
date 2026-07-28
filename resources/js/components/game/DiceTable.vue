@@ -22,6 +22,13 @@ const props = defineProps<{
      * result, and there is nothing on this screen to do about it.
      */
     heard?: string | null;
+    /**
+     * Something remembered out of one of this player's own finished tales,
+     * quoted because this moment rhymed with the moment that preserved it.
+     * Quieter still than the news above: it is memory, it grants nothing, and
+     * the player is meant to come across it rather than be told about it.
+     */
+    remembered?: string | null;
 }>();
 
 const emit = defineEmits<{ continue: [] }>();
@@ -443,6 +450,17 @@ const hasReasons = (row: RollRow) =>
                 class="mt-5 text-center text-sm text-muted-foreground italic"
             >
                 {{ heard }}
+            </p>
+
+            <!-- And a line out of a book of theirs that is already closed,
+                 at exactly the weight of the news above it. No badge, no
+                 colour, nothing to answer — the shelf leaning in once, and
+                 then leaving them to it. -->
+            <p
+                v-if="remembered"
+                class="mt-5 text-center text-sm text-muted-foreground italic"
+            >
+                {{ remembered }}
             </p>
 
             <!-- The wait ahead, offered where the player already is. The

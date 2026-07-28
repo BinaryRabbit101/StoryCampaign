@@ -296,6 +296,22 @@ class Mementos
     }
 
     /**
+     * The KIND of keepsake this turn left behind, as a plain word off the
+     * closed trigger list — or null on the many turns that left none.
+     *
+     * The second thing the engine may ask about a keepsake, and it asks it
+     * here rather than of the model, for the same reason it asks for the count
+     * here: nothing under app/Game may so much as name that class. What comes
+     * back is a string. It grants nothing, prices nothing, and reaches no card
+     * and no roll — it only tells the resolver WHICH moment just happened, so
+     * the moment can be handed on to whatever else cares about it.
+     */
+    public static function mintedTrigger(Turn $turn): ?string
+    {
+        return self::forTurn($turn)?->trigger;
+    }
+
+    /**
      * The shelf, in chapter order — what the campaign page shows and what the
      * book's closing section is compiled from. An empty shelf is an empty
      * array, and every reader of it draws nothing at all rather than an empty

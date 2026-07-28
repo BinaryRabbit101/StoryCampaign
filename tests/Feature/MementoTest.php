@@ -552,6 +552,10 @@ class MementoTest extends TestCase
      * A rumor lives by exactly the same rule and is checked by exactly the
      * same sweep: it is news about elsewhere, it grants nothing, and the
      * engine may only ever detect the MOMENT and hand the pick outward.
+     *
+     * An echo is the third of them, pointed at the past. It quotes a line out
+     * of a finished book and instantiates nothing — so the resolver detects
+     * the RHYME and hands the pick outward, and `EchoLine` never appears here.
      */
     public function test_the_shelf_and_the_hearsay_never_reach_the_engine()
     {
@@ -569,8 +573,9 @@ class MementoTest extends TestCase
             $source = (string) file_get_contents($file->getPathname());
 
             // `Rumors` (the service the resolver calls) is fine; `Rumor` (the
-            // model) is not — the word boundary is what tells them apart.
-            foreach (['Memento', 'Rumor'] as $model) {
+            // model) is not — the word boundary is what tells them apart. The
+            // same pairing holds for `Echoes` against `EchoLine`.
+            foreach (['Memento', 'Rumor', 'EchoLine'] as $model) {
                 if (preg_match("/\\b{$model}\\b/", $source)) {
                     $offenders[] = "{$file->getPathname()} ({$model})";
                 }
@@ -578,7 +583,7 @@ class MementoTest extends TestCase
         }
 
         $this->assertSame([], $offenders,
-            'app/Game reached for an inert model — mementos and rumors must stay mechanically inert');
+            'app/Game reached for an inert model — mementos, rumors, and echoes must stay mechanically inert');
     }
 
     /**

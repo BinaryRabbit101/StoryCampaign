@@ -219,7 +219,27 @@ adjudicates legality or outcomes — it is only ever handed resolved facts.
   most one keepsake per chapter and ~12 per tale (`config/game.php`
   `mementos`), with engine-templated words written the instant the turn
   resolves; the narrator may only reword name/line inside a clamp, and the
-  shelf compiles into the book's closing section).
+  shelf compiles into the book's closing section),
+  `Echoes` (the shelf of finished books becomes one library: when a moment in
+  the present tale RHYMES with a moment a CLOSED book already preserved, one
+  line out of that book surfaces as a memory. Five rhymes, closed and in
+  priority order — `the_mark` (a `scar_taken` keepsake minted) / `the_rival`
+  (`rival_settled`) / `the_company` (a bond crossed into sworn, or
+  `companion_lost`) / `old_ground` (a scene opened in a land another tale of
+  theirs was set in) / `the_gathering` (the finale ARMED this turn) — each
+  drawing only from its own column: a keepsake of the matching trigger, or a
+  chapter's own `intent_line`. Sources are exclusively the SAME user's ENDED
+  campaigns (`status = completed`); a first tale is silent forever, and Claude
+  is never asked to remember on the player's behalf. The row on `echoes` stores
+  the source campaign, type, and id, so the quote is re-derived from the real
+  persisted row rather than copied — the narrator may reword only the FRAME
+  around it. Rare by four caps in `config/game.php` `echoes`: a seeded chance,
+  `campaign_cap` 4, `cooldown_chapters` 3 (counted in turns — a chapter is one
+  turn's telling), one per turn, and each source line once per campaign. No
+  push; it lands as the `echo` resolution key, one narrator block, and one
+  quiet line beside the rumor line on the resolved-turn screen. The model is
+  `App\Models\EchoLine`, not `Echo`: `echo` is a PHP language construct and
+  `class Echo` will not parse).
 - Affordances are JSON tags on `scene_features` (e.g.
   `{"reachable_via":["climb","swing"],"height":11}`). Zone-level features
   (`scene_id` null) are templates: dressed scenes (`state.dressed`) draw a
@@ -421,6 +441,23 @@ adjudicates legality or outcomes — it is only ever handed resolved facts.
   the existing `BookCompiler::close` (coda, flourish, compilation) fired exactly
   once behind the chapter that tells it, and a fall past the scar cap mid-finale
   ends the tale through the scar path with no special casing anywhere.
+
+- An echo is QUOTATION, never invention, and never a second door between
+  worlds. It quotes a line the player really lived and instantiates NOTHING —
+  no actor, zone, item, grudge, or feature ever crosses campaigns through it,
+  and a past companion's name is spoken as memory and nothing else. Only CLOSED
+  books of the SAME user may speak: a sibling tale still being played is not a
+  memory yet, another player's tales are not this player's life, and an empty
+  shelf is silence with no fallback, because every fallback is a fabrication.
+  The verbatim quote survives any rewording (the clamp checks it against the
+  SOURCE row, not a copy, and refuses the whole proposal otherwise — the
+  wrapper is all Claude may move); the engine's words stand on any violation.
+  It is colour in every direction — no card, no odds part, no board group, no
+  reveal, no number, no push — enforced by direction as well as by type, in the
+  same `app/Game` sweep the shelf and the queue live under. And it is FOUND
+  rather than announced: a seeded roll, a cap on the tale, a cooldown between
+  them, one per turn, and one visit per source line. A memory that arrives on
+  schedule has stopped being a memory.
 
 ## Widget
 

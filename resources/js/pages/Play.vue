@@ -735,6 +735,7 @@ const healthPct = computed(
         :turn-number="rollTable.turn_number"
         :rows="rollTable.rows"
         :heard="rollTable.heard"
+        :remembered="rollTable.remembered"
         @continue="rollsSeen"
     >
         <template #downtime>
