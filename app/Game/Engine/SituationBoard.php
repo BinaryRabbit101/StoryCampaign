@@ -66,6 +66,14 @@ class SituationBoard
             ]);
         }
 
+        // The world's patience with stillness, from the very first tick. This
+        // is scene state, so it belongs on the board (unlike a scar, which is
+        // the sheet's) — and it has to be here early, because the whole point
+        // of pressure is that waiting again is a readable choice rather than
+        // an ambush the player walked into.
+        $groups[] = self::group('pressure', 'The stillness', 'ground',
+            array_values(array_filter([Pressure::line(Pressure::of($scene))])));
+
         $groups[] = self::group('captives', 'In your grip', 'foe',
             $scene->actors()->where('status', 'restrained')->pluck('name')->all());
 
@@ -139,7 +147,7 @@ class SituationBoard
             }
 
             $parts[] = match ($group['key']) {
-                'moment', 'alarm', 'sky' => implode(' ', $items),
+                'moment', 'alarm', 'pressure', 'sky' => implode(' ', $items),
                 'self' => implode('. ', $items).'.',
                 default => "{$group['title']}: ".implode(', ', $items).'.',
             };

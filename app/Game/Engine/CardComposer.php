@@ -89,7 +89,7 @@ class CardComposer
             $cards[$card->slot->value][] = $card;
         }
 
-        foreach ($this->genericCards($character, $actors) as $card) {
+        foreach ($this->genericCards($character, $scene, $actors) as $card) {
             $cards[$card->slot->value][] = $card;
         }
 
@@ -1015,7 +1015,7 @@ class CardComposer
      *
      * @return list<ActionCard>
      */
-    private function genericCards(Character $character, $actors): array
+    private function genericCards(Character $character, Scene $scene, $actors): array
     {
         $cards = [
             new ActionCard(
@@ -1028,7 +1028,14 @@ class CardComposer
                 slot: TurnSlot::Main,
                 verb: 'wait',
                 label: 'Wait',
-                description: 'Hold still and let the scene move first.',
+                // The card has always promised that the scene moves first. It
+                // is only true once something is actually coming, so the card
+                // says WHEN — a world beat the player could not see coming is
+                // an ambush, not a consequence of their own choice, and this
+                // turn commits the moment they submit it.
+                description: Pressure::waitWouldBreak($scene)
+                    ? 'Hold still and let the scene move first. The stillness here has stretched as far as it goes: wait again and this place moves without you.'
+                    : 'Hold still and let the scene move first.',
             ),
         ];
 

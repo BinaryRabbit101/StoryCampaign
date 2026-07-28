@@ -340,6 +340,44 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Pressure (the world moves when you don't)
+    |--------------------------------------------------------------------------
+    | A stall counter on the scene fills while a turn casts no die, the player
+    | stays put, and nobody is fighting. At the threshold the world spends the
+    | initiative it was handed: one beat from a closed table, rolled with the
+    | turn's own seeded dice and executed through machinery that already existed.
+    |
+    | The two weights ARE the cadence, and the cadence is the whole feature.
+    | An explicit wait is an invitation and out-paces idle poking, so two waits
+    | reach the threshold and three quiet turns of anything else also reach it.
+    | Raising the threshold does not make the world calmer — it makes waiting a
+    | lie again, which is the wound this heals.
+    |
+    | Pressure is combat-silent by construction: while an enemy stands in the
+    | open the alarm clock above owns escalation, and a second escalator on the
+    | same fight would be difficulty creep in a costume.
+    |
+    | The beat weights only decide how often the world reaches for each kind of
+    | move. WHICH beats are even eligible is not tunable: a beat that could not
+    | cost or change anything here is filtered out of the pool before any of
+    | these numbers are read, and an empty pool holds the counter rather than
+    | inventing content. That table is App\Game\Engine\Pressure.
+    */
+
+    'pressure' => [
+        'quiet_weight' => 1,
+        'wait_weight' => 2,
+        'threshold' => 3,
+        'beats' => [
+            'arrival' => 30,
+            'reveal' => 25,
+            'grudge' => 15,
+            'mishap' => 30,
+        ],
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
     | Vignette shape
     |--------------------------------------------------------------------------
     */
