@@ -9,6 +9,7 @@ use App\Game\Engine\Companions;
 use App\Game\Engine\Grudges;
 use App\Game\Engine\Hours;
 use App\Game\Engine\Scars;
+use App\Game\Engine\Standings;
 use App\Models\Chapter;
 use App\Models\Turn;
 use App\Notifications\TurnReadyNotification;
@@ -196,6 +197,12 @@ class Narrator
         // and never as a status the chapter is allowed to announce.
         $company = Companions::narratorBlock($turn);
 
+        // How the ground itself holds them, and whether this chapter moved it.
+        // Plain facts about doors, prices, and greetings — never a reputation
+        // the chapter is allowed to announce, and empty on ground that has no
+        // opinion of them, which is most of it.
+        $standing = Standings::narratorBlock($turn);
+
         // The floor, when the character hit it. Where they went down, what
         // happened while they were out, where they came round, and the
         // permanent mark it left — plain facts, no mechanics, and the chapter's
@@ -338,7 +345,7 @@ Some beats carry the player's own words for that moment. Those words are voice a
 
 ## How the scene answered
 {$reaction}
-{$world}{$endeavor}{$figures}{$company}{$fall}{$news}{$keepsake}{$criticals}
+{$world}{$endeavor}{$figures}{$company}{$standing}{$fall}{$news}{$keepsake}{$criticals}
 ## Where the vignette stops
 {$turn->branch_trigger}: the chapter must end on this note, at a clean decision point, leaving the situation open for the player's next choice. {$wordLow}-{$wordHigh} words.
 

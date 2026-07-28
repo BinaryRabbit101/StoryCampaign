@@ -9,6 +9,7 @@ use App\Game\Verb;
 use App\Game\VerbFamily;
 use App\Models\Actor;
 use App\Models\Character;
+use App\Models\Grudge;
 use App\Models\Scene;
 use App\Models\Turn;
 use App\Models\Zone;
@@ -61,6 +62,11 @@ class TurnResolver
                 // against the same list a turn ago, so an old wound charges the
                 // die exactly what the card said it would.
                 'scars' => Scars::names($character),
+                // What this ground remembers about them, read BEFORE anything
+                // this turn does to it. The cards were priced under the old
+                // standing, so the die is measured against the same one, and
+                // whatever this turn earns lands on the cards still to come.
+                'standing' => Standings::of($scene),
                 'concealed' => false,
                 'time_slowed' => false,
                 'hastened' => false,
@@ -346,6 +352,16 @@ class TurnResolver
                 Grudges::recordDowning($sceneBefore, $turn);
             }
 
+            // And the GROUND remembers. Every fact standing behind this is
+            // already fixed above — a captive loose, an elite down, a score
+            // closed without killing, somebody who broke and ran, a piece of
+            // this place put beyond use, a district that had to answer. The
+            // ledger belongs to the zone the scene stood in, which is where
+            // all of it happened, whatever the transition did afterwards.
+            $standingShift = Standings::record($sceneBefore, $turn, $this->standingEvents(
+                $turn, $sceneBefore, $scene, $outcomes, $captivesBefore, $elitesBefore, $forced,
+            ));
+
             // Companions the road provided, rather than ones the player asked
             // for. Both paths end the same way — a consensual offer pair on the
             // next turn's cards — and both stay silent while the party is full.
@@ -450,6 +466,12 @@ class TurnResolver
                     // world does not produce news faster than the character
                     // runs into people to hear it from.
                     'rumor' => $heard,
+                    // The ground's opinion of them, moved. One plain sentence
+                    // on the turns it actually shifted, and null on every other
+                    // one — a place that thinks exactly what it thought
+                    // yesterday is not news, and the tier itself is carried by
+                    // the board and the narrator's own block, not by this.
+                    'standing' => $standingShift,
                 ],
                 'branch_trigger' => $trigger->value,
                 'meters_snapshot' => $character->meters,
@@ -1766,11 +1788,22 @@ class TurnResolver
     {
         $enemies = $scene->actors()->where('status', 'active')->where('kind', 'enemy')->get();
 
+        // What this ground thinks of the player colors how somebody who has
+        // only just walked into it carries themselves — nothing more. It never
+        // spawns, removes, or converts anybody, and it never reaches a lurker.
+        $standing = Standings::of($scene);
+
         foreach ($enemies as $enemy) {
             $tags = $enemy->tags ?? [];
             if (($tags['lurking'] ?? false) || ($tags['truce'] ?? false)) {
                 continue;
             }
+
+            // No telegraph yet means this is their first one: they have only
+            // just arrived. Everybody already standing here re-rolls unbiased —
+            // whatever the town thinks, the fight in front of them is the fight
+            // in front of them.
+            $arriving = ! isset($tags['intent']);
 
             // An enemy who fumbled their swing spends the next beat hauling
             // themselves back upright — the opening they left is real, and
@@ -1784,12 +1817,25 @@ class TurnResolver
             }
 
             // A won angle is pressed home, not squandered on a new feint.
-            $tags['intent'] = ($tags['angle'] ?? false) ? 'press' : match ($dice->between(1, 6)) {
-                4 => 'windup',
-                5 => 'guard',
-                6 => 'circle',
-                default => 'press',
-            };
+            if ($tags['angle'] ?? false) {
+                $tags['intent'] = 'press';
+            } else {
+                // One draw off the turn's own stream, exactly as before — the
+                // standing only bends the face it came up on, so hostile ground
+                // leans them toward pressing and friendly ground toward
+                // hesitating, and neither ever settles it outright.
+                $roll = $dice->between(1, 6);
+                if ($arriving) {
+                    $roll = Standings::bendFirstIntent($roll, $standing);
+                }
+
+                $tags['intent'] = match ($roll) {
+                    4 => 'windup',
+                    5 => 'guard',
+                    6 => 'circle',
+                    default => 'press',
+                };
+            }
             $enemy->update(['tags' => $tags]);
         }
     }
@@ -1926,6 +1972,78 @@ class TurnResolver
         }
 
         return $candidates;
+    }
+
+    /**
+     * What this turn did to the ground's opinion of them.
+     *
+     * DETECTION ONLY, and from facts this resolution has already fixed — the
+     * same discipline the memento triggers live by, and the reason standing
+     * adds no new event source anywhere. The table is closed and lives with
+     * App\Game\Engine\Standings; nothing here rolls, and nothing here reads a
+     * note, a genre, or a land.
+     *
+     * Grudges are LISTENED to and never touched: the flights and the settling
+     * both happened above, and this only reads what they wrote down.
+     *
+     * @param  list<BeatOutcome>  $outcomes
+     * @param  list<int>  $captivesBefore
+     * @param  list<int>  $elitesBefore
+     * @return list<string>
+     */
+    private function standingEvents(Turn $turn, Scene $before, Scene $after, array $outcomes, array $captivesBefore, array $elitesBefore, bool $forced): array
+    {
+        $events = [];
+
+        // Somebody cut loose, and whole.
+        foreach ($this->rescuedThisTurn($captivesBefore) as $ignored) {
+            $events[] = Standings::CAPTIVE_FREED;
+        }
+
+        // The thing this place could not handle, handled.
+        foreach (Actor::whereIn('id', $elitesBefore)->get() as $elite) {
+            if (in_array($elite->status, ['defeated', 'dead', 'restrained'], true)) {
+                $events[] = Standings::ELITE_BEATEN;
+            }
+        }
+
+        // A score closed without killing — bargained out, or taken and kept.
+        // Read off the status the settle path already left on the actor, so
+        // the difference between mercy and a body is the world's own record.
+        $settled = Grudges::settledNames($turn);
+        if ($settled !== []) {
+            $spared = Actor::whereIn('scene_id', array_unique([$before->id, $after->id]))
+                ->whereIn('name', $settled)
+                ->whereIn('status', ['fled', 'restrained'])->count();
+            $events = array_merge($events, array_fill(0, $spared, Standings::RIVAL_SPARED));
+        }
+
+        // Somebody broke and ran from here, and the tale wrote it down. Read
+        // from the memory itself rather than from the flight, so a faceless
+        // template dupe nobody will ever meet again costs nothing.
+        $born = Grudge::where('campaign_id', $turn->campaign_id)->get()
+            ->filter(fn (Grudge $grudge) => collect($grudge->history)->contains(
+                fn (array $entry) => ($entry['turn_id'] ?? null) === $turn->id
+                    && ($entry['event'] ?? null) === 'fled',
+            ))->count();
+        $events = array_merge($events, array_fill(0, $born, Standings::GRUDGE_BORN));
+
+        // A piece of this place put beyond use by the player's own hand —
+        // once per scene, however many crates went. An accident this place had
+        // on its own is not something anybody blames them for.
+        foreach ($outcomes as $outcome) {
+            if (! $outcome->skipped && $outcome->verb === Verb::Break->value
+                && $outcome->succeeded() && Standings::chargeWreck($before)) {
+                $events[] = Standings::GROUND_WRECKED;
+            }
+        }
+
+        // The district had to come and deal with it.
+        if ($forced) {
+            $events[] = Standings::ALARM_ANSWERED;
+        }
+
+        return $events;
     }
 
     /**

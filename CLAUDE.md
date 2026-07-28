@@ -147,6 +147,16 @@ adjudicates legality or outcomes — it is only ever handed resolved facts.
   transitions), and both end in a consensual pair of ordinary main-slot cards.
   Loss is decided at scene exit against the tier and mints the `companion_lost`
   memento; the name never respawns. `config/game.php` `companions`),
+  `Standings` (places remember what you did there: a campaign-scoped `standings`
+  row per zone — clamped ±3, append-only `{turn_id, event, shift}` history —
+  moved ONLY by a closed table of facts the resolver already fixed (captive
+  freed / elite beaten / rival spared +1; grudge born / ground wrecked, once
+  per scene / alarm answered −1). It tiers into plain words
+  (hostile/wary/silent/known/welcome) the board and narrator carry, prices the
+  SOCIAL verbs alone by one itemized `Odds::STANDING` point in either direction,
+  and biases a newly arrived enemy's FIRST telegraph through the existing seeded
+  intent roll. Zero emits nothing anywhere; the evolver never touches it.
+  `config/game.php` `standing`),
   `ActionCard`, `BeatOutcome`.
 - Anti-repetition systems (all engine-side, no LLM): every visible feature
   and actor carries capability-free `inspect`/`improvise`/`speak` cards, so
@@ -340,6 +350,18 @@ adjudicates legality or outcomes — it is only ever handed resolved facts.
   initiates ends in an engine-offered accept/decline pair, sending someone on
   their way is never a dead choice, and a third candidate's offer simply does
   not fire while the party is at its cap of two.
+- A standing is earned in front of the people who hold it, and zero says
+  nothing. It moves ONLY through the closed event table — notes, genre, drive,
+  land, narration, and the evolver never touch it, and the history is
+  append-only like a grudge's. It reaches the arithmetic exactly once, through
+  `Odds::STANDING`, as ONE point on the social/presence verbs however far the
+  score has run: a ladder that grew with the number would turn a memory into a
+  stat to farm, and steel and stone do not care what the town thinks. It
+  DEGRADES social cards and never removes one — a shunned zone still offers
+  speak. The arrival bias bends the draw the existing intent machinery already
+  cast, for a newcomer's first telegraph only; standing never spawns, removes,
+  or converts an actor, and never touches `hidden`/`lurking`. At zero there is
+  no board line, no odds part, no fact, and no row: an unknown is unknown.
 
 ## Widget
 

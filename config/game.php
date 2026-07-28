@@ -462,6 +462,30 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Standing (places remember what you did there)
+    |--------------------------------------------------------------------------
+    | A campaign-scoped ledger per zone, moved ONLY by the closed event table in
+    | App\Game\Engine\Standings — facts the resolver had already fixed. WHICH
+    | events move it is not tunable here, and neither is what it is worth: one
+    | itemized point on the social verbs, no matter how far the score has run.
+    | The evolver never touches it.
+    |
+    | `clamp` is the whole shape of the feature. Three either way is a place
+    | that greets you differently; ten would be a reputation stat to farm.
+    | Raising it does not make standing matter more — it only makes it take
+    | longer to come back from, in a game where coming back is the point.
+    |
+    | `wrecks_per_scene` keeps one bad afternoon from being ten of them. A
+    | player who takes four crates apart in one room took one room apart.
+    */
+
+    'standing' => [
+        'clamp' => 3,
+        'wrecks_per_scene' => 1,
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
     | Previously On (the returning-player recap)
     |--------------------------------------------------------------------------
     | A short, dismissible panel above the form, compiled from strings the

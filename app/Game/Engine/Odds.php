@@ -243,6 +243,35 @@ class Odds
     ];
 
     /**
+     * What this ground's opinion of them is worth, and to what.
+     *
+     * A zone's standing (Standings::of) is a clamped ±3 ledger moved only by
+     * resolved facts. It reaches the arithmetic exactly once, here, as ONE
+     * point in whichever direction the score leans — the size of the score
+     * never reaches a card. A place that loathes you is not mechanically worse
+     * than one that dislikes you; it is the same closed door, and a ladder that
+     * grew with the number would turn a memory into a stat to farm.
+     *
+     * SOCIAL AND PRESENCE ONLY. Stealth, steel, and stone do not care what the
+     * town thinks — a wall is the same height in a place that spits your name
+     * — and the verbs listed are exactly the ones the ruined-voice scar prices,
+     * because they are the same faculty seen from the other side. Verbs that
+     * cast no die (Odds::QUIET) are absent: `command` and `bargain` are settled
+     * before a die is asked for, and a table entry the dice can never honor is
+     * a price nobody pays.
+     *
+     * One point on purpose. It sits an order below anything the player built,
+     * inside the ±4 spread of CONDITIONS, and it degrades a social card rather
+     * than removing one: a shunned zone still offers speak.
+     */
+    private const STANDING = [
+        'verbs' => ['speak', 'persuade', 'deceive', 'calm', 'intimidate', 'recruit'],
+        'capabilities' => ['persuade', 'deceive', 'calm', 'intimidate'],
+        'welcome' => 'Your name carries here',
+        'hostile' => 'Your name is spat here',
+    ];
+
+    /**
      * What a bargain buys, and on which side of the arithmetic.
      *
      * A bargain card is the plain card with a named complication attached and a
@@ -372,6 +401,13 @@ class Odds
             $parts[] = $part;
         }
 
+        // What this ground remembers about them. Same table for the card's
+        // forecast and for the die, off the same live conditions — so a place
+        // that greets them badly says so on the card rather than in the roll.
+        foreach (self::standingParts((int) ($conditions['standing'] ?? 0), $card['verb'], $card['capability'] ?? null) as $part) {
+            $parts[] = $part;
+        }
+
         // The deal, if this card is one. The complication was printed on the
         // card beside this line; the edge is the half the arithmetic owes back.
         $edge = self::bargainPart($card['bargain']['key'] ?? null, 'difficulty');
@@ -492,6 +528,32 @@ class Odds
         }
 
         return $parts;
+    }
+
+    /**
+     * What this ground's standing costs (or spares) a given card. Public
+     * because it is the one place the standing table is read; nothing else may
+     * keep a copy.
+     *
+     * @return list<Part>
+     */
+    public static function standingParts(int $standing, string $verb, ?string $capability = null): array
+    {
+        // Silent ground emits nothing anywhere, and that includes here.
+        if ($standing === 0) {
+            return [];
+        }
+
+        $matched = in_array($verb, self::STANDING['verbs'], true)
+            || ($capability !== null && in_array($capability, self::STANDING['capabilities'], true));
+
+        if (! $matched) {
+            return [];
+        }
+
+        return $standing > 0
+            ? [['label' => self::STANDING['welcome'], 'amount' => -1]]
+            : [['label' => self::STANDING['hostile'], 'amount' => 1]];
     }
 
     /**

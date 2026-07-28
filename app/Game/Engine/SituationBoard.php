@@ -126,6 +126,14 @@ class SituationBoard
                 Hours::line(Hours::of($scene->campaign)),
             ])));
 
+        // How this ground holds them: what the people here remember about the
+        // last time they came through. Silent ground says nothing at all —
+        // which is most ground, and an unknown is unknown. It sits with the
+        // air and the light because it is the same kind of fact about the
+        // place: something standing over the scene that the cards then price.
+        $groups[] = self::group('standing', 'How this place holds you', 'ground',
+            array_values(array_filter([Standings::line(Standings::of($scene))])));
+
         $self = [];
         $health = $character->meters['health'];
         $self[] = "Health {$health['current']}/{$health['max']}";
@@ -170,7 +178,7 @@ class SituationBoard
             }
 
             $parts[] = match ($group['key']) {
-                'moment', 'alarm', 'pressure', 'sky' => implode(' ', $items),
+                'moment', 'alarm', 'pressure', 'sky', 'standing' => implode(' ', $items),
                 'self' => implode('. ', $items).'.',
                 default => "{$group['title']}: ".implode(', ', $items).'.',
             };
