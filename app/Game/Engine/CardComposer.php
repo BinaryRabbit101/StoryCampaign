@@ -24,8 +24,16 @@ class CardComposer
 
     private const GAPS = ['short' => 1, 'medium' => 2, 'far' => 3];
 
-    /** @return array{pre: list<array>, main: list<array>, post: list<array>, companions: list<array{id: int, name: string, cards: list<array>}>} */
-    public function compose(Character $character, Scene $scene): array
+    /**
+     * @param  Dice|null  $dice  The seeded stream the bargain pass rolls on. The
+     *                           resolver hands down the turn's own dice so the
+     *                           offer moves from turn to turn; callers with no
+     *                           stream (the first turn, a test recomposing) get
+     *                           one seeded off the scene, which keeps the pass
+     *                           deterministic rather than absent.
+     * @return array{pre: list<array>, main: list<array>, post: list<array>, companions: list<array{id: int, name: string, cards: list<array>}>}
+     */
+    public function compose(Character $character, Scene $scene, ?Dice $dice = null): array
     {
         $capabilities = $character->effectiveCapabilities();
         // Only what the player can perceive makes cards: hidden features wait
@@ -129,6 +137,14 @@ class CardComposer
             $cards,
         );
 
+        // The deals, last of all — so a bargain inherits whatever the load
+        // already did to its sibling, and so the plain version is always the
+        // one standing first in the list.
+        $cards = $this->offerBargains(
+            $cards, $character, $scene,
+            $dice ?? new Dice($scene->id * 2654435761 % PHP_INT_MAX),
+        );
+
         $composed = array_map(
             fn (array $slotCards) => array_map(fn (ActionCard $c) => $c->toArray($conditions), $slotCards),
             $cards,
@@ -199,6 +215,75 @@ class CardComposer
     }
 
     /**
+     * One seeded pass for the deals.
+     *
+     * A bargain is never the whole offer and never stands alone: it is inserted
+     * immediately AFTER the honest version of the same beat, so taking it is
+     * always a choice against the plain card rather than instead of it. The
+     * ≥2-legal-cards invariant is untouched — this only ever adds.
+     *
+     * At most one per turn (config), and only sometimes: a deal on the table
+     * every single turn stops being a decision and becomes a tax on reading.
+     * Eligibility is decided entirely by Bargains, which refuses any offer
+     * whose complication could not cost the player anything here.
+     *
+     * @param  array{pre: list<ActionCard>, main: list<ActionCard>, post: list<ActionCard>}  $cards
+     * @return array{pre: list<ActionCard>, main: list<ActionCard>, post: list<ActionCard>}
+     */
+    private function offerBargains(array $cards, Character $character, Scene $scene, Dice $dice): array
+    {
+        $cap = (int) config('game.bargains.per_turn', 1);
+        $chance = (float) config('game.bargains.chance', 0);
+
+        if ($cap < 1 || $chance <= 0) {
+            return $cards;
+        }
+
+        $state = Bargains::sceneState($character, $scene, $cards['pre']);
+
+        $candidates = [];
+        foreach (['pre', 'main', 'post'] as $slot) {
+            foreach ($cards[$slot] as $index => $card) {
+                foreach (Bargains::keysFor($card, $state) as $key) {
+                    $candidates[] = ['slot' => $slot, 'index' => $index, 'key' => $key];
+                }
+            }
+        }
+
+        // Nothing eligible costs no die: a turn with no honest deal in it must
+        // not shift the stream for the turns that follow.
+        if ($candidates === [] || ! $dice->chance($chance)) {
+            return $cards;
+        }
+
+        $chosen = [];
+        for ($taken = 0; $taken < $cap && $candidates !== []; $taken++) {
+            $pick = $candidates[$dice->between(1, count($candidates)) - 1];
+            $chosen[$pick['slot']][$pick['index']] = $pick['key'];
+
+            // Never two deals on one card: the player would be reading three
+            // versions of the same beat and pricing none of them.
+            $candidates = array_values(array_filter(
+                $candidates,
+                fn (array $c) => $c['slot'] !== $pick['slot'] || $c['index'] !== $pick['index'],
+            ));
+        }
+
+        foreach ($chosen as $slot => $picks) {
+            $rebuilt = [];
+            foreach ($cards[$slot] as $index => $card) {
+                $rebuilt[] = $card;
+                if (isset($picks[$index])) {
+                    $rebuilt[] = Bargains::offer($card, $picks[$index]);
+                }
+            }
+            $cards[$slot] = $rebuilt;
+        }
+
+        return $cards;
+    }
+
+    /**
      * The price of full hands, written onto the cards that want one.
      *
      * A degraded card is still offered and still winnable — it just costs
@@ -225,6 +310,7 @@ class CardComposer
             cost: $card->cost,
             modifiers: $card->modifiers,
             composed: $card->composed,
+            bargain: $card->bargain,
         );
     }
 

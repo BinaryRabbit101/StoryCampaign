@@ -232,7 +232,7 @@ class TurnResolver
                 'resolved_at' => now(),
             ]);
 
-            return $this->openNextTurn($turn, $character, $scene, $trigger);
+            return $this->openNextTurn($turn, $character, $scene, $trigger, $dice);
         });
     }
 
@@ -346,7 +346,7 @@ class TurnResolver
         // against. Two copies of this arithmetic is exactly how a card would
         // start promising a DC the dice do not honor.
         $difficultyLedger = Odds::difficulty($card, $approach, $conditions);
-        $bonusLedger = Odds::bonus($conditions, $verb, $card['slot']);
+        $bonusLedger = Odds::bonus($conditions, $verb, $card['slot'], $card['bargain']['key'] ?? null);
         $difficulty = $difficultyLedger['value'];
         $bonus = $bonusLedger['value'];
 
@@ -387,6 +387,16 @@ class TurnResolver
                 CritConsequence::apply($crit, $verb, $card, $character, $scene, $conditions),
                 $facts,
             );
+        }
+
+        // The deal, settled. The edge was already spent above — it rode into
+        // the difficulty and the bonus as one more itemized line — and the
+        // price falls here, the instant the beat is done, whether the roll
+        // landed or not. Wrenching a gate open is loud even when it works, and
+        // a complication that only bites on a failure is the `risky` stance
+        // wearing a different name.
+        if (($card['bargain'] ?? null) !== null) {
+            $facts = array_merge($facts, Bargains::pay($card, $character, $scene, $conditions));
         }
 
         // The chosen attack form is narration color only: it never touched
@@ -1508,11 +1518,14 @@ class TurnResolver
         return $next;
     }
 
-    private function openNextTurn(Turn $turn, Character $character, Scene $scene, BranchTrigger $trigger): Turn
+    private function openNextTurn(Turn $turn, Character $character, Scene $scene, BranchTrigger $trigger, Dice $dice): Turn
     {
         $character = $character->fresh();
         $scene = $scene->fresh();
-        $cards = $this->composer->compose($character, $scene);
+        // The turn's own stream carries into the card pass, so whether a
+        // bargain is offered moves from turn to turn and still replays
+        // identically when the same turn is resolved again.
+        $cards = $this->composer->compose($character, $scene, $dice);
 
         // One board, two readings: the grouped bullets the player reads and
         // the paragraph the narrator reads are compiled from the same facts,

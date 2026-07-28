@@ -224,6 +224,29 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Bargain cards (a complication with a price tag)
+    |--------------------------------------------------------------------------
+    | Sometimes a card is offered twice: the honest version, and the same beat
+    | with a named consequence traded for a named edge — both quoted before the
+    | commit, and the consequence paid whether the roll lands or not.
+    |
+    | `chance` is how often a turn that HAS an honest deal available actually
+    | puts one on the table. Deliberately occasional: a deal every turn is not
+    | a decision, it is a tax on reading the list. `per_turn` caps how many may
+    | be offered at once — one, so the turn still has a shape.
+    |
+    | The deals themselves are two closed lists and neither is tunable here:
+    | the edge lives in App\Game\Engine\Odds::BARGAINS with every other number
+    | the dice honor, and the complication in App\Game\Engine\Bargains.
+    */
+
+    'bargains' => [
+        'chance' => 0.35,
+        'per_turn' => 1,
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
     | Vignette shape
     |--------------------------------------------------------------------------
     */

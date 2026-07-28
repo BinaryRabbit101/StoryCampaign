@@ -62,8 +62,11 @@ const rows = computed<Row[]>(() => {
     const grouped = new Map<string, ActionCard[]>();
 
     for (const card of props.cards) {
+        // A bargain is its own row, never a target chip on its plain sibling:
+        // it is a different beat with a different price, and collapsing the two
+        // together would hide the price behind a chip that reads like a target.
         const key = card.target
-            ? `verb:${card.verb}:${card.capability ?? ''}`
+            ? `verb:${card.verb}:${card.capability ?? ''}:${card.bargain?.key ?? ''}`
             : `card:${card.id}`;
         grouped.set(key, [...(grouped.get(key) ?? []), card]);
     }
@@ -564,6 +567,43 @@ function costLabel(card: ActionCard): string | null {
 
                                 <p class="mt-0.5 text-xs text-muted-foreground">
                                     {{ rowCard(row).description }}
+                                </p>
+
+                                <!-- The deal, both halves, weighted the same.
+                                     The honest version of this beat is sitting
+                                     directly above it, so nothing here may
+                                     read as the recommendation: same size,
+                                     same colour, the price under the gain. -->
+                                <dl
+                                    v-if="rowCard(row).bargain"
+                                    class="mt-1.5 grid grid-cols-[auto_1fr] gap-x-2 gap-y-0.5 rounded-md border border-sidebar-border/70 px-2 py-1.5 text-[11px] dark:border-sidebar-border"
+                                >
+                                    <dt
+                                        class="tracking-wide text-muted-foreground uppercase"
+                                    >
+                                        Gain
+                                    </dt>
+                                    <dd>
+                                        {{ rowCard(row).bargain!.edge_label }}
+                                    </dd>
+                                    <dt
+                                        class="tracking-wide text-muted-foreground uppercase"
+                                    >
+                                        Cost
+                                    </dt>
+                                    <dd>
+                                        {{
+                                            rowCard(row).bargain!
+                                                .complication_label
+                                        }}
+                                    </dd>
+                                </dl>
+                                <p
+                                    v-if="rowCard(row).bargain"
+                                    class="mt-1 text-[10px] text-muted-foreground"
+                                >
+                                    The cost is paid whether the beat lands or
+                                    not.
                                 </p>
 
                                 <div

@@ -97,6 +97,16 @@ adjudicates legality or outcomes — it is only ever handed resolved facts.
   weighted toward clear by `config/game.php` `ambient`; it reaches the
   arithmetic only through `Odds::AMBIENT`, shows as the board's `sky` line,
   and reaches Claude as one fact to render in the land's own weather),
+  `Bargains` (a complication with a price tag: a seeded composer pass
+  occasionally clones one card into a second, bargained twin offered BESIDE
+  its plain sibling — five closed keys (`loud` / `reckless` / `two_hands` /
+  `provoking` / `burning`), each trading a named edge for a named consequence
+  the engine applies the instant the beat resolves, win or lose. The edge is
+  arithmetic and lives in `Odds::BARGAINS`; the complication lives here and
+  routes only through mechanisms that already existed — the scene's `alarm`
+  int, `Hands::releaseAll`, the `concealed` condition, an enemy `intent` tag,
+  `Meters::spend`. Offer chance and per-turn cap in `config/game.php`
+  `bargains`),
   `ActionCard`, `BeatOutcome`.
 - Anti-repetition systems (all engine-side, no LLM): every visible feature
   and actor carries capability-free `inspect`/`improvise`/`speak` cards, so
@@ -215,6 +225,20 @@ adjudicates legality or outcomes — it is only ever handed resolved facts.
   forecast and the die from that one table. Clear emits nothing anywhere. And
   ambient moves the ODDS of detection only: it may never reveal or conceal a
   `hidden` feature or a `lurking` actor by itself.
+- A bargain is priced up front and always paid. The complication happens
+  whether the roll lands or not — wrenching a gate open is loud even when it
+  works — which is what keeps the card priceable at choose-time and leaves
+  failure meaning exactly what it already meant. Never build "complication only
+  on failure": that is the `risky` stance's ground, and blurring the two leaves
+  the player unable to read either. A bargain never stands alone (it is
+  inserted directly after its plain sibling, so the deal is always a choice
+  against the honest version), never lands on `improvise` or an `Odds::QUIET`
+  verb, and is never offered when its complication could not cost anything
+  here — no `two_hands` with empty hands, no `loud` where nobody is fighting,
+  no `burning` against a pool that cannot pay. A free lunch wearing a warning
+  label teaches the player the whole mechanic is a strictly better button. The
+  UI gives the gain and the cost equal weight; the bargain is never styled as
+  the better card.
 - Companions are coordinated, never controlled: requests are cards in each
   companion's own slot (never the player's pre/main/post), the engine rolls
   the companion's attempt, and failure can cost the companion.

@@ -48,6 +48,20 @@ export interface CardForecast {
     } | null;
 }
 
+/**
+ * The deal a bargain card is: a named edge on the arithmetic traded for a named
+ * consequence in the world, both quoted before the commit and the consequence
+ * paid whether the roll lands or not. Never the "better" card — the plain
+ * sibling stands beside it, and both lines carry the same weight on screen.
+ */
+export interface CardBargain {
+    key: string;
+    /** What it buys, in the same words the odds ledger itemizes it under. */
+    edge_label: string;
+    /** What it costs, applied by the engine the instant the beat resolves. */
+    complication_label: string;
+}
+
 export interface ActionCard {
     id: string;
     slot: 'pre' | 'main' | 'post' | 'companion';
@@ -60,6 +74,8 @@ export interface ActionCard {
     cost: CardCost[];
     modifiers: CardModifier[];
     composed: boolean;
+    /** Null on ordinary cards; present only on the bargained twin of one. */
+    bargain: CardBargain | null;
     forecast: CardForecast;
 }
 

@@ -16,6 +16,12 @@ class ActionCard
      * @param  array{type:string,id:int|null,name:string}|null  $target
      * @param  list<array{meter:string,amount:int}>  $cost
      * @param  list<array{key:string,label:string,options:list<array{value:string,label:string}>}>  $modifiers
+     * @param  array{key:string,edge_label:string,complication_label:string}|null  $bargain  The
+     *                                                                                       deal this card is, when it is one: a named edge on the arithmetic
+     *                                                                                       traded for a named complication the engine applies whether the roll
+     *                                                                                       lands or not. A bargain is always offered BESIDE its plain sibling,
+     *                                                                                       which is why the key has to reach id() — same verb, same target,
+     *                                                                                       different card.
      */
     public function __construct(
         public readonly TurnSlot $slot,
@@ -28,6 +34,7 @@ class ActionCard
         public readonly array $cost = [],
         public readonly array $modifiers = [],
         public readonly bool $composed = false,
+        public readonly ?array $bargain = null,
     ) {}
 
     public function id(): string
@@ -39,6 +46,10 @@ class ActionCard
             $this->target['type'] ?? '-',
             $this->target['id'] ?? '-',
             $this->risk,
+            // Without this the deal and the honest version of the same beat
+            // would collapse onto one id, and a submission could not say which
+            // of the two the player actually committed to.
+            $this->bargain['key'] ?? '-',
         ])), 0, 16);
     }
 
@@ -61,6 +72,10 @@ class ActionCard
             'cost' => $this->cost,
             'modifiers' => $this->modifiers,
             'composed' => $this->composed,
+            // Both halves of the deal, in the player's words: what it buys and
+            // what it costs. The forecast below already carries the edge as an
+            // itemized part, so the two readings can never disagree.
+            'bargain' => $this->bargain,
             'forecast' => $this->forecast($conditions),
         ];
     }
@@ -94,6 +109,9 @@ class ActionCard
             'capability' => $this->capability,
             'target' => $this->target,
             'slot' => $this->slot->value,
+            // The deal rides into the ledger the same way it will at
+            // resolution: as one more itemized reason the number is what it is.
+            'bargain' => $this->bargain,
         ];
 
         $grant = Odds::grant($this->verb);
@@ -117,7 +135,7 @@ class ActionCard
         }
 
         $balanced = Odds::difficulty($card, 'balanced', $conditions);
-        $bonus = Odds::bonus($conditions, $this->verb, $this->slot->value);
+        $bonus = Odds::bonus($conditions, $this->verb, $this->slot->value, $this->bargain['key'] ?? null);
 
         return [
             'rolls' => true,
@@ -144,6 +162,7 @@ class ActionCard
             cost: $data['cost'] ?? [],
             modifiers: $data['modifiers'] ?? [],
             composed: $data['composed'] ?? false,
+            bargain: $data['bargain'] ?? null,
         );
     }
 }

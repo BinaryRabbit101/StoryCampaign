@@ -121,6 +121,33 @@ class Odds
     ];
 
     /**
+     * What a bargain buys, and on which side of the arithmetic.
+     *
+     * A bargain card is the plain card with a named complication attached and a
+     * named edge granted — "wrench it open, and the district hears you." The
+     * COMPLICATION is the world's business and lives in Bargains; the EDGE is
+     * arithmetic, so it lives here with every other number, itemized like the
+     * rest. A second copy of these amounts sitting in the bargain table is
+     * exactly how a card would start advertising an edge the dice never gave it.
+     *
+     * Two sides, because the two kinds of deal do not feel alike. A `difficulty`
+     * edge of -4 moves the card exactly one band down the BANDS ladder above:
+     * Hard becomes Medium, Medium becomes Easy. A `bonus` edge rides on the
+     * roll instead, where the player reads it as their own nerve rather than as
+     * easier ground.
+     *
+     * Magnitudes stay inside the CONDITIONS spread: a bargain is a trade, never
+     * a shortcut past everything the player built.
+     */
+    private const BARGAINS = [
+        'loud' => ['side' => 'difficulty', 'amount' => -4, 'label' => 'You stop being careful about the noise'],
+        'two_hands' => ['side' => 'difficulty', 'amount' => -4, 'label' => 'Both hands on it, and nothing else'],
+        'reckless' => ['side' => 'bonus', 'amount' => 2, 'label' => 'Nothing covered, nothing held back'],
+        'provoking' => ['side' => 'bonus', 'amount' => 2, 'label' => 'You give them something they have to answer'],
+        'burning' => ['side' => 'bonus', 'amount' => 3, 'label' => 'Everything the gift has, spent at once'],
+    ];
+
+    /**
      * Which condition a quiet set-up beat leaves behind. This is the forecast
      * side of the same table: it lets a card say what it BUYS before it is
      * chosen, in the exact terms the roll will later be paid in.
@@ -208,7 +235,46 @@ class Odds
             $parts[] = $part;
         }
 
+        // The deal, if this card is one. The complication was printed on the
+        // card beside this line; the edge is the half the arithmetic owes back.
+        $edge = self::bargainPart($card['bargain']['key'] ?? null, 'difficulty');
+        if ($edge !== null) {
+            $parts[] = $edge;
+        }
+
         return self::ledger($parts);
+    }
+
+    /**
+     * What a bargain is worth on one side of the arithmetic, itemized, or null
+     * when this key trades on the other side (or is no key at all).
+     *
+     * Public because the composer prints the very label the resolver will add
+     * up. One table, three readers, no drift.
+     *
+     * @return Part|null
+     */
+    public static function bargainPart(?string $key, string $side): ?array
+    {
+        $rule = self::BARGAINS[$key] ?? null;
+
+        if ($rule === null || $rule['side'] !== $side) {
+            return null;
+        }
+
+        return ['label' => $rule['label'], 'amount' => $rule['amount']];
+    }
+
+    /** The player-facing wording for a bargain's edge, quoted on the card before the commit. */
+    public static function bargainLabel(?string $key): ?string
+    {
+        return self::BARGAINS[$key]['label'] ?? null;
+    }
+
+    /** @return list<string> */
+    public static function bargainKeys(): array
+    {
+        return array_keys(self::BARGAINS);
     }
 
     /**
@@ -238,9 +304,14 @@ class Odds
      *
      * @return Ledger
      */
-    public static function bonus(array $conditions, string $verb, string $slot): array
+    public static function bonus(array $conditions, string $verb, string $slot, ?string $bargain = null): array
     {
         $parts = [];
+
+        $edge = self::bargainPart($bargain, 'bonus');
+        if ($edge !== null) {
+            $parts[] = $edge;
+        }
 
         foreach (self::CONDITIONS as $key => $rule) {
             if (! ($conditions[$key] ?? false)) {
