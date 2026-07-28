@@ -81,6 +81,13 @@ class SituationBoard
         $groups[] = self::group('endeavor', 'What you are set on', 'neutral',
             array_values(array_filter([Clocks::boardLine($scene)])));
 
+        // Where the tale itself is going, once it is going anywhere. Plain
+        // words and never a count: a ripe tale is offered an ending and told so
+        // outright, because the one irreversible choice in the game must never
+        // arrive as a card the player had no warning of.
+        $groups[] = self::group('finale', 'Where this tale is going', 'neutral',
+            array_values(array_filter([Finale::boardLine($scene->campaign)])));
+
         $groups[] = self::group('captives', 'In your grip', 'foe',
             $scene->actors()->where('status', 'restrained')->pluck('name')->all());
 
@@ -170,7 +177,7 @@ class SituationBoard
             }
 
             $parts[] = match ($group['key']) {
-                'moment', 'alarm', 'pressure', 'sky' => implode(' ', $items),
+                'moment', 'alarm', 'pressure', 'sky', 'finale' => implode(' ', $items),
                 'self' => implode('. ', $items).'.',
                 default => "{$group['title']}: ".implode(', ', $items).'.',
             };

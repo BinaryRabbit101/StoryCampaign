@@ -58,6 +58,28 @@ class Clocks
     /** A fight already under way, worked at until they are set for it. */
     public const PREPARATION = 'preparation';
 
+    /**
+     * The tale's own last stretch, minted by App\Game\Engine\Finale when a
+     * campaign takes up its ending and has no old score left to settle.
+     *
+     * The ENGINE owns it end to end: it is never proposed, never committed to,
+     * and never abandoned — which is exactly why it is exempt from the
+     * one-at-a-time rule below without freeing (or occupying) the player's own
+     * slot. A finale a player's half-finished search could deadlock is a finale
+     * that does not work, and charging them their endeavor to be allowed an
+     * ending would be the engine taxing the last scene of the book.
+     */
+    public const RECKONING = 'reckoning';
+
+    /** @var list<string> Kinds the player never took on, and cannot set down. */
+    public const ENGINE_KINDS = [self::RECKONING];
+
+    /**
+     * What an engine-owned clock pays out: nothing. Its payoff is the thing it
+     * is counting toward, which happens outside this class entirely.
+     */
+    public const NO_PAYOFF = 'none';
+
     /** The closed payoff list. Each one routes through machinery that existed. */
     public const REVEAL_HIDDEN = 'reveal_hidden';
 
@@ -83,14 +105,20 @@ class Clocks
 
         return Clock::where('campaign_id', $scene->campaign_id)
             ->where('scene_id', $scene->id)
+            ->whereNotIn('kind', self::ENGINE_KINDS)
             ->where('status', 'open')
             ->orderBy('id')->first();
     }
 
-    /** The one endeavor this tale may have running at a time, wherever it stands. */
+    /**
+     * The one endeavor this tale may have running at a time, wherever it
+     * stands. Engine-owned kinds are not the player's and never count toward
+     * it — see the RECKONING note above.
+     */
     public static function openFor(Campaign $campaign): ?Clock
     {
         return Clock::where('campaign_id', $campaign->id)
+            ->whereNotIn('kind', self::ENGINE_KINDS)
             ->where('status', 'open')->orderBy('id')->first();
     }
 
@@ -140,6 +168,7 @@ class Clocks
         }
 
         return ! Clock::where('campaign_id', $scene->campaign_id)
+            ->whereNotIn('kind', self::ENGINE_KINDS)
             ->where(fn ($q) => $q->where('status', 'open')->orWhere('scene_id', $scene->id))
             ->exists();
     }
@@ -295,17 +324,7 @@ class Clocks
 
         $clock = self::on($scene);
 
-        if ($clock === null || $outcome->skipped) {
-            return $nothing;
-        }
-
-        // A beat that cast no die cannot pay for progress: quiet verbs always
-        // "succeed", so counting them would make an endeavor free.
-        if (! Odds::rolls($outcome->verb) || ! in_array($outcome->verb, $clock->advance_verbs, true)) {
-            return $nothing;
-        }
-
-        if ($outcome->degree === BeatOutcome::FAILURE) {
+        if ($clock === null || ! self::qualifies($clock, $outcome)) {
             return $nothing;
         }
 
@@ -323,6 +342,27 @@ class Clocks
             'facts' => self::payOff($clock, $scene, $conditions),
             'filled' => $clock->name,
         ];
+    }
+
+    /**
+     * Does this beat move that clock?
+     *
+     * The rule, in one place, because more than one clock reads it: the beat
+     * has to have happened, it has to be one the clock named, and the die must
+     * not have simply failed. A partial counts — this measures ground covered,
+     * not blows landed.
+     *
+     * A beat that cast no die cannot pay for progress either: quiet verbs
+     * always "succeed", so counting them would make any clock free.
+     */
+    public static function qualifies(Clock $clock, BeatOutcome $outcome): bool
+    {
+        if ($outcome->skipped || $outcome->degree === BeatOutcome::FAILURE) {
+            return false;
+        }
+
+        return Odds::rolls($outcome->verb)
+            && in_array($outcome->verb, $clock->advance_verbs, true);
     }
 
     /**

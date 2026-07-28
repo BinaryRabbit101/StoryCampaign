@@ -147,6 +147,21 @@ adjudicates legality or outcomes — it is only ever handed resolved facts.
   transitions), and both end in a consensual pair of ordinary main-slot cards.
   Loss is decided at scene exit against the tier and mints the `companion_lost`
   memento; the name never respawns. `config/game.php` `companions`),
+  `Finale` (a tale that ends on a peak: RIPENESS read once per resolution from
+  closed engine facts and `config/game.php` `finale` weights — a chapter floor
+  AND enough among {a grudge at max heat 2, each filled clock 1, each zone
+  beyond the first 1, each scar 1, every 4 keepsakes 1} — ARMS an ending on
+  `campaigns.finale` json, which puts one board line and one recurring main-slot
+  `face` card on the table and changes nothing else. Declining is free forever.
+  Taking it pins the target — the hottest simmering grudge by heat then age,
+  else the engine-owned portable `reckoning` clock whose advance verbs are drawn
+  from the campaign's own most-used verb families — and UNDERWAY the pinned
+  score is forced back at the next transition (or this scene, if nobody is
+  standing in the open) through `Grudges::forceReturn`, telegraphing, the one
+  place the chapter floor and one-per-scene rule are waived. Ventures are
+  suppressed; everything else keeps running. Completion is an engine condition —
+  the score resolved or the reckoning filled — and closes the book through
+  `BookCompiler::close` exactly as the scar cap does),
   `ActionCard`, `BeatOutcome`.
 - Anti-repetition systems (all engine-side, no LLM): every visible feature
   and actor carries capability-free `inspect`/`improvise`/`speak` cards, so
@@ -340,6 +355,23 @@ adjudicates legality or outcomes — it is only ever handed resolved facts.
   initiates ends in an engine-offered accept/decline pair, sending someone on
   their way is never a dead choice, and a third candidate's offer simply does
   not fire while the party is at its cap of two.
+- The ending is armed, never forced, and it curates rather than invents. Ripeness
+  only puts a card on the table; declining costs nothing FOREVER (the offer
+  recurs unchanged, nothing escalates behind it), and the scar cap stays the only
+  unchosen ending in the game. Ripeness reads closed engine facts and config
+  weights alone — genre, drive, land, tech level, notes, and narration move none
+  of it, and the chapter floor gates a short tale on its own. While underway the
+  finale adds no mechanics: no finale-only bonus, no finale-only penalty, one
+  ladder, ordinary cards. Its content routes through machinery that already
+  existed — the forced grudge return (the ONLY place the chapter floor and the
+  one-per-scene rule are waived, reachable only through `Grudges::forceReturn`'s
+  explicit parameter) and the existing clock — and the only thing suppressed is
+  the venture card, because the player chose this ground. Pressure, the hour, the
+  air, companions and the rest keep running: a world that holds its breath is a
+  cutscene. Completion is an engine CONDITION and never a judgement, the close is
+  the existing `BookCompiler::close` (coda, flourish, compilation) fired exactly
+  once behind the chapter that tells it, and a fall past the scar cap mid-finale
+  ends the tale through the scar path with no special casing anywhere.
 
 ## Widget
 

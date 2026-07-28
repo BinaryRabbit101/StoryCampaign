@@ -320,6 +320,21 @@ class Mementos
             ->values()->all();
     }
 
+    /**
+     * How full the shelf is.
+     *
+     * The one number the engine may ask about a keepsake, and it asks it here
+     * rather than of the model — nothing under app/Game may so much as name
+     * that class, and this keeps the rule intact while the finale still gets to
+     * read how much a tale has accumulated. It is a COUNT, and it moves nothing
+     * mechanical: it is one signal among five deciding when an ending is
+     * offered, and an offer is not a mechanic.
+     */
+    public static function count(Campaign $campaign): int
+    {
+        return Memento::where('campaign_id', $campaign->id)->count();
+    }
+
     /** The newest keepsake's name — one line of flavor for the widget. */
     public static function latestName(Campaign $campaign): ?string
     {
