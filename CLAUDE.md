@@ -147,6 +147,23 @@ adjudicates legality or outcomes — it is only ever handed resolved facts.
   transitions), and both end in a consensual pair of ordinary main-slot cards.
   Loss is decided at scene exit against the tier and mints the `companion_lost`
   memento; the name never respawns. `config/game.php` `companions`),
+  `Threads` (someone else's small story: a non-hostile actor the dressing spawns
+  may carry a WANT — a 2–4 segment arc from a closed kind table (`seeking` on
+  hidden-rich ground / `mending` on a standing breakable / `road` once a
+  frontier zone exists), seeded off the actor's own id, ONE active per campaign.
+  It is DORMANT until a ≥-partial social or inspect beat lands on that person:
+  before the reveal it reaches no card, no board group and no prompt, which is
+  hidden-is-hidden applied to story. After it, ordinary offered beats in the
+  kind's advance class move it (a search needs a beat that actually EXPOSED
+  something; a mending only counts work on the named feature; the road fills at
+  scene transitions), at most one step per chapter. Payoffs route through
+  machinery that already existed — `revelation` unhides a feature or sets
+  `exit_scouted`, `told_tale` writes one `rumors` row with source `thread`, and
+  `companionship` is the third path `COMPANION_BONDS.md` promised: the existing
+  consensual welcome/decline pair, silent at the party cap, with no new bond
+  mover. Neglect is real and only fictional — a rooted want dies at the border,
+  a walking one at `threads.expiry_chapters`, and the bad end costs the player
+  nothing at all),
   `ActionCard`, `BeatOutcome`.
 - Anti-repetition systems (all engine-side, no LLM): every visible feature
   and actor carries capability-free `inspect`/`improvise`/`speak` cards, so
@@ -340,6 +357,16 @@ adjudicates legality or outcomes — it is only ever handed resolved facts.
   initiates ends in an engine-offered accept/decline pair, sending someone on
   their way is never a dead choice, and a third candidate's offer simply does
   not fire while the party is at its cap of two.
+- A side thread is a window, not a hook with a barb. It is DORMANT until the
+  player discovers it — an undiscovered want is engine state the cards, the
+  board, and the narrator never see, and it may not even accrue progress, or a
+  payoff could fire for a player who never met the person. Ignoring one must
+  stay legitimate: the cost of walking past lands entirely on the NPC (their
+  want ends badly, one plain fact says so) and NEVER on the player's sheet —
+  no odds part, no standing, no scar, no memento. The engine authors every want
+  from the closed kind table and Claude never invents one; every payoff routes
+  through machinery that already existed, and the `companionship` one adds no
+  bond mover and yields to the party cap in silence.
 
 ## Widget
 

@@ -139,6 +139,12 @@ class CardComposer
             // qualifying card quotes it in its forecast, so "advances the
             // search of the long quay" is a promise the tick will honor.
             'endeavor' => Clocks::forecast($scene),
+            // And somebody else's want, once the player has actually discovered
+            // it. Null while it is dormant, which is the dormancy rule as the
+            // cards see it: an undiscovered want prices nothing and promises
+            // nothing. Read off the thread's own row, so "helps Aldan's search"
+            // is quoting the very row the tick will move.
+            'thread' => Threads::forecast($scene),
         ];
 
         // Full hands never forbid an action — a held crate that locked the
@@ -551,9 +557,11 @@ class CardComposer
         // would make the answer an accident rather than a decision. Ordinary
         // main-slot cards, validated exactly as every other card is.
         if (! $hostile && $actor->kind !== 'companion' && isset($tags['offering'])) {
-            $asked = $tags['offering'] === Companions::STRAY
-                ? "{$actor->name} has kept near you long enough to ask outright."
-                : "{$actor->name} owes you their skin, and has asked to walk with you.";
+            $asked = match ($tags['offering']) {
+                Companions::STRAY => "{$actor->name} has kept near you long enough to ask outright.",
+                Companions::THREAD => "{$actor->name} got what they came for with your help, and has asked to walk on with you.",
+                default => "{$actor->name} owes you their skin, and has asked to walk with you.",
+            };
 
             return [
                 new ActionCard(

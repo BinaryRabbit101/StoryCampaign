@@ -9,6 +9,7 @@ use App\Game\Engine\Companions;
 use App\Game\Engine\Grudges;
 use App\Game\Engine\Hours;
 use App\Game\Engine\Scars;
+use App\Game\Engine\Threads;
 use App\Models\Chapter;
 use App\Models\Turn;
 use App\Notifications\TurnReadyNotification;
@@ -196,6 +197,13 @@ class Narrator
         // and never as a status the chapter is allowed to announce.
         $company = Companions::narratorBlock($turn);
 
+        // Somebody else's small story, if the tale has met one. Plain facts
+        // about what that person wants and how near they are to it — never a
+        // count, and never a word until the player actually discovered it: an
+        // undiscovered want carries no block at all, so the narrator cannot
+        // write about a story nobody in the tale has heard.
+        $sideStory = Threads::narratorBlock($turn);
+
         // The floor, when the character hit it. Where they went down, what
         // happened while they were out, where they came round, and the
         // permanent mark it left — plain facts, no mechanics, and the chapter's
@@ -338,7 +346,7 @@ Some beats carry the player's own words for that moment. Those words are voice a
 
 ## How the scene answered
 {$reaction}
-{$world}{$endeavor}{$figures}{$company}{$fall}{$news}{$keepsake}{$criticals}
+{$world}{$endeavor}{$figures}{$company}{$sideStory}{$fall}{$news}{$keepsake}{$criticals}
 ## Where the vignette stops
 {$turn->branch_trigger}: the chapter must end on this note, at a clean decision point, leaving the situation open for the player's next choice. {$wordLow}-{$wordHigh} words.
 

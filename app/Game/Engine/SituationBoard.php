@@ -81,6 +81,13 @@ class SituationBoard
         $groups[] = self::group('endeavor', 'What you are set on', 'neutral',
             array_values(array_filter([Clocks::boardLine($scene)])));
 
+        // And what somebody ELSE is set on, once the player has found out what
+        // it is. Absent entirely until then — an undiscovered want is engine
+        // state, and a board line about one would be the page telling the
+        // player something nobody in the tale has said out loud.
+        $groups[] = self::group('thread', 'What someone else needs', 'person',
+            array_values(array_filter([Threads::boardLine($scene)])));
+
         $groups[] = self::group('captives', 'In your grip', 'foe',
             $scene->actors()->where('status', 'restrained')->pluck('name')->all());
 
@@ -150,14 +157,15 @@ class SituationBoard
      * The endeavor's whole group goes the same way, and for the same reason:
      * "three of five" is a count, and a count in the narrator's copy of the
      * board is mechanics language on the page. The narrator gets the goal
-     * itself instead, in plain words, from Clocks::narratorBlock.
+     * itself instead, in plain words, from Clocks::narratorBlock — and somebody
+     * else's want the same way, from Threads::narratorBlock.
      */
     public static function prose(array $groups): string
     {
         $parts = [];
 
         foreach ($groups as $group) {
-            if ($group['key'] === 'endeavor') {
+            if (in_array($group['key'], ['endeavor', 'thread'], true)) {
                 continue;
             }
 

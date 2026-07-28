@@ -116,6 +116,12 @@ class SceneDresser
             // spawn inside it would shift every feature, inhabitant and sky
             // every dressed scene in the game has ever produced.
             Companions::markStray($spawned, $scene);
+
+            // And rarely, one of them turns out to be in the middle of
+            // something of their own. Seeded off the actor's own id for the
+            // same reason as the line above, and silent while the tale is
+            // already carrying a want — one small story at a time.
+            Threads::attach($spawned->fresh(), $scene);
         }
     }
 

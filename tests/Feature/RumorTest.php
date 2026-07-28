@@ -2,10 +2,12 @@
 
 namespace Tests\Feature;
 
+use App\Game\Engine\BeatOutcome;
 use App\Game\Engine\CardComposer;
 use App\Game\Engine\Dice;
 use App\Game\Engine\Downtime;
 use App\Game\Engine\SituationBoard;
+use App\Game\Engine\Threads;
 use App\Game\Engine\TurnResolver;
 use App\Game\Meters;
 use App\Models\Actor;
@@ -16,6 +18,7 @@ use App\Models\EvolutionRun;
 use App\Models\Rumor;
 use App\Models\Scene;
 use App\Models\SceneFeature;
+use App\Models\Thread;
 use App\Models\Turn;
 use App\Models\User;
 use App\Models\Zone;
@@ -304,6 +307,70 @@ class RumorTest extends TestCase
         $this->assertSame(Rumor::FORGE, $rumor->source);
         $this->assertSame($zone->id, $rumor->subject_zone_id);
         $this->assertStringContainsString('The Far Shelf', $rumor->line);
+    }
+
+    /**
+     * The one source play itself writes, and it earns its place the same way
+     * every other one does: a `threads` row that really filled, a line the
+     * engine templated from it while the fact was still in hand, and no way for
+     * the engine to have invented it. The direction rule is unchanged and is
+     * checked by the same sweep as the shelf — App\Game\Engine\Threads reaches
+     * the queue through this service and never names the model.
+     */
+    public function test_a_side_thread_seen_through_writes_one_traceable_tale()
+    {
+        $campaign = $this->createCampaign();
+        $this->openBareTurn($campaign);
+        $scene = $campaign->activeScene;
+
+        $gate = SceneFeature::create([
+            'scene_id' => $scene->id,
+            'zone_id' => $scene->zone_id,
+            'name' => 'the barred gate',
+            'feature_type' => 'landmark',
+            'affordances' => ['breakable' => true],
+            'state' => [],
+            'source' => 'seed',
+        ]);
+        $sera = $this->bystander($scene, 'Sera');
+
+        $thread = Thread::create([
+            'campaign_id' => $campaign->id,
+            'actor_id' => $sera->id,
+            'actor_name' => 'Sera',
+            'kind' => Threads::MENDING,
+            'segments' => 1,
+            'filled' => 0,
+            'age' => 0,
+            'revealed' => true,
+            'subject' => ['type' => 'feature', 'id' => $gate->id, 'name' => $gate->name],
+            'status' => 'open',
+            'history' => [],
+        ]);
+
+        Threads::resolveTurn(
+            $scene->fresh(),
+            $campaign->fresh()->currentTurn,
+            [new BeatOutcome('main', 'break', ['type' => 'feature', 'id' => $gate->id, 'name' => $gate->name],
+                BeatOutcome::SUCCESS, 14, 14, 10, ['It held.'])],
+            Threads::snapshot($scene->fresh()),
+        );
+
+        $rumor = Rumor::where('campaign_id', $campaign->id)->latest('id')->first();
+
+        $this->assertNotNull($rumor, 'a want seen through left nothing on the queue');
+        $this->assertSame(Rumor::THREAD, $rumor->source);
+        $this->assertSame('filled', $thread->fresh()->status);
+
+        // Traceable in both directions: the subject is the soul whose want it
+        // was, and the line is about them.
+        $this->assertSame($thread->actor_name, $rumor->subject);
+        $this->assertStringContainsString($rumor->subject, $rumor->line);
+        $this->assertNull($rumor->evolution_run_id);
+
+        // And it waits on a moment exactly as every other piece of news does.
+        $this->assertNull($rumor->heard_turn_id);
+        $this->assertSame(1, Rumors::pending($campaign->fresh()));
     }
 
     public function test_the_queue_drops_the_oldest_news_past_its_cap()
