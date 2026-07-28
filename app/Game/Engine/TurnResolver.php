@@ -6,12 +6,14 @@ use App\Game\BranchTrigger;
 use App\Game\Hands;
 use App\Game\Meters;
 use App\Game\Verb;
+use App\Game\VerbFamily;
 use App\Models\Actor;
 use App\Models\Character;
 use App\Models\Scene;
 use App\Models\Turn;
 use App\Models\Zone;
 use App\Services\Mementos;
+use App\Services\Rumors;
 use Illuminate\Support\Facades\DB;
 
 /**
@@ -108,6 +110,13 @@ class TurnResolver
             $moved = false;
             $wasInDanger = Meters::healthInDangerBand($character);
 
+            // What the player set themselves to, and what came of it. Only the
+            // FINISH is collected here — a tick is the board's business and the
+            // goal line covers the middle, so an endeavor half done leaves the
+            // chapter carrying no instructions about it.
+            $endeavor = [];
+            $endeavorFilled = null;
+
             foreach (['pre', 'companion', 'main', 'post'] as $slot) {
                 // Companions act from their own slot, between the player's
                 // set-up and act: support requests (block, flank) shape the
@@ -159,6 +168,14 @@ class TurnResolver
                 if (! $outcome->succeeded()) {
                     $conditions['prior_failure'] = true;
                 }
+
+                // The endeavor, moved by the beat that just landed — only if
+                // the clock named this verb, and only if the die did not
+                // simply fail. The clock's own row decides both, which is the
+                // same row the card quoted before the commit.
+                $tick = Clocks::advance($scene, $outcome, $conditions);
+                $endeavor = array_merge($endeavor, $tick['facts']);
+                $endeavorFilled ??= $tick['filled'];
 
                 // Partial counts: the facts say they got through (battered),
                 // so the scene must actually change under them.
@@ -292,6 +309,11 @@ class TurnResolver
                 if ($fall['scene'] !== null) {
                     $scene = $fall['scene'];
                     $moved = true;
+                    // The waking is a change of ground like any other, and an
+                    // endeavor left behind on the floor they fell on has to be
+                    // let go of here too — otherwise the one-at-a-time rule
+                    // would leave the tale unable to take anything else on.
+                    Clocks::onSceneExit($sceneBefore, $scene);
                 }
             } elseif ($moved) {
                 $scene = $this->transitionScene($scene, $dice, $turn, $companionEvents);
@@ -346,6 +368,21 @@ class TurnResolver
                 }
             }
 
+            // What the world has been doing while nobody was watching, finally
+            // reaching the person it is happening around.
+            //
+            // DETECTION ONLY. The engine reads one of three moments off facts
+            // this resolution has already fixed and hands the pick outward —
+            // nothing under app/Game may so much as name the rumor model, the
+            // same rule the shelf lives by. Which piece of news it turns out
+            // to be is decided entirely outside the engine, and an empty queue
+            // simply says nothing: Claude is never asked to invent any.
+            $heard = Rumors::deliver(
+                $turn,
+                $this->rumorChannel($outcomes, $sceneBefore, $scene, $moved, $turn),
+                $turn->campaign->fresh()->next_zone_id,
+            );
+
             $turn->update([
                 'status' => Turn::STATUS_COMPLETE,
                 'resolution' => [
@@ -376,6 +413,16 @@ class TurnResolver
                     // one, so an ordinary chapter carries no instructions about
                     // a world that stayed where it was.
                     'world' => $world,
+                    // The endeavor the player committed to, FINISHED. Null on
+                    // every turn it merely moved — the board carries the count
+                    // and the narrator carries the goal, and a chapter told to
+                    // announce a tally every page has stopped being a chapter.
+                    'endeavor' => $endeavor === [] ? null : $endeavor,
+                    // Something heard about somewhere else entirely. Null on
+                    // every turn nothing was, which is most of them — the
+                    // world does not produce news faster than the character
+                    // runs into people to hear it from.
+                    'rumor' => $heard,
                 ],
                 'branch_trigger' => $trigger->value,
                 'meters_snapshot' => $character->meters,
@@ -391,7 +438,8 @@ class TurnResolver
             // reference to what came back, because a memento is memory and
             // must never be able to reach the mechanics that made it.
             Mementos::mint($turn, $this->mementoTriggers(
-                $turn, $sceneBefore, $scene, $elitesBefore, $captivesBefore, $companionsBefore, $fall, $reactionRolls,
+                $turn, $sceneBefore, $scene, $elitesBefore, $captivesBefore, $companionsBefore,
+                $fall, $reactionRolls, $endeavorFilled,
             ));
 
             // The tale that ran out of body. No next turn is opened — there is
@@ -633,6 +681,19 @@ class TurnResolver
                 // theirs to offer — and its whole mechanical content is the
                 // closed list the engine picked at their return.
                 $facts = Grudges::strikeBargain($card, $scene, $turn);
+                break;
+            case Verb::Undertake:
+                // Setting yourself to a multi-turn goal. Roll-free, and the
+                // whole proposal is recomputed from the scene rather than
+                // carried on the card — so a submission can never smuggle in
+                // terms the ground does not currently afford.
+                $facts = Clocks::commit($scene);
+                break;
+            case Verb::Abandon:
+                // Free, and never a dead choice: what it buys back is room to
+                // take something else on. Everything already done is lost —
+                // that loss IS the commitment the clock was worth.
+                $facts = Clocks::abandon($scene, $card['target']['id'] ?? null);
                 break;
             case Verb::TimeSlow:
                 $conditions['time_slowed'] = true;
@@ -1757,19 +1818,20 @@ class TurnResolver
      * and what (if anything) becomes an object on the shelf is decided
      * entirely outside the engine, by App\Services\Mementos.
      *
-     * The list is closed and its priority order lives with the service. One
-     * entry is not detected here yet: `endeavor_filled` waits on a clock
-     * system, and anything later arrives the same way — one more block in this
-     * method, and nothing else anywhere.
+     * The list is closed and its priority order lives with the service, and
+     * anything later arrives the way `endeavor_filled` just did — one more
+     * block in this method, and nothing else anywhere.
      *
      * @param  list<int>  $elitesBefore
      * @param  list<int>  $captivesBefore
      * @param  list<int>  $companionsBefore
      * @param  array{scene:?Scene, record:array}|null  $fall
      * @param  list<array>  $reactionRolls
+     * @param  string|null  $endeavorFilled  The name of the endeavor this turn
+     *                                       saw all the way through, if it saw one.
      * @return list<array{trigger:string, subject:string, place:string}>
      */
-    private function mementoTriggers(Turn $turn, Scene $before, Scene $after, array $elitesBefore, array $captivesBefore, array $companionsBefore, ?array $fall, array $reactionRolls): array
+    private function mementoTriggers(Turn $turn, Scene $before, Scene $after, array $elitesBefore, array $captivesBefore, array $companionsBefore, ?array $fall, array $reactionRolls, ?string $endeavorFilled = null): array
     {
         $candidates = [];
         $place = $before->title;
@@ -1806,6 +1868,13 @@ class TurnResolver
             }
         }
 
+        // A multi-turn endeavor seen all the way through. Read straight off
+        // the fill the resolution already fixed — the engine never asks the
+        // shelf about it, it only hands the moment outward.
+        if ($endeavorFilled !== null) {
+            $candidates[] = ['trigger' => 'endeavor_filled', 'subject' => $endeavorFilled, 'place' => $place];
+        }
+
         // An elite who was on their feet at the top of the turn and is down
         // or bound at the end of it.
         foreach (Actor::whereIn('id', $elitesBefore)->get() as $elite) {
@@ -1830,6 +1899,64 @@ class TurnResolver
         }
 
         return $candidates;
+    }
+
+    /**
+     * Which of the three moments this turn produced, if it produced one.
+     *
+     * Every channel is a thing the turn already did — the resolver adds no new
+     * mechanics to serve them, and none of them may be reached for. Checked in
+     * the closed list's own order; the first that qualifies is the one.
+     *
+     * Combat silences all three, and that check comes first: nobody trades
+     * news with a fight still standing, and a chapter that stopped mid-swing
+     * to pass on gossip about another county would read as a bug. Lurkers do
+     * not count — a fight nobody knows about yet is not a fight.
+     *
+     * @param  list<BeatOutcome>  $outcomes
+     */
+    private function rumorChannel(array $outcomes, Scene $before, Scene $after, bool $moved, Turn $turn): ?string
+    {
+        $fighting = fn (Scene $scene) => $scene->fresh()?->visibleActors()
+            ->contains(fn (Actor $a) => $a->kind === 'enemy') ?? false;
+
+        if ($fighting($before) || ($after->id !== $before->id && $fighting($after))) {
+            return null;
+        }
+
+        // Met on the road: the ground changed under them, whether that was one
+        // more locale or the whole country.
+        if ($moved) {
+            return Rumors::CROSSING;
+        }
+
+        // They pass on what they heard. A social beat that got somewhere with
+        // somebody who was not fighting them and was not holding to terms —
+        // an enemy under truce came to deal, not to chat.
+        foreach ($outcomes as $outcome) {
+            if ($outcome->skipped || $outcome->degree === BeatOutcome::FAILURE) {
+                continue;
+            }
+            if (Verb::familyOf($outcome->verb) !== VerbFamily::Speak
+                || str_starts_with($outcome->verb, 'companion_')) {
+                continue;
+            }
+
+            $actor = Actor::find($outcome->target['id'] ?? 0);
+            if ($actor !== null && $actor->kind !== 'enemy' && ! ($actor->tags['truce'] ?? false)) {
+                return Rumors::TALK;
+            }
+        }
+
+        // Overheard, found posted, read in the ashes of somebody else's camp:
+        // a wait actually spent out in it, and one that actually paid.
+        $payout = $turn->downtime['payout'] ?? [];
+        if (($payout['granted'] ?? false)
+            && in_array($payout['stance'] ?? null, [Downtime::WALK, Downtime::WATCH], true)) {
+            return Rumors::FIRESIDE;
+        }
+
+        return null;
     }
 
     /**
@@ -1970,6 +2097,12 @@ class TurnResolver
                 Companions::nudge($companion, 1, $turn, 'road');
             }
         }
+
+        // The endeavor, at the border. A goal about ground the tale has left
+        // is a goal that can never be finished, and a board line promising one
+        // would be a promise the engine cannot keep — so it expires here.
+        // What the body itself learned comes along.
+        Clocks::onSceneExit($scene, $next);
 
         // New ground, new air — one roll, kept for as long as this scene lasts.
         // Last, so the draws above keep the exact stream they have always had.

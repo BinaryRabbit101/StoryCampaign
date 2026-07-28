@@ -23,6 +23,7 @@ import type {
     CharacterItem,
     CharacterMeters,
     DowntimeOffer,
+    Endeavor,
     GrowthMessage,
     Memento,
     RollTable,
@@ -81,6 +82,11 @@ const props = defineProps<{
          */
         downtime: DowntimeOffer | null;
     } | null;
+    /**
+     * The multi-turn goal the player took on, if they took one on. Null the
+     * rest of the time — one endeavor at a time, and most of the time none.
+     */
+    endeavor: Endeavor | null;
     /**
      * The shelf. What notable moments left behind, oldest first — read-only
      * in the strictest sense: there is nothing here to equip, spend, or use.
@@ -720,6 +726,7 @@ const healthPct = computed(
         :key="rollTable.turn_id"
         :turn-number="rollTable.turn_number"
         :rows="rollTable.rows"
+        :heard="rollTable.heard"
         @continue="rollsSeen"
     >
         <template #downtime>
@@ -788,6 +795,32 @@ const healthPct = computed(
                     "
                     :style="{ width: `${healthPct}%` }"
                 />
+            </div>
+
+            <!-- The endeavor, beside the meters because it is read the same
+                 way: a standing figure the next commit has to be priced
+                 against. Segments rather than a bar — the player needs to
+                 count what is left, not estimate it. -->
+            <div
+                v-if="endeavor"
+                class="mt-2 flex items-center gap-2 text-xs text-muted-foreground"
+            >
+                <span class="flex shrink-0 gap-0.5" aria-hidden="true">
+                    <span
+                        v-for="i in endeavor.segments"
+                        :key="i"
+                        class="h-1.5 w-3 rounded-sm transition-colors duration-500"
+                        :class="
+                            i <= endeavor.filled
+                                ? 'bg-teal-500'
+                                : 'bg-muted-foreground/25'
+                        "
+                    />
+                </span>
+                <span class="truncate"
+                    >{{ endeavor.name }} —
+                    {{ endeavor.filled }} of {{ endeavor.segments }}</span
+                >
             </div>
 
             <Transition name="unfold">

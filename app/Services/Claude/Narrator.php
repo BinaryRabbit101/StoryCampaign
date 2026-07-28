@@ -4,6 +4,7 @@ namespace App\Services\Claude;
 
 use App\Game\Engine\Ambient;
 use App\Game\Engine\ChapterEvents;
+use App\Game\Engine\Clocks;
 use App\Game\Engine\Companions;
 use App\Game\Engine\Grudges;
 use App\Game\Engine\Scars;
@@ -13,6 +14,7 @@ use App\Notifications\TurnReadyNotification;
 use App\Services\BookCompiler;
 use App\Services\Mementos;
 use App\Services\PlayerPresence;
+use App\Services\Rumors;
 use Illuminate\Support\Facades\File;
 
 /**
@@ -60,6 +62,15 @@ class Narrator
         // costs the wording and nothing else.
         try {
             Mementos::reword($turn, $chapter, $response['memento'] ?? null);
+        } catch (\Throwable $e) {
+            report($e);
+        }
+
+        // The same bargain for the news this chapter carried: the line is
+        // already true and already written, and all that lands here is better
+        // wording inside a clamp, plus the stamp of the chapter that heard it.
+        try {
+            Rumors::reword($turn, $chapter, $response['rumor'] ?? null);
         } catch (\Throwable $e) {
             report($e);
         }
@@ -173,6 +184,12 @@ class Narrator
         // here, and a lurking return stays as hidden from this as from cards.
         $figures = Grudges::returningFigures($turn);
 
+        // The multi-turn goal the player committed a beat to: finished this
+        // chapter, or still being worked at. A plain goal in plain words and
+        // never a count — the tally is the board's, and a tally on the page is
+        // mechanics language wearing prose.
+        $endeavor = Clocks::narratorBlock($turn);
+
         // Who is walking beside them, and what passed between them this time.
         // The tier arrives as plain words about behaviour — never as a number,
         // and never as a status the chapter is allowed to announce.
@@ -197,6 +214,16 @@ class Narrator
             : ', "memento": {"name": "<the keepsake\'s name, at most '.Mementos::MAX_NAME_WORDS
                 .' words>", "line": "<one plain sentence about it, at most '.Mementos::MAX_LINE_WORDS
                 .' words — or repeat the given words exactly>"}';
+
+        // News from elsewhere, if any reached them this chapter. True and
+        // already written: the invitation is only to say it the way this land
+        // would say it, inside a clamp. Empty on every ordinary chapter, so
+        // nothing ever asks Claude to make up news that does not exist.
+        $news = Rumors::narratorBlock($turn);
+        $rumorField = $news === ''
+            ? ''
+            : ', "rumor": "<the same piece of news in this land\'s own words, one plain sentence of at most '
+                .Rumors::MAX_LINE_WORDS.' words — or repeat the given words exactly>"';
 
         // How the wait before this vignette was spent: one engine-written
         // sentence, plain and factual, carrying no numbers and no name for
@@ -287,7 +314,7 @@ Some beats carry the player's own words for that moment. Those words are voice a
 
 ## How the scene answered
 {$reaction}
-{$world}{$figures}{$company}{$fall}{$keepsake}{$criticals}
+{$world}{$endeavor}{$figures}{$company}{$fall}{$news}{$keepsake}{$criticals}
 ## Where the vignette stops
 {$turn->branch_trigger}: the chapter must end on this note, at a clean decision point, leaving the situation open for the player's next choice. {$wordLow}-{$wordHigh} words.
 
@@ -297,7 +324,7 @@ Some beats carry the player's own words for that moment. Those words are voice a
 The reader makes their next choice from the page itself: close the chapter inside this moment, with the people and surroundings named above present in the prose, so nothing the player can act on appears unannounced. Do not summarize or list them — let the scene hold them naturally.
 
 Respond with ONLY a JSON object:
-{"intent_line": "<the chapter's italic epigraph — the ONE place a turned phrase is welcome; a compact line in the spirit of 'She chose to take the rooftops.' or 'They read the shack before they read the woman.' The prose register's image limit does not bind this single line. Or null.>", "chapter": "<the chapter prose>", "synopsis_line": "<ONE factual line for the campaign's running record: what this chapter changed — names met, promises made, injuries taken, debts owed. Plain record-keeping, no style.>"{$mementoField}}
+{"intent_line": "<the chapter's italic epigraph — the ONE place a turned phrase is welcome; a compact line in the spirit of 'She chose to take the rooftops.' or 'They read the shack before they read the woman.' The prose register's image limit does not bind this single line. Or null.>", "chapter": "<the chapter prose>", "synopsis_line": "<ONE factual line for the campaign's running record: what this chapter changed — names met, promises made, injuries taken, debts owed. Plain record-keeping, no style.>"{$mementoField}{$rumorField}}
 PROMPT;
     }
 

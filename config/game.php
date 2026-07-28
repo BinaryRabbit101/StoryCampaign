@@ -340,6 +340,65 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Rumors (the world's news, reaching the character)
+    |--------------------------------------------------------------------------
+    | The evolver tends each tale's world overnight and the Chronicle tells the
+    | READER about it. These are the same facts reaching the CHARACTER — days
+    | late, one at a time, through channels the turn already produced.
+    |
+    | All three numbers exist to keep it RARE. `per_run` is how many pieces of
+    | gossip one night's tending is worth: a run is a night in a tavern, not a
+    | gazette. `queue` is how much unheard news the world will hold on to
+    | before the oldest of it simply goes stale — without it the character
+    | would still be hearing about last month at the end of the tale.
+    | `per_chapter` is one, and a chapter is one turn's telling: two pieces of
+    | news in a page is a briefing, not a conversation.
+    |
+    | WHICH moments deliver is not tunable: that is the closed channel list in
+    | App\Services\Rumors, detected by the resolver from facts it has already
+    | fixed. And nothing here can make one up — an empty queue is silence.
+    */
+
+    'rumors' => [
+        'per_run' => 3,
+        'queue' => 12,
+        'per_chapter' => 1,
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
+    | Endeavor clocks (the goal the player is working toward)
+    |--------------------------------------------------------------------------
+    | The alarm clock above counts up AGAINST the player while they stand and
+    | fight. An endeavor is the same clock turned around: a multi-turn goal the
+    | engine offered, the player spent a whole beat committing to, and ordinary
+    | qualifying beats fill.
+    |
+    | The segment band is what makes one feel like a commitment rather than a
+    | chore. Under four and it fills inside one scene, which is not a goal, it
+    | is a delay; over six and it can never be finished before the ground
+    | changes underneath it.
+    |
+    | `offer_chance` is how often a scene that COULD support an endeavor
+    | actually puts one on the table. Deliberately occasional — the harder caps
+    | are structural and not tunable here: one endeavor per tale at a time, and
+    | at most one ever proposed per scene however that one ended.
+    |
+    | WHICH endeavors exist, which verbs move them, and what filling one pays
+    | are not tunable either: that is the closed table in
+    | App\Game\Engine\Clocks, and its payoffs route through machinery that
+    | already existed — the engine's own reveal, a feature's destroyed state,
+    | and one existing condition out of App\Game\Engine\Odds::CONDITIONS.
+    */
+
+    'clocks' => [
+        'min_segments' => 4,
+        'max_segments' => 6,
+        'offer_chance' => 0.5,
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
     | Pressure (the world moves when you don't)
     |--------------------------------------------------------------------------
     | A stall counter on the scene fills while a turn casts no die, the player

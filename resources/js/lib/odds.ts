@@ -129,6 +129,17 @@ export function grantLine(
         : null;
 }
 
+/**
+ * What this beat moves toward, when an endeavor is open and names its verb.
+ * Null otherwise. Same class of promise as a grant, and read the same way —
+ * off the engine's own forecast, never re-derived here.
+ */
+export function endeavorLine(card: ActionCard): string | null {
+    return card.forecast.endeavor === null
+        ? null
+        : `advances ${card.forecast.endeavor}`;
+}
+
 /** One target's identity, for collapsing same-verb cards into a chip strip. */
 export const targetKey = (card: ActionCard) =>
     card.target

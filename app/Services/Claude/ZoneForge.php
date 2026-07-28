@@ -9,6 +9,7 @@ use App\Models\Campaign;
 use App\Models\Chapter;
 use App\Models\SceneFeature;
 use App\Models\Zone;
+use App\Services\Rumors;
 use Illuminate\Support\Facades\File;
 use Illuminate\Support\Str;
 use Throwable;
@@ -68,6 +69,16 @@ class ZoneForge
 
         $zone = $this->forge($campaign, leaving: $scene->zone);
         $campaign->update(['next_zone_id' => $zone->id]);
+
+        // The road ahead gets a voice before anybody walks it, so the venture
+        // card's destination is somewhere the character has heard of rather
+        // than a name that appears out of nothing. A failure here costs the
+        // hearsay and never the zone.
+        try {
+            Rumors::fromForge($campaign, $zone);
+        } catch (Throwable $e) {
+            report($e);
+        }
     }
 
     /** Claude-forged, engine-clamped; engine-built from the campaign's land when the forge is cold. */

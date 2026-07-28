@@ -5,6 +5,7 @@ import TargetStrip from '@/components/game/TargetStrip.vue';
 import {
     costLabel,
     difficultyAt,
+    endeavorLine,
     grantLine,
     riskLabel,
     signed,
@@ -68,7 +69,10 @@ const rows = computed<Row[]>(() => {
         key,
         label: cards.length > 1 ? cards[0].verb_label : cards[0].label,
         cards,
-        line: grantLine(cards[0], props.actVerb),
+        // What this rider is FOR, in one line: the bonus it hands the act,
+        // or — failing that — the endeavor it moves. Both come off the
+        // engine's forecast; neither is worked out here.
+        line: grantLine(cards[0], props.actVerb) ?? endeavorLine(cards[0]),
     }));
 });
 

@@ -4,6 +4,7 @@ import OddsLedger from '@/components/game/OddsLedger.vue';
 import {
     costLabel,
     difficultyAt,
+    endeavorLine,
     riskChipClass,
     riskLabel,
     signed,
@@ -160,6 +161,13 @@ const placeholder = computed(
                 >
                     — if it lands</template
                 ></span
+            >
+            <!-- What this beat moves toward, quoted the same way a grant is:
+                 off the engine's forecast, before the commit. -->
+            <span
+                v-if="card.forecast.endeavor"
+                class="rounded-full bg-teal-500/10 px-2 py-0.5 text-[10px] text-teal-700 dark:text-teal-300"
+                >{{ endeavorLine(card) }}</span
             >
         </div>
 

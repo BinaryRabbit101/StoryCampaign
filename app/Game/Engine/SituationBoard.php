@@ -74,6 +74,13 @@ class SituationBoard
         $groups[] = self::group('pressure', 'The stillness', 'ground',
             array_values(array_filter([Pressure::line(Pressure::of($scene))])));
 
+        // What the player set themselves to, and how far along it is. Neutral
+        // on purpose: an endeavor is neither a threat nor a comfort, it is
+        // simply the thing they said they were doing — and the count belongs
+        // here, where they can price the next beat against it.
+        $groups[] = self::group('endeavor', 'What you are set on', 'neutral',
+            array_values(array_filter([Clocks::boardLine($scene)])));
+
         $groups[] = self::group('captives', 'In your grip', 'foe',
             $scene->actors()->where('status', 'restrained')->pluck('name')->all());
 
@@ -132,12 +139,20 @@ class SituationBoard
      * the same facts.
      *
      * Health is a meter and meters never reach prose, so it is left out here.
+     * The endeavor's whole group goes the same way, and for the same reason:
+     * "three of five" is a count, and a count in the narrator's copy of the
+     * board is mechanics language on the page. The narrator gets the goal
+     * itself instead, in plain words, from Clocks::narratorBlock.
      */
     public static function prose(array $groups): string
     {
         $parts = [];
 
         foreach ($groups as $group) {
+            if ($group['key'] === 'endeavor') {
+                continue;
+            }
+
             $items = $group['key'] === 'self'
                 ? array_values(array_filter($group['items'], fn (string $i) => ! str_starts_with($i, 'Health ')))
                 : $group['items'];
