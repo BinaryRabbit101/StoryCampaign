@@ -107,6 +107,17 @@ adjudicates legality or outcomes — it is only ever handed resolved facts.
   int, `Hands::releaseAll`, the `concealed` condition, an enemy `intent` tag,
   `Meters::spend`. Offer chance and per-turn cap in `config/game.php`
   `bargains`),
+  `Scars` (going down marks you instead of erasing you: health at 0 keeps
+  writing `downed`, and the resolver's turn-end path then rolls a permanent
+  burden from the closed `App\Game\ScarCatalog` table with seeded dice, keyed
+  to how they went down — appended through the ORDINARY constraint path with
+  `source: 'scar'` and a `{turn_id, chapter_id}` stamp, re-coupled through
+  `CapabilityClamp`, priced by `Odds::SCARS` under a plain label, and refunding
+  nothing. They wake at `config/game.php` `scars.wake_health_fraction` on safe
+  adjacent ground — dragged clear if a companion still stood, left where they
+  fell otherwise — and the fall past `scars.max_before_end` ends the tale
+  through `BookCompiler::close`'s coda path instead, closed by the Narrator
+  behind the fall's own chapter),
   `ActionCard`, `BeatOutcome`.
 - Anti-repetition systems (all engine-side, no LLM): every visible feature
   and actor carries capability-free `inspect`/`improvise`/`speak` cards, so
@@ -239,6 +250,18 @@ adjudicates legality or outcomes — it is only ever handed resolved facts.
   label teaches the player the whole mechanic is a strictly better button. The
   UI gives the gain and the cost equal weight; the bargain is never styled as
   the better card.
+- A scar is a real burden, and the engine alone hands it out. Claude never
+  chooses or invents one — it is handed the finished facts (where they fell,
+  what it cost in plain words, where they wake) and writes the waking. A scar
+  prices by its NAME through the same `Odds` ladder a creation-time burden
+  does, itemized where the player can read it: there is no harsher table for
+  injuries, because how you came by a burden is a story fact and story facts
+  never move numbers. It refunds NOTHING (the sanctioned relief valve is the
+  growth interview acknowledging it, never points), it never lands on a
+  companion (a downed companion is the existing actor status and stays there),
+  and it never becomes a `SituationBoard` group — the board is for the scene.
+  Rest still never lifts a downed character off the floor; only the fall's own
+  recovery beat does, and it charges a permanent mark to do it.
 - Companions are coordinated, never controlled: requests are cards in each
   companion's own slot (never the player's pre/main/post), the engine rolls
   the companion's attempt, and failure can cost the companion.

@@ -71,6 +71,12 @@ class Meters
         $meters['health']['current'] = max(0, $meters['health']['current'] - $amount);
         $character->forceFill(['meters' => $meters])->save();
 
+        // Zero writes `downed` and nothing more — deliberately. What FOLLOWS a
+        // fall (the scar, the waking, the end of the tale) is the resolver's
+        // business at the end of the turn, in App\Game\Engine\Scars: damage is
+        // applied from a dozen places mid-chain, and rolling a permanent mark
+        // from inside one of them would fire before the turn had finished
+        // happening.
         if ($meters['health']['current'] === 0) {
             $character->forceFill(['status' => 'downed'])->save();
         }

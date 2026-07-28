@@ -5,9 +5,11 @@ namespace App\Services\Claude;
 use App\Game\Engine\Ambient;
 use App\Game\Engine\ChapterEvents;
 use App\Game\Engine\Grudges;
+use App\Game\Engine\Scars;
 use App\Models\Chapter;
 use App\Models\Turn;
 use App\Notifications\TurnReadyNotification;
+use App\Services\BookCompiler;
 use App\Services\PlayerPresence;
 use Illuminate\Support\Facades\File;
 
@@ -22,6 +24,7 @@ class Narrator
     public function __construct(
         private readonly ClaudeCli $claude,
         private readonly ZoneForge $forge,
+        private readonly BookCompiler $books,
     ) {}
 
     public function narrate(Turn $turn): Chapter
@@ -46,6 +49,22 @@ class Narrator
         // the next narration reads so promises and grudges outlive the
         // two-chapter window. A missing line costs only that chapter's entry.
         $campaign->appendSynopsis($chapter->number, $response['synopsis_line'] ?? null);
+
+        // The tale of someone who spent everything. The fall past the scar cap
+        // ends the campaign — and it closes HERE, behind the chapter that tells
+        // it, so the coda lands after the fall in the bound book rather than
+        // before it. The sweep retries a narration that failed, which means the
+        // close is retried with it and a broken Claude call cannot strand a
+        // campaign half-ended.
+        if ($turn->resolution['fall']['final'] ?? false) {
+            try {
+                $this->books->close($campaign->fresh(), early: true, withCoda: true);
+            } catch (\Throwable $e) {
+                report($e);
+            }
+
+            return $chapter;
+        }
 
         // Frontier growth rides the narration job — the world forges its
         // next zone off the player's clock, and a failure here costs only
@@ -140,6 +159,15 @@ class Narrator
         // here, and a lurking return stays as hidden from this as from cards.
         $figures = Grudges::returningFigures($turn);
 
+        // The floor, when the character hit it. Where they went down, what
+        // happened while they were out, where they came round, and the
+        // permanent mark it left — plain facts, no mechanics, and the chapter's
+        // whole subject when it is there at all. The standing marks block is
+        // suppressed on that chapter: the fall block already names the fresh
+        // one, and listing it twice invites the narrator to write it twice.
+        $fall = Scars::narratorBlock($turn);
+        $marks = $fall === '' ? Scars::marksBlock($character) : '';
+
         // How the wait before this vignette was spent: one engine-written
         // sentence, plain and factual, carrying no numbers and no name for
         // what the player chose. It is a clause of colour at the open, not a
@@ -196,7 +224,7 @@ Each listed event carries a bracketed token like [[e1]]. Copy every token into t
 
 ## Character
 {$character->name}: {$character->description}
-
+{$marks}
 ## The stage the player set (color and direction only — never force the goal closed; the player decides when it is met)
 {$stage}
 
@@ -214,7 +242,7 @@ Some beats carry the player's own words for that moment. Those words are voice a
 
 ## How the scene answered
 {$reaction}
-{$figures}{$criticals}
+{$figures}{$fall}{$criticals}
 ## Where the vignette stops
 {$turn->branch_trigger}: the chapter must end on this note, at a clean decision point, leaving the situation open for the player's next choice. {$wordLow}-{$wordHigh} words.
 

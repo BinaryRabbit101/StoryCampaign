@@ -193,6 +193,17 @@ class DowntimeTest extends TestCase
         $this->assertStringContainsString('woke steadier', $turn->resolution['downtime']);
     }
 
+    /**
+     * Sleep is not a resurrection. A character already on the floor when the
+     * wait began gets nothing at all from resting through it — the payout is
+     * zero, and the stance is spent all the same.
+     *
+     * What DOES lift them is the fall's own recovery beat (App\Game\Engine\
+     * Scars), which happens at the end of the resolution, costs a permanent
+     * scar, and is nothing to do with how the wait was spent. The two must stay
+     * separate: if rest ever healed a downed character, going down would become
+     * a thing you could sleep off for free.
+     */
     public function test_rest_never_lifts_a_downed_character_off_the_floor()
     {
         $campaign = $this->createCampaign();
@@ -205,10 +216,16 @@ class DowntimeTest extends TestCase
         $this->resolveQuietly($turn);
         $turn->refresh();
 
-        $character = $campaign->character->fresh();
-        $this->assertSame(0, $character->meters['health']['current']);
-        $this->assertSame('downed', $character->status);
+        // The wait paid nothing: eight hours of sleep on a body at zero.
         $this->assertSame(0, $turn->downtime['payout']['healed']);
+
+        // They are up — but the fall put them up, not the sleep, and it took a
+        // permanent mark and half a health pool to do it.
+        $character = $campaign->character->fresh();
+        $this->assertNotNull($turn->resolution['fall']);
+        $this->assertNotNull($turn->resolution['fall']['scar']);
+        $this->assertSame(5, $character->meters['health']['current']);
+        $this->assertCount(1, $character->constraints()->where('source', 'scar')->get());
     }
 
     public function test_keeping_watch_exposes_arrivals_but_not_an_ambush_already_laid()

@@ -121,6 +121,70 @@ class Odds
     ];
 
     /**
+     * What an old wound costs, and to what.
+     *
+     * A scar is a burden the character acquired mid-tale (App\Game\ScarCatalog),
+     * carried on the sheet as an ordinary constraint row. It reaches the
+     * arithmetic only through here, itemized under a plain label — "The old
+     * wound in your knee" — because a cost the player cannot see teaches them
+     * nothing, and a permanent one they cannot see is the worst kind: it is
+     * still charging them ten chapters after they have forgotten it exists.
+     *
+     * The key is the constraint's NAME, not its source. A scar prices exactly
+     * as the same burden would have priced had it been taken at creation —
+     * there is no second, harsher ladder for injuries, because "how you came by
+     * it" is a story fact and story facts never move numbers.
+     *
+     * One-sided on purpose, unlike AMBIENT: a scar is a price paid for
+     * surviving, not weather. It stays inside the ±4 spread of CONDITIONS
+     * (nothing here exceeds 2) so a marked body is never worse off than
+     * everything it built.
+     *
+     * A rule matches on the card's VERB or on the capability it is spent
+     * through — a bad knee is a bad knee whether the leap is written as a
+     * `cross` or an `ascend`. Verbs that cast no die (Odds::QUIET) are absent:
+     * a table entry the dice can never honor is a price nobody pays.
+     */
+    private const SCARS = [
+        'marked_limp' => [
+            'label' => 'The old wound in your knee',
+            'amount' => 2,
+            'verbs' => ['ascend', 'cross', 'flee', 'ride'],
+            'capabilities' => ['climb', 'leap', 'swing', 'glide'],
+        ],
+        'guarded_side' => [
+            'label' => 'The side that never healed straight',
+            'amount' => 2,
+            'verbs' => ['restrain', 'haul', 'hurl'],
+            'capabilities' => ['restrain', 'carry_extra'],
+        ],
+        'dimmed_eye' => [
+            'label' => 'The eye that never came back',
+            'amount' => 2,
+            'verbs' => ['detect', 'scout', 'track'],
+            'capabilities' => ['scout', 'detect', 'track'],
+        ],
+        'unsteady_hands' => [
+            'label' => 'The tremor in your hands',
+            'amount' => 2,
+            'verbs' => ['lift', 'break', 'recover'],
+            'capabilities' => ['lift', 'break'],
+        ],
+        'ruined_voice' => [
+            'label' => 'The voice you were left with',
+            'amount' => 2,
+            'verbs' => ['persuade', 'deceive', 'calm', 'intimidate', 'speak', 'recruit'],
+            'capabilities' => ['persuade', 'deceive', 'calm', 'intimidate'],
+        ],
+        'lingering_flinch' => [
+            'label' => 'The flinch you did not have before',
+            'amount' => 2,
+            'verbs' => ['strike', 'interrupt', 'improvise'],
+            'capabilities' => [],
+        ],
+    ];
+
+    /**
      * What a bargain buys, and on which side of the arithmetic.
      *
      * A bargain card is the plain card with a named complication attached and a
@@ -235,6 +299,13 @@ class Odds
             $parts[] = $part;
         }
 
+        // What the body carries out of everywhere it has already been. Same
+        // table for the card's forecast and for the die, so a scar can never
+        // quietly cost two points the card did not quote.
+        foreach (self::scarParts($conditions['scars'] ?? [], $card['verb'], $card['capability'] ?? null, $card['slot'] ?? null) as $part) {
+            $parts[] = $part;
+        }
+
         // The deal, if this card is one. The complication was printed on the
         // card beside this line; the edge is the half the arithmetic owes back.
         $edge = self::bargainPart($card['bargain']['key'] ?? null, 'difficulty');
@@ -290,6 +361,42 @@ class Odds
         foreach (self::AMBIENT[$ambient] ?? [] as $rule) {
             $matched = in_array($verb, $rule['verbs'] ?? [], true)
                 || ($capability !== null && in_array($capability, $rule['capabilities'] ?? [], true));
+
+            if ($matched) {
+                $parts[] = ['label' => $rule['label'], 'amount' => $rule['amount']];
+            }
+        }
+
+        return $parts;
+    }
+
+    /**
+     * What the scars this body carries cost a given card. Public because it is
+     * the one place the scar table is read; nothing else may keep a copy.
+     *
+     * The player's own marks never price a COMPANION's attempt — the companion
+     * is rolling their own body, and charging them for the player's bad knee
+     * would be a number nobody could account for.
+     *
+     * @param  list<string>  $scars  Constraint names carried on the sheet.
+     * @return list<Part>
+     */
+    public static function scarParts(array $scars, string $verb, ?string $capability = null, ?string $slot = null): array
+    {
+        if ($slot === 'companion') {
+            return [];
+        }
+
+        $parts = [];
+
+        foreach ($scars as $scar) {
+            $rule = self::SCARS[$scar] ?? null;
+            if ($rule === null) {
+                continue;
+            }
+
+            $matched = in_array($verb, $rule['verbs'], true)
+                || ($capability !== null && in_array($capability, $rule['capabilities'], true));
 
             if ($matched) {
                 $parts[] = ['label' => $rule['label'], 'amount' => $rule['amount']];

@@ -163,6 +163,37 @@ class Grudges
     }
 
     /**
+     * The day they put you on the floor.
+     *
+     * A fall is the single most memorable thing that can pass between the
+     * player and an enemy, and until now the tale's memory did not record it —
+     * an old score could come back for a third time still describing itself as
+     * having merely fled. Every grudged figure standing in the scene when the
+     * character went down gets the line; the narrator quotes it at the reunion,
+     * which is where the whole payoff of this lives.
+     *
+     * The score is not settled by it: heat, disposition, and status are the
+     * return machinery's business and are left exactly as they were.
+     */
+    public static function recordDowning(Scene $scene, Turn $turn): void
+    {
+        $present = $scene->actors()->where('status', 'active')->where('kind', 'enemy')->get()
+            ->filter(fn (Actor $a) => isset($a->tags['grudge_id']));
+
+        foreach ($present as $actor) {
+            $grudge = Grudge::find($actor->tags['grudge_id']);
+            if ($grudge === null || $grudge->status === 'resolved') {
+                continue;
+            }
+
+            $grudge->update(['history' => [...$grudge->history, self::entry(
+                'downed_you', "Put them on the floor at {$scene->title}, and walked away from it.",
+                $turn, null, $scene->title,
+            )]]);
+        }
+    }
+
+    /**
      * The return decision, rolled when new ground is dressed. Engine-side
      * and seeded: heat sets the chance, the chapter floor keeps a return
      * from ever feeling instant, and at most ONE grudge enters per scene.

@@ -120,9 +120,13 @@ class CardComposer
         // The air is part of that: it was rolled once when this ground was
         // dressed and it stands here, so it prices onto the card the same way
         // high ground does — visible before the commit, never after it.
+        // Old wounds are part of that too. A permanent cost the card does not
+        // quote is the worst kind of surprise: it is still charging the player
+        // ten chapters after they stopped thinking about it.
         $conditions = [
             'elevated' => (bool) ($scene->state['elevated'] ?? false),
             'ambient' => Ambient::of($scene),
+            'scars' => Scars::names($character),
         ];
 
         // Full hands never forbid an action — a held crate that locked the

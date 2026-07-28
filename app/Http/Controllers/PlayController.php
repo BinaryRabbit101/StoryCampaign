@@ -6,6 +6,7 @@ use App\Game\Engine\ChapterEntities;
 use App\Game\Engine\ChapterEvents;
 use App\Game\Engine\Downtime;
 use App\Game\Engine\RollTable;
+use App\Game\Engine\Scars;
 use App\Game\Engine\TurnResolver;
 use App\Game\Hands;
 use App\Game\TurnSlot;
@@ -74,6 +75,11 @@ class PlayController extends Controller
                 'hands_free' => Hands::free($character),
                 'capabilities' => $character->capabilities->map(fn ($c) => $c->only(['capability', 'magnitude', 'grade', 'scope', 'source'])),
                 'constraints' => $character->constraints->map(fn ($c) => $c->only(['name', 'params', 'coupled_capability'])),
+                // What the tale has permanently taken. Surfaced plainly on the
+                // strip rather than buried among the burdens: a mark that cost
+                // a whole fall to acquire, and that quietly charges two points
+                // on half the cards, has to be somewhere the player sees it.
+                'scars' => Scars::marks($character),
                 'items' => $character->items->map(fn ($i) => [
                     'name' => $i->name,
                     'description' => $i->description,

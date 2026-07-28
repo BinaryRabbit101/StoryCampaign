@@ -218,11 +218,22 @@ class TraitCatalog
         };
     }
 
-    /** What a real constraint pays back toward the budget. */
+    /**
+     * What a real constraint pays back toward the budget.
+     *
+     * A scar pays back nothing. Creation-time burdens are a bargain the player
+     * struck — carry this, and buy that with it — while a scar is the price of
+     * having fallen, and pricing it as currency would make going down a way to
+     * shop. The relief valve for a fall that felt purely punitive is the growth
+     * interview acknowledging it, never points.
+     */
     public static function constraintRefund(array $constraint): int
     {
-        return match ($constraint['name'] ?? '') {
-            'ponderous', 'stealth_penalty' => 2,
+        $name = $constraint['name'] ?? '';
+
+        return match (true) {
+            ScarCatalog::isScar($name) => 0,
+            in_array($name, ['ponderous', 'stealth_penalty'], true) => 2,
             default => 1,
         };
     }

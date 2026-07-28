@@ -47,6 +47,10 @@ class TurnResolver
                 // The cards were priced against it a turn ago; the dice read
                 // the same key off the same scene, so the quoted DC is paid.
                 'ambient' => Ambient::of($scene),
+                // Everywhere this body has already been. The cards were priced
+                // against the same list a turn ago, so an old wound charges the
+                // die exactly what the card said it would.
+                'scars' => Scars::names($character),
                 'concealed' => false,
                 'time_slowed' => false,
                 'hastened' => false,
@@ -191,10 +195,33 @@ class TurnResolver
             $character->refresh();
             $scene->refresh();
 
-            $trigger ??= $this->evaluateTrigger($character, $scene, $outcomes, $moved, $newThreat, $wasInDanger);
+            // The floor.
+            //
+            // Health at zero used to write `downed` and stop there, which made
+            // the highest-stakes moment in the game a dead end. It branches
+            // here instead: the character survives it carrying an engine-rolled
+            // permanent mark, wakes on safe adjacent ground at half health, and
+            // the tale bends around the recovery. Past the cap, it ends — and
+            // the book closes on the fall's own chapter, once that chapter has
+            // been written.
+            $fall = ($character->status === 'downed' && $scene->campaign_id !== null)
+                ? Scars::takeFall($character, $scene, $turn, $dice, $outcomes, $reactionRolls, $this->dresser)
+                : null;
+
+            $trigger = $fall !== null
+                ? BranchTrigger::ResourceThreshold
+                : ($trigger ?? $this->evaluateTrigger($character, $scene, $outcomes, $moved, $newThreat, $wasInDanger));
 
             $sceneBefore = $scene;
-            if ($moved) {
+            if ($fall !== null) {
+                // Whatever the turn was doing, the fall is what happened. The
+                // waking already moved them (or ended them); nothing else may
+                // transition the scene out from under it.
+                if ($fall['scene'] !== null) {
+                    $scene = $fall['scene'];
+                    $moved = true;
+                }
+            } elseif ($moved) {
                 $scene = $this->transitionScene($scene, $dice, $turn);
             } else {
                 $this->rollEnemyIntents($scene, $dice);
@@ -212,6 +239,13 @@ class TurnResolver
             // walked away leaves it simmering for another day.
             Grudges::settle($sceneBefore, $scene, $moved, $turn);
 
+            // And the tale's memory keeps the worst of it: any old score
+            // standing over them when they went down remembers doing it, and
+            // says so the next time the two meet.
+            if ($fall !== null) {
+                Grudges::recordDowning($sceneBefore, $turn);
+            }
+
             $turn->update([
                 'status' => Turn::STATUS_COMPLETE,
                 'resolution' => [
@@ -226,11 +260,23 @@ class TurnResolver
                     // when the wait bought nothing, so an ordinary turn
                     // carries no instructions about a night that did not matter.
                     'downtime' => $downtime['fact'],
+                    // Where they fell, what it cost them permanently, and where
+                    // they came round. Null on any turn nobody went down, so an
+                    // ordinary chapter carries no instructions about a body
+                    // that is fine.
+                    'fall' => $fall['record'] ?? null,
                 ],
                 'branch_trigger' => $trigger->value,
                 'meters_snapshot' => $character->meters,
                 'resolved_at' => now(),
             ]);
+
+            // The tale that ran out of body. No next turn is opened — there is
+            // nothing left to choose — and the book closes behind the fall's
+            // own chapter, in the narration run that writes it.
+            if ($fall !== null && $fall['record']['final']) {
+                return $turn->fresh();
+            }
 
             return $this->openNextTurn($turn, $character, $scene, $trigger, $dice);
         });

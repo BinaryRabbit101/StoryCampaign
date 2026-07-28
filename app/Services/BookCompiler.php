@@ -2,6 +2,7 @@
 
 namespace App\Services;
 
+use App\Game\Engine\Scars;
 use App\Models\Campaign;
 use App\Models\Turn;
 use App\Services\Claude\ClaudeCli;
@@ -54,6 +55,18 @@ class BookCompiler
             $stage = $campaign->stageBrief();
             $register = ProseStyle::rules();
 
+            // What the tale took out of them, permanently. A closing page that
+            // does not know the body it is closing over is writing about
+            // somebody else — and on the fall that ends a campaign, the marks
+            // ARE the arc: this is the tale of someone who spent everything.
+            $scars = Scars::promptList($campaign->character);
+            $scars = $scars === '' ? '' : <<<SCARS
+
+            What this tale left permanently on them (fixed facts — let the body show where it has been; never list them):
+            {$scars}
+
+            SCARS;
+
             $coda = $this->claude->prompt(<<<PROMPT
 The player is ending this RPG campaign early. Write a brief closing coda — a short epilogue (100-200 words, third-person past tense, no mechanics) that gracefully lands the story wherever the character was, in the spirit of: "And so her tale, for now, went quiet on the rooftops of the old district…"
 
@@ -62,6 +75,7 @@ The player is ending this RPG campaign early. Write a brief closing coda — a s
 Character: {$name}
 The stage the player set for this tale (acknowledge how far the goal got, resolved or not):
 {$stage}
+{$scars}
 Final chapters:
 {$lastChapters}
 

@@ -3,6 +3,7 @@
 namespace App\Services\Claude;
 
 use App\Game\Capability;
+use App\Game\Engine\Scars;
 use App\Game\Meters;
 use App\Game\TraitCatalog;
 use App\Models\Campaign;
@@ -731,13 +732,26 @@ PROMPT;
         $vocabulary = implode(', ', array_column(Capability::cases(), 'value'));
         $transcript = $this->growthTranscript($campaign);
 
+        // What the tale has already taken. A scar is a constraint like any
+        // other on the sheet, but the player is far more likely to want to TALK
+        // about one — working around a bad knee is exactly the kind of request
+        // this conversation exists for — so it arrives in plain words as well
+        // as in the JSON above. It buys nothing: grants stay inside the same
+        // bounds, and acknowledging a scar never lifts it.
+        $scars = Scars::promptList($character);
+        $scars = $scars === '' ? '' : <<<SCARS
+        Permanent scars this character carries (taken in play, not chosen — the player may want to work around one; you may acknowledge it warmly, but it does not heal and it earns no exception to the bounds below):
+        {$scars}
+
+        SCARS;
+
         $response = $this->claude->promptForJson(<<<PROMPT
 A player asks to evolve their character. Either translate the request into a small capability/magnitude change, or push back in-world if it overreaches ("your tail can hold one more item, but lifting a grown person is beyond it — perhaps with training, later"). One change at a time; deepening an existing magnitude is cheaper than a new capability.
 
 Capabilities must come from this vocabulary: {$vocabulary}
 Current capabilities: {$sheet}
 Current constraints: {$constraints}
-Hard bounds (engine-enforced): {$bounds}
+{$scars}Hard bounds (engine-enforced): {$bounds}
 {$transcript}
 Player's request: {$request}
 

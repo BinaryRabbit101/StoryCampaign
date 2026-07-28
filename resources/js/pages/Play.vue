@@ -48,6 +48,17 @@ const props = defineProps<{
             params: Record<string, unknown> | null;
             coupled_capability: string | null;
         }[];
+        /**
+         * Permanent marks taken in play, not chosen. Empty until the first
+         * fall — a body with nothing to show gets no line about it.
+         */
+        scars: {
+            key: string;
+            label: string;
+            description: string;
+            fact: string;
+            chapter_id: number | null;
+        }[];
         items: CharacterItem[];
     };
     turn: {
@@ -643,6 +654,18 @@ const healthPct = computed(
                 <div
                     class="flex items-center gap-3 text-xs text-muted-foreground"
                 >
+                    <!-- What the tale has permanently taken. Plain, and only
+                         once there is something to say: a scar cost a whole
+                         fall and charges the odds forever after, so it does
+                         not belong buried in a panel nobody opens. -->
+                    <span
+                        v-if="character.scars.length"
+                        class="text-red-600 dark:text-red-400"
+                        :title="character.scars.map((s) => s.label).join(', ')"
+                    >
+                        {{ character.scars.length }}
+                        {{ character.scars.length === 1 ? 'scar' : 'scars' }}
+                    </span>
                     <span
                         v-for="(pool, name) in character.meters.tempo"
                         :key="name"
@@ -713,6 +736,33 @@ const healthPct = computed(
                             >
                                 {{ c.name.replace('_', ' ') }}
                             </span>
+                        </div>
+                    </div>
+
+                    <!-- The burdens above are what they chose. These are what
+                         the tale took: named in full, with what each one now
+                         costs, because nobody picked them off a list. -->
+                    <div v-if="character.scars.length">
+                        <p
+                            class="mb-1 text-[10px] tracking-widest text-muted-foreground uppercase"
+                        >
+                            Scars
+                        </p>
+                        <div class="space-y-1">
+                            <div
+                                v-for="s in character.scars"
+                                :key="s.key"
+                                class="rounded-md border border-red-500/30 bg-red-500/5 p-2 text-xs"
+                            >
+                                <p
+                                    class="font-medium text-red-700 dark:text-red-400"
+                                >
+                                    {{ s.label }}
+                                </p>
+                                <p class="text-muted-foreground">
+                                    {{ s.description }}
+                                </p>
+                            </div>
                         </div>
                     </div>
 

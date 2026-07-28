@@ -247,6 +247,35 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Scars (going down marks you instead of erasing you)
+    |--------------------------------------------------------------------------
+    | Health reaching zero used to be a dead end: `status = 'downed'` and
+    | nothing followed. Permadeath would fight the keepsake-book identity and a
+    | consequence-free faint would gut the stakes, so a fall is the third thing:
+    | the character survives it carrying an engine-rolled permanent burden, and
+    | the tale bends around the recovery.
+    |
+    | `max_before_end` is how many scars a body may carry. The fall AFTER that
+    | closes the campaign through the book's early-end/coda path — the tale of
+    | someone who spent everything. The cap is what stops a death spiral: two
+    | stacked burdens make the third fall likelier, and a third stacked burden
+    | would make it inevitable and miserable.
+    |
+    | `wake_health_fraction` is what they wake with. Never respawn-at-full: the
+    | fall has to still be standing there in the numbers when they come round.
+    |
+    | Which scar lands is NOT tunable here. That table is App\Game\ScarCatalog,
+    | and its prices live in App\Game\Engine\Odds::SCARS with every other number
+    | the dice honor.
+    */
+
+    'scars' => [
+        'max_before_end' => 2,
+        'wake_health_fraction' => 0.5,
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
     | Vignette shape
     |--------------------------------------------------------------------------
     */
