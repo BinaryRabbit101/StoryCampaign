@@ -117,6 +117,12 @@ class TurnResolver
             // feet or on the floor any more was lost for good somewhere in it.
             $companionsBefore = Companions::beside($scene)->pluck('id')->all();
 
+            // And what this ground was still keeping back. Somebody else's
+            // search moves only on a beat that genuinely turned something up,
+            // and counting what was concealed on both sides of the turn is the
+            // only honest way to tell.
+            $concealedBefore = Threads::snapshot($scene);
+
             $outcomes = [];
             $trigger = null;
             $moved = false;
@@ -362,6 +368,15 @@ class TurnResolver
                 $turn, $sceneBefore, $scene, $outcomes, $captivesBefore, $elitesBefore, $forced,
             ));
 
+            // Somebody else's small story, at the border and then at the end of
+            // the turn: a rooted want dies with its ground, a want about the
+            // road walks along, and discovery, help, the payoff and the bad end
+            // all land in the second call. It runs BEFORE the offers below on
+            // purpose — a want the player actually saw through outranks a
+            // stranger who happened to take a liking to them.
+            $thread = $scene->id === $sceneBefore->id ? [] : Threads::onSceneExit($sceneBefore, $scene);
+            $thread = array_merge($thread, Threads::resolveTurn($scene, $turn, $outcomes, $concealedBefore));
+
             // Companions the road provided, rather than ones the player asked
             // for. Both paths end the same way — a consensual offer pair on the
             // next turn's cards — and both stay silent while the party is full.
@@ -472,6 +487,13 @@ class TurnResolver
                     // yesterday is not news, and the tier itself is carried by
                     // the board and the narrator's own block, not by this.
                     'standing' => $standingShift,
+
+                    // Somebody else's want: found out about, helped along,
+                    // paid off, or quietly gone wrong for them. Null on every
+                    // turn none of that happened — and null forever on a want
+                    // nobody ever discovered, which is the dormancy rule as the
+                    // narrator sees it.
+                    'thread' => $thread === [] ? null : $thread,
                 ],
                 'branch_trigger' => $trigger->value,
                 'meters_snapshot' => $character->meters,

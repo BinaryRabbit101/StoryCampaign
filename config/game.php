@@ -424,6 +424,38 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Side threads (someone else's small story)
+    |--------------------------------------------------------------------------
+    | A non-hostile soul the dressing put on the ground may be in the middle of
+    | something of their own: a short engine-authored arc the player discovers by
+    | talking to them, helps through cards they were already being offered, or
+    | ignores at a real cost to that person and none at all to themselves.
+    |
+    | `offer_chance` is deliberately tiny. It fires per spawned soul, and a scene
+    | where every bystander needs something is a quest board, not a place. `active`
+    | is one for the same reason the endeavor cap is one: two small stories running
+    | at once is a subplot ledger, and neither of them gets noticed.
+    |
+    | `expiry_chapters` only ever binds the walking kind — the rooted kinds run out
+    | of GROUND first, at the border, because a want about this place cannot follow
+    | the tale off it. It is the patience of somebody who is not the protagonist:
+    | long enough to be answerable, short enough that ignoring them means something.
+    |
+    | WHICH wants exist, what moves them, and what seeing one through pays are not
+    | tunable: that is the closed kind table in App\Game\Engine\Threads, and every
+    | payoff routes through machinery that already existed — the engine's own
+    | reveal, one rumors row, and the consensual welcome/decline pair Companions
+    | already owns. Nothing here can cost the player a number, and nothing ever may.
+    */
+
+    'threads' => [
+        'offer_chance' => 0.12,
+        'active' => 1,
+        'expiry_chapters' => 8,
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
     | Pressure (the world moves when you don't)
     |--------------------------------------------------------------------------
     | A stall counter on the scene fills while a turn casts no die, the player

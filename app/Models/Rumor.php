@@ -35,6 +35,14 @@ class Rumor extends Model
     /** An old score, developed off-screen. Word gets around. */
     public const GRUDGE = 'grudge';
 
+    /**
+     * Somebody the player helped through their own small story, and the tale
+     * that grew out of it. The one source play itself produces — which is
+     * exactly as inert as the others: it is still a line about ELSEWHERE,
+     * written by the engine from a fact it had already fixed.
+     */
+    public const THREAD = 'thread';
+
     public function campaign(): BelongsTo
     {
         return $this->belongsTo(Campaign::class);

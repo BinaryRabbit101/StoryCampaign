@@ -101,7 +101,7 @@ class ActionCard
      * quoted on its own card, as a grant, and the page adds it up as the plan
      * is assembled.
      *
-     * @return array{rolls:bool,difficulty:int,band:string,parts:list<array{label:string,amount:int}>,stances:array<string,int>,bonus:int,bonus_parts:list<array{label:string,amount:int}>,grant:?array,endeavor:?string}
+     * @return array{rolls:bool,difficulty:int,band:string,parts:list<array{label:string,amount:int}>,stances:array<string,int>,bonus:int,bonus_parts:list<array{label:string,amount:int}>,grant:?array,endeavor:?string,thread:?string}
      */
     private function forecast(array $conditions): array
     {
@@ -131,6 +131,13 @@ class ActionCard
         $advances = ($endeavor !== null && in_array($this->verb, $endeavor['verbs'] ?? [], true))
             ? $endeavor['name'] : null;
 
+        // And whose small story this beat would help along, when the player has
+        // discovered one. Same promise, same source — the thread's own row —
+        // with one deliberate difference from the endeavor above: a roll-free
+        // beat may carry it. What a search is gated on is EXPOSURE rather than
+        // a die, and `examine` casts none while turning things up all the same.
+        $helps = self::helpsThread($conditions['thread'] ?? null, $this->verb, $this->target);
+
         if (! Odds::rolls($this->verb)) {
             return [
                 'rolls' => false,
@@ -144,6 +151,7 @@ class ActionCard
                 // A beat that casts no die can never tick a clock, so a
                 // roll-free card never promises one either.
                 'endeavor' => null,
+                'thread' => $helps,
             ];
         }
 
@@ -165,7 +173,34 @@ class ActionCard
             'bonus_parts' => $bonus['parts'],
             'grant' => $grant,
             'endeavor' => $advances,
+            'thread' => $helps,
         ];
+    }
+
+    /**
+     * Whose want this beat would help along, or null.
+     *
+     * The forecast quotes the thread's stored verb list and — where the kind
+     * names one thing — the stored target, so a card can never advertise
+     * progress the resolver's own check would refuse.
+     *
+     * @param  array{name:string,verbs:list<string>,target_id:?int}|null  $thread
+     * @param  array{type:string,id:int|null,name:string}|null  $target
+     */
+    private static function helpsThread(?array $thread, string $verb, ?array $target): ?string
+    {
+        if ($thread === null || ! in_array($verb, $thread['verbs'] ?? [], true)) {
+            return null;
+        }
+
+        $named = $thread['target_id'] ?? null;
+
+        if ($named !== null
+            && (($target['type'] ?? null) !== 'feature' || (int) ($target['id'] ?? 0) !== (int) $named)) {
+            return null;
+        }
+
+        return $thread['name'];
     }
 
     public static function fromArray(array $data): self

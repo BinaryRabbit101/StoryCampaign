@@ -57,6 +57,14 @@ class Companions
 
     public const STRAY = 'stray';
 
+    /**
+     * Somebody whose own small story the player saw through, asking to keep
+     * walking. The third finding path this file promised and never had — and it
+     * changes nothing here: it ends in the same accept/decline pair, respects
+     * the same cap, and adds no bond mover of its own.
+     */
+    public const THREAD = 'thread';
+
     /** The closed signature table. One is picked, once, when fellow is reached. */
     public const HARRY = 'companion_harry';
 

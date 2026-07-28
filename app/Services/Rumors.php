@@ -196,6 +196,21 @@ class Rumors
     }
 
     /**
+     * A side thread's side of it: somebody the player saw through their own
+     * small story, and the story that got about afterwards.
+     *
+     * The only source play itself writes, and it obeys every rule the others
+     * do — engine-templated from a fact already fixed (a `threads` row that
+     * really filled), inert in every direction, and subject to the same queue
+     * cap. The engine hands the line outward from here rather than naming the
+     * model, exactly as the resolver does with the delivery moment.
+     */
+    public static function fromThread(Campaign $campaign, string $subject, string $line): ?Rumor
+    {
+        return self::offer($campaign, Rumor::THREAD, $subject, $line);
+    }
+
+    /**
      * Deliver at most one, if this turn produced a moment for it.
      *
      * The resolver decides the CHANNEL (it is the only thing that knows what
