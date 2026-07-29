@@ -308,6 +308,19 @@ export interface CarriedThing {
     hands: number;
 }
 
+/**
+ * A tappable example answer, with what it would do to the sheet.
+ *
+ * The kind is the narrator's label on its OWN sentence, never anything read
+ * back out of the prose — it decides the chip's tint before the player taps.
+ * `neutral` covers the unlabelled: growth suggestions, which have no ledger to
+ * lean against, and every suggestion written before the column carried kinds.
+ */
+export interface Suggestion {
+    text: string;
+    kind: 'gift' | 'price' | 'both' | 'neutral';
+}
+
 /** One exchange in the evolution conversation. */
 export interface GrowthMessage {
     id: number;
@@ -317,7 +330,7 @@ export interface GrowthMessage {
     granted: boolean | null;
     changes:
         { kind: 'gift' | 'burden'; label: string; detail: string }[] | null;
-    suggestions: string[] | null;
+    suggestions: Suggestion[] | null;
 }
 
 export interface CharacterItem {

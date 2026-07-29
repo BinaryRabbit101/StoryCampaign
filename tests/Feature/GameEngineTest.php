@@ -1238,18 +1238,25 @@ class GameEngineTest extends TestCase
 
         $this->actingAs($user)->post("/campaigns/{$campaign->id}/interview", ['body' => 'A great black cat.']);
 
-        // Sanitized: strings only, trimmed, ≤ 200 chars, capped at four.
+        // Sanitized: real text only, trimmed, ≤ 200 chars, capped at four. An
+        // unlabelled answer keeps its words and simply carries no tint.
         $reply = $campaign->interviewMessages()->orderByDesc('id')->first();
         $this->assertSame('narrator', $reply->role);
         $this->assertCount(4, $reply->suggestions);
-        $this->assertSame('The tail tangles in tight spaces.', $reply->suggestions[0]);
-        $this->assertSame(200, mb_strlen($reply->suggestions[1]));
-        $this->assertNotContains('A fifth suggestion that must be dropped.', $reply->suggestions);
+        $this->assertSame(
+            ['text' => 'The tail tangles in tight spaces.', 'kind' => 'neutral'],
+            $reply->suggestions[0],
+        );
+        $this->assertSame(200, mb_strlen($reply->suggestions[1]['text']));
+        $this->assertNotContains(
+            'A fifth suggestion that must be dropped.',
+            array_column($reply->suggestions, 'text'),
+        );
 
         // The page hands the chips to the client alongside the question.
         $this->actingAs($user)->get("/campaigns/{$campaign->id}/interview")
             ->assertInertia(fn ($page) => $page
-                ->where('messages.2.suggestions.0', 'The tail tangles in tight spaces.'));
+                ->where('messages.2.suggestions.0.text', 'The tail tangles in tight spaces.'));
     }
 
     public function test_a_narrator_that_cannot_answer_leaves_the_players_words_in_their_hands()

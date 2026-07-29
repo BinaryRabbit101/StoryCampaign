@@ -3,6 +3,7 @@
 namespace Tests\Feature;
 
 use App\Models\Campaign;
+use App\Models\InterviewMessage;
 use App\Models\User;
 use App\Services\Claude\ClaudeCli;
 use Database\Seeders\WorldSeeder;
@@ -33,6 +34,9 @@ class InterviewBalanceTest extends TestCase
     /** The draft the narrator answers with next, replaced between exchanges. */
     private ?array $sheet = null;
 
+    /** The suggestions the narrator answers with next. */
+    private array $offered = [['text' => 'I can swim.', 'kind' => 'gift']];
+
     private function openInterview(): Campaign
     {
         $this->seed(WorldSeeder::class);
@@ -45,7 +49,7 @@ class InterviewBalanceTest extends TestCase
 
                 return [
                     'reply' => 'And what walks in with you?',
-                    'suggestions' => ['I can swim.'],
+                    'suggestions' => $this->offered,
                     'character' => $this->sheet,
                 ];
             })->byDefault();
@@ -114,7 +118,7 @@ class InterviewBalanceTest extends TestCase
 
         $this->assertStringContainsString('2 points STILL UNSPENT', $prompt);
         $this->assertStringContainsString('LEAN POSITIVE', $prompt);
-        $this->assertStringContainsString('At least three of your suggestions must be GIFTS', $prompt);
+        $this->assertStringContainsString('must reach for a gift (kind "gift" or "both")', $prompt);
         $this->assertStringContainsString('Do not ask what it costs them', $prompt);
         $this->assertStringNotContainsString('LEAN TOWARD THE PRICE', $prompt);
 
@@ -209,5 +213,93 @@ class InterviewBalanceTest extends TestCase
         // interview refusing to notice they paid.
         $this->assertStringContainsString('1 point STILL UNSPENT', $prompt);
         $this->assertStringContainsString('LEAN POSITIVE', $prompt);
+    }
+
+    /**
+     * The kind rides with the answer, so the chip can be tinted before the
+     * player taps it. It is Claude labelling its own sentence — nothing here
+     * reads the prose and decides what it meant.
+     */
+    public function test_each_offered_answer_carries_what_it_would_do_to_the_sheet()
+    {
+        $campaign = $this->openInterview();
+
+        $this->offered = [
+            ['text' => 'I can put my shoulder through a locked door.', 'kind' => 'gift'],
+            ['text' => 'Crowds see me coming a street away.', 'kind' => 'price'],
+            ['text' => 'I lift what three others cannot, and every room is too small.', 'kind' => 'both'],
+        ];
+
+        $this->say($campaign, 'I am strong.');
+
+        $suggestions = $campaign->interviewMessages()
+            ->where('role', 'narrator')->orderByDesc('id')->first()->suggestions;
+
+        $this->assertSame($this->offered, $suggestions);
+    }
+
+    /** An invented kind is not a kind: it falls to neutral and the chip is plain. */
+    public function test_an_unknown_kind_falls_back_to_no_tint_at_all()
+    {
+        $campaign = $this->openInterview();
+
+        $this->offered = [
+            ['text' => 'Something the narrator made up a colour for.', 'kind' => 'catastrophic'],
+            ['text' => 'A bare string, the way it used to arrive.'],
+        ];
+
+        $this->say($campaign, 'Anything.');
+
+        $suggestions = $campaign->interviewMessages()
+            ->where('role', 'narrator')->orderByDesc('id')->first()->suggestions;
+
+        $this->assertSame('neutral', $suggestions[0]['kind']);
+        $this->assertSame('neutral', $suggestions[1]['kind']);
+        $this->assertSame('A bare string, the way it used to arrive.', $suggestions[1]['text']);
+    }
+
+    /**
+     * Every campaign already has rows holding plain strings. They are normalized
+     * on the way OUT rather than backfilled, because a backfill would have to
+     * guess a kind for prose nobody labelled — and guessing is the one thing the
+     * kind exists to avoid.
+     */
+    public function test_suggestions_written_before_kinds_existed_still_read()
+    {
+        $campaign = $this->openInterview();
+
+        $row = InterviewMessage::create([
+            'campaign_id' => $campaign->id,
+            'kind' => 'creation',
+            'role' => 'narrator',
+            'body' => 'From before the column carried kinds.',
+        ]);
+
+        // Straight past the model, exactly as the old code wrote it.
+        InterviewMessage::whereKey($row->id)->update([
+            'suggestions' => json_encode(['I am quick.', 'I am slow but certain.']),
+        ]);
+
+        $this->assertSame(
+            [
+                ['text' => 'I am quick.', 'kind' => 'neutral'],
+                ['text' => 'I am slow but certain.', 'kind' => 'neutral'],
+            ],
+            $row->fresh()->suggestions,
+        );
+    }
+
+    /** No suggestions at all stays null, so the chip row hides rather than empties. */
+    public function test_an_empty_offer_is_null_rather_than_an_empty_row()
+    {
+        $campaign = $this->openInterview();
+
+        $this->offered = [['text' => '   ', 'kind' => 'gift']];
+        $this->say($campaign, 'Nothing useful comes back.');
+
+        $this->assertNull(
+            $campaign->interviewMessages()
+                ->where('role', 'narrator')->orderByDesc('id')->first()->suggestions,
+        );
     }
 }

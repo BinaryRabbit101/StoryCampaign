@@ -280,7 +280,17 @@ adjudicates legality or outcomes — it is only ever handed resolved facts.
   leans to the price but must still hand back at least one way FORWARD (trade
   a gift down, set one aside) rather than four ways to be worse. Claude writes
   the words and may never override the lean; there is no text classifier
-  deciding what counts as positive, and there should never be one.
+  deciding what counts as positive, and there should never be one. Each offered
+  answer carries its own `kind` (`gift` / `price` / `both` / `neutral`, closed
+  list on `InterviewMessage::KINDS`) — Claude labelling its OWN sentence, which
+  is the only reason a tint may reach the screen at all: violet reaches, amber
+  pays, `both` is violet with an amber edge, and an invented or missing kind
+  falls to `neutral` and no tint, because a wrong tint tells the player a price
+  the engine never charged. The column normalizes on read
+  (`InterviewMessage::normalizeSuggestions`), never by backfill — rows written
+  before kinds existed hold bare strings and a backfill would have to guess the
+  very thing the kind exists to stop guessing. Growth suggestions have no
+  ledger to lean against, so they stay `neutral` and untinted.
 - Nothing about a card's odds may be a surprise. Turns commit on submit — the
   player cannot go back and re-pick — so every card carries a `forecast` (DC
   per stance, the bonuses already standing, and what a set-up beat grants the

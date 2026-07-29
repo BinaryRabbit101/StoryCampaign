@@ -3,12 +3,13 @@ import { Head, router } from '@inertiajs/vue3';
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue';
 import AmbientBackdrop from '@/components/game/AmbientBackdrop.vue';
 import { enablePush } from '@/lib/push';
+import type { Suggestion } from '@/types/game';
 
 interface Message {
     id: number;
     role: 'player' | 'narrator';
     body: string;
-    suggestions: string[] | null;
+    suggestions: Suggestion[] | null;
 }
 
 /** The sheet as it currently stands, priced in the engine's own coin. */
@@ -72,27 +73,63 @@ const suggestions = computed(() => {
         : [];
 });
 
-function adopted(suggestion: string): boolean {
-    return body.value.includes(suggestion);
+/** Whether the tints mean anything on this row — legacy rows carry no kinds. */
+const kinded = computed(() =>
+    suggestions.value.some((s) => s.kind !== 'neutral'),
+);
+
+function adopted(suggestion: Suggestion): boolean {
+    return body.value.includes(suggestion.text);
 }
 
 // Answers accumulate rather than replace: a character is usually more than
 // one of these. Tapping an adopted one takes it back, so a mistap costs a
 // tap instead of hand-editing.
-function adopt(suggestion: string) {
+function adopt(suggestion: Suggestion) {
     const current = body.value.trim();
 
     body.value = adopted(suggestion)
         ? current
-              .replace(suggestion, '')
+              .replace(suggestion.text, '')
               .replace(/\s{2,}/g, ' ')
               .trim()
         : current === ''
-          ? suggestion
-          : `${current} ${suggestion}`;
+          ? suggestion.text
+          : `${current} ${suggestion.text}`;
 
     speakBox.value?.focus();
 }
+
+/**
+ * What an answer would do to the sheet, in the palette the ledger above it
+ * already uses: violet buys, amber pays. A `both` chip is violet with an amber
+ * edge, because that is literally what it is — a gift with a price on it.
+ *
+ * Deliberately the low-opacity borders rather than the amber-500 the overspent
+ * warning and the send errors are written in: a row of chips is an invitation,
+ * and a price is a legitimate answer, not a mistake being flagged.
+ */
+const KIND_STYLES: Record<Suggestion['kind'], string> = {
+    gift: 'border-violet-500/30 bg-violet-500/10 hover:border-violet-500/60',
+    price: 'border-amber-500/30 bg-amber-500/10 hover:border-amber-500/60',
+    both: 'border-violet-500/30 border-l-2 border-l-amber-500/60 bg-violet-500/10 hover:border-violet-500/60',
+    neutral: 'border-input bg-background/60 hover:border-violet-500/50',
+};
+
+const KIND_SELECTED: Record<Suggestion['kind'], string> = {
+    gift: 'border-violet-500 bg-violet-600/30',
+    price: 'border-amber-500 bg-amber-600/25',
+    both: 'border-violet-500 border-l-2 border-l-amber-500 bg-violet-600/30',
+    neutral: 'border-violet-500 bg-violet-600/30',
+};
+
+/** Colour is never the only carrier — screen readers get the same fact. */
+const KIND_LABELS: Record<Suggestion['kind'], string> = {
+    gift: 'a gift',
+    price: 'a price',
+    both: 'a gift and its price',
+    neutral: '',
+};
 
 // ---- The point-buy path: gifts cost, burdens refund, break even to be born. ----
 
@@ -568,22 +605,35 @@ watch(() => props.messages.length, scrollDown);
 
         <div
             v-if="suggestions.length && !pending && !showBuilder"
-            class="sc-rise flex flex-wrap gap-2"
+            class="sc-rise space-y-1.5"
         >
-            <button
-                v-for="suggestion in suggestions"
-                :key="suggestion"
-                type="button"
-                class="max-w-full rounded-lg border px-3 py-1.5 text-left text-xs italic transition active:scale-[0.98]"
-                :class="
-                    adopted(suggestion)
-                        ? 'border-violet-500 bg-violet-600/30 text-foreground'
-                        : 'border-violet-500/30 bg-violet-500/10 text-muted-foreground hover:border-violet-500/60 hover:text-foreground'
-                "
-                @click="adopt(suggestion)"
-            >
-                {{ suggestion }}
-            </button>
+            <!-- The palette is the ledger's own — violet buys, amber pays —
+                 but the ledger only appears once something has been drafted,
+                 and these chips are on screen before that. One short line, and
+                 only while there is actually a contrast to read. -->
+            <p v-if="kinded" class="text-[10px] text-muted-foreground">
+                Violet reaches for something; amber names its price.
+            </p>
+
+            <div class="flex flex-wrap gap-2">
+                <button
+                    v-for="suggestion in suggestions"
+                    :key="suggestion.text"
+                    type="button"
+                    class="max-w-full rounded-lg border px-3 py-1.5 text-left text-xs italic transition active:scale-[0.98]"
+                    :class="
+                        adopted(suggestion)
+                            ? `${KIND_SELECTED[suggestion.kind]} text-foreground`
+                            : `${KIND_STYLES[suggestion.kind]} text-muted-foreground hover:text-foreground`
+                    "
+                    @click="adopt(suggestion)"
+                >
+                    {{ suggestion.text }}
+                    <span v-if="KIND_LABELS[suggestion.kind]" class="sr-only">
+                        — {{ KIND_LABELS[suggestion.kind] }}
+                    </span>
+                </button>
+            </div>
         </div>
 
         <button

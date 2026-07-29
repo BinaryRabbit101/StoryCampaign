@@ -52,11 +52,13 @@ class Interviewer
                 .'and the price those gifts carry. Speak freely; I will listen.',
             // A hand for players who freeze on the blank page: tappable
             // starting points, each a full answer they can send or reshape.
+            // Every one carries a gift AND its price, which is the shape the
+            // whole interview is trying to teach — so they are all `both`.
             'suggestions' => [
-                'A huge black cat with a prehensile tail — strong enough to carry a person, too big to go unnoticed.',
-                'A slight, quick shadow of a person who can squeeze through anywhere, but folds fast in a straight fight.',
-                'A patient old giant: slow, hard to move, able to lift what three others could not.',
-                'A silver-tongued wanderer who can talk their way past most trouble — and is helpless when talk fails.',
+                ['text' => 'A huge black cat with a prehensile tail — strong enough to carry a person, too big to go unnoticed.', 'kind' => 'both'],
+                ['text' => 'A slight, quick shadow of a person who can squeeze through anywhere, but folds fast in a straight fight.', 'kind' => 'both'],
+                ['text' => 'A patient old giant: slow, hard to move, able to lift what three others could not.', 'kind' => 'both'],
+                ['text' => 'A silver-tongued wanderer who can talk their way past most trouble — and is helpless when talk fails.', 'kind' => 'both'],
             ],
         ]);
     }
@@ -633,22 +635,37 @@ PROMPT);
     }
 
     /**
-     * Sanitize Claude-proposed answer suggestions: short strings only,
-     * capped at four; null hides the chip row entirely.
+     * Sanitize Claude-proposed answer suggestions: short text, a kind from the
+     * closed list, capped at four; null hides the chip row entirely.
      *
-     * @return list<string>|null
+     * The kind is Claude labelling its OWN sentence, which is why it is allowed
+     * to reach the screen at all — nothing here reads the prose and decides
+     * what it meant. An unlabelled or invented kind falls to `neutral` and the
+     * chip simply carries no tint, because a wrong tint on a real answer is
+     * worse than no tint: it would tell the player a gift costs them something
+     * the engine never charged.
+     *
+     * @return list<array{text: string, kind: string}>|null
      */
     private function sanitizeSuggestions(mixed $suggestions): ?array
     {
         $clean = collect(is_array($suggestions) ? $suggestions : [])
-            ->filter(fn ($s) => is_string($s) && trim($s) !== '')
-            ->map(fn (string $s) => mb_substr(trim($s), 0, 200))
-            ->unique()
+            ->map(function ($entry) {
+                $text = is_array($entry) ? ($entry['text'] ?? '') : $entry;
+
+                return [
+                    'text' => is_string($text) ? mb_substr(trim($text), 0, 200) : '',
+                    'kind' => is_array($entry) ? (string) ($entry['kind'] ?? 'neutral') : 'neutral',
+                ];
+            })
+            ->filter(fn (array $s) => $s['text'] !== '')
+            ->unique('text')
             ->take(4)
             ->values()
             ->all();
 
-        return $clean === [] ? null : $clean;
+        // The model owns the closed kind list and the final shape.
+        return InterviewMessage::normalizeSuggestions($clean);
     }
 
     /**
@@ -700,8 +717,9 @@ PROMPT);
         // because there is no bargain to be on one side of.
         if ($ledger === null) {
             return 'Nothing is priced yet — this is the opening of the conversation. '
-                .'Offer whole-character answers, each carrying a gift AND the price it drags, '
-                .'so the player sees that both halves belong to them from the very first message.';
+                .'Offer whole-character answers, each carrying a gift AND the price it drags '
+                .'(kind "both"), so the player sees that both halves belong to them from the '
+                .'very first message.';
         }
 
         $balance = (int) $ledger['balance'];
@@ -713,9 +731,9 @@ PROMPT);
 
             return "{$sheet}\nThe player has {$balance} {$word} STILL UNSPENT — they can afford more than they are carrying.\n"
                 .'LEAN POSITIVE. Your question should be about what this character CAN do: what else this body, '
-                .'this temperament, this history opens up. At least three of your suggestions must be GIFTS — a way '
-                .'through the world, a thing others cannot do — and at most one may be a price. Do not ask what it '
-                .'costs them: they have already paid, and the change is sitting in their hand.';
+                .'this temperament, this history opens up. At least three of your suggestions must reach for a '
+                .'gift (kind "gift" or "both") and at most one may be kind "price". Do not ask what it costs '
+                .'them: they have already paid, and the change is sitting in their hand.';
         }
 
         // Overspent. The question is about the price — but never four ways down.
@@ -724,16 +742,17 @@ PROMPT);
 
             return "{$sheet}\nThe draft is OVERSPENT by {$over} — the scales refuse this bargain as it stands.\n"
                 .'LEAN TOWARD THE PRICE. Your question should be about what this costs. But at least ONE suggestion '
-                .'must be a way FORWARD rather than a way down — trading a large gift for its smaller version, or '
-                .'setting one aside — so the player is never handed four different ways to make their character '
-                .'worse. Name what they would still be, not only what they would lose.';
+                .'must be a way FORWARD rather than a way down (kind "gift" or "both") — trading a large gift for '
+                .'its smaller version, or setting one aside for something they keep — so the player is never handed '
+                .'four different ways to make their character worse. Name what they would still be, not only what '
+                .'they would lose.';
         }
 
         return "{$sheet}\nThe bargain is EXACTLY EVEN — every point spoken for, nothing owed.\n"
-            .'BALANCE THE OFFER. Some suggestions should reach for a new gift and name its price in the same '
-            .'breath; others should trade one thing already on the sheet for another. Neither direction is the '
-            .'safe one here, and a question that only asks for more prices reads as the world haggling with '
-            .'somebody who has already settled up.';
+            .'BALANCE THE OFFER. Reach for new gifts and name their prices in the same breath (kind "both" '
+            .'suits this best), and offer at least one of each other kind. Neither direction is the safe one '
+            .'here, and a question that only asks for more prices reads as the world haggling with somebody '
+            .'who has already settled up.';
     }
 
     /** What the sheet is actually carrying, so the narrator does not offer it twice. */
@@ -804,7 +823,11 @@ Rules:
 Respond with ONLY a JSON object:
 {
   "reply": "<your next in-world line to the player>",
-  "suggestions": <3-4 example answers to YOUR question, each in the PLAYER's voice and sendable exactly as written — one plain sentence, ≤ 160 characters. Pull them in genuinely different directions (different bodies, prices, temperaments), so a stuck player discovers what kinds of answers are possible. Their MIX of gifts and prices is set by "Where the bargain stands" above, and it is not yours to override.>,
+  "suggestions": <3-4 example answers to YOUR question, as objects: {"text": "<the answer in the PLAYER's voice, sendable exactly as written — one plain sentence, ≤ 160 characters>", "kind": "gift" | "price" | "both"}. Pull them in genuinely different directions (different bodies, prices, temperaments), so a stuck player discovers what kinds of answers are possible. Their MIX is set by "Where the bargain stands" above and is not yours to override.
+    "gift" — asks for a power, a way through the world, something others cannot do, and gives up nothing.
+    "price" — names a cost, a limit, a thing this character cannot do or will not survive.
+    "both" — a gift and the price it drags, in one breath. Usually the best answer, and it counts as a gift when the lean asks for gifts.
+    The kind must be TRUE of the text: the player sees it as a colour on the chip before they tap it, so a price dressed as a gift is a lie told in advance.>,
   "character": <ALWAYS your best current draft, never null — even after one exchange, even if half-guessed. This is what the player sees priced on screen and what they step into the world as if they press Begin now, so it must always be a playable sheet: {"name": "...", "description": "<2-3 sentence distillation>", "attack_styles": ["a bite", "a rake of claws", ...], "capabilities": [{"capability": "reach", "magnitude": 12, "grade": null, "scope": null}, ...], "constraints": [{"name": "stealth_penalty", "params": {"size": "large"}, "coupled_capability": "intimidate"}, ...], "companions": [] or one entry as described above}>
 }
 
@@ -920,10 +943,11 @@ PROMPT);
             'body' => $response['reply'] ?? '…',
             'granted' => $granted,
             'changes' => $applied,
-            'suggestions' => array_values(array_filter(
-                array_map('strval', $response['suggestions'] ?? []),
-                fn (string $s) => trim($s) !== '',
-            )),
+            // Growth has no ledger to lean against, so these carry no kind and
+            // the chips stay untinted. Routed through the same normalizer only
+            // so a narrator that answers in objects here cannot stringify to
+            // the literal word "Array" on somebody's screen.
+            'suggestions' => $response['suggestions'] ?? [],
         ]);
     }
 

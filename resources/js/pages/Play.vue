@@ -1138,12 +1138,12 @@ const healthPct = computed(
                     >
                         <button
                             v-for="suggestion in growthSuggestions"
-                            :key="suggestion"
+                            :key="suggestion.text"
                             type="button"
                             class="rounded-full border border-input px-2.5 py-1 text-left text-xs transition hover:bg-accent active:scale-95"
-                            @click="growthText = suggestion"
+                            @click="growthText = suggestion.text"
                         >
-                            {{ suggestion }}
+                            {{ suggestion.text }}
                         </button>
                     </div>
 
