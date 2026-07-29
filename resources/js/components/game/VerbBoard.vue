@@ -26,7 +26,11 @@ const props = defineProps<{
     selectedId: string | null;
 }>();
 
-const emit = defineEmits<{ (e: 'pick', card: ActionCard): void }>();
+const emit = defineEmits<{
+    (e: 'pick', card: ActionCard): void;
+    /** Stepping into another word puts the beat already chosen down. */
+    (e: 'clear'): void;
+}>();
 
 const ORDER: { key: VerbFamily; word: string }[] = [
     { key: 'look', word: 'Look' },
@@ -118,6 +122,11 @@ watch(chosen, (card) => {
  * lighting nothing — so the press produced a list somewhere below and no mark on
  * the thing that had just been pressed, which reads as a tap that missed. A word
  * whose drawer is open is a word the player is inside; it lights.
+ *
+ * Exactly one word is ever lit, which is the whole reason `tapWord` puts the
+ * previous beat down when it steps into a different word. Two lit words meant
+ * "Speak with Mara" in the header and LOOK glowing beside SPEAK, and no way to
+ * tell which one the turn was about to resolve.
  */
 const lit = (word: BoardWord) =>
     props.selectedId !== null && chosen.value?.family === word.key
@@ -133,6 +142,8 @@ function tapWord(word: BoardWord) {
         return;
     }
 
+    // One verb under the word is the common case: the tap IS the choice, and
+    // it replaces whatever was chosen before all by itself.
     if (word.verbs.length === 1) {
         openWord.value = null;
         emit('pick', firstOf(word.verbs[0].cards));
@@ -140,7 +151,20 @@ function tapWord(word: BoardWord) {
         return;
     }
 
-    openWord.value = openWord.value === word.key ? null : word.key;
+    const opening = openWord.value !== word.key;
+    openWord.value = opening ? word.key : null;
+
+    // Opening a DIFFERENT word puts the beat already chosen down. Browsing
+    // Look while Speak stayed selected lit two words at once and left the
+    // header describing a beat the player had visibly moved on from — and the
+    // reading that resolves is always the header's, which is exactly the kind
+    // of thing a turn that commits on submit must never be ambiguous about.
+    //
+    // Collapsing a word's own drawer is not stepping away, so a player who
+    // opens their own word and closes it again keeps their beat.
+    if (opening && chosen.value !== null && chosen.value.family !== word.key) {
+        emit('clear');
+    }
 }
 
 function tapVerb(group: VerbGroup) {
@@ -156,6 +180,7 @@ function tapVerb(group: VerbGroup) {
                 :key="word.key"
                 type="button"
                 :disabled="word.count === 0"
+                :aria-pressed="lit(word)"
                 class="flex flex-col items-center gap-0.5 rounded-lg border px-1 py-2 text-[11px] font-semibold tracking-widest uppercase transition-all duration-200 active:scale-95"
                 :class="
                     word.count === 0

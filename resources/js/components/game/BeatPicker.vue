@@ -194,6 +194,7 @@ function pickTarget(key: string) {
                     :cards="cards"
                     :selected-id="modelValue?.card_id ?? null"
                     @pick="pickVerb"
+                    @clear="emit('update:modelValue', null)"
                 />
 
                 <TargetStrip
