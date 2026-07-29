@@ -4,10 +4,15 @@ import type { TargetOption } from '@/lib/odds';
 /**
  * WHAT: the second step of the sentence.
  *
- * One chip per thing the chosen verb can be aimed at, each carrying its own
- * difficulty — the strip the old row-based picker already had, lifted out so
- * the board can use it in the act and the riders alike. Every chip stands for
- * a card the engine offered; picking one never composes anything.
+ * One chip per thing the chosen verb can be aimed at. Every chip stands for a
+ * card the engine offered; picking one never composes anything.
+ *
+ * The chips used to print their own DC, which put the same number on screen a
+ * dozen times over — six things to aim at, all reading "· 13", because on most
+ * ground the target is not what makes a beat hard. A figure repeated until it
+ * is wallpaper stops being read at all. The DC lives one tap away in the panel
+ * for the beat actually chosen, before the commit, where it is about something.
+ * The risk colouring stays here: THAT genuinely differs per target.
  */
 defineProps<{
     label?: string;
@@ -41,10 +46,7 @@ defineEmits<{ (e: 'pick', key: string): void }>();
                 "
                 @click.stop="$emit('pick', option.key)"
             >
-                {{ option.name
-                }}<template v-if="option.difficulty !== null">
-                    · {{ option.difficulty }}</template
-                >
+                {{ option.name }}
             </button>
         </div>
     </div>

@@ -47,6 +47,7 @@ export function costClass(amount: number): string {
     if (amount < 0) {
         return 'text-emerald-700 dark:text-emerald-400';
     }
+
     if (amount === 0) {
         return 'text-muted-foreground';
     }
@@ -190,11 +191,15 @@ export const targetKey = (card: ActionCard) =>
         ? `${card.target.type}:${card.target.id ?? card.target.name}`
         : 'none';
 
-/** One chip on the WHAT strip: a thing the chosen verb can be aimed at. */
+/**
+ * One chip on the WHAT strip: a thing the chosen verb can be aimed at.
+ *
+ * No difficulty rides along any more — the strip stopped printing one, and a
+ * number computed for nobody to read is how a stale figure ends up back on
+ * screen later. It is quoted once, in the panel for the beat actually chosen.
+ */
 export interface TargetOption {
     key: string;
     name: string;
-    /** Null when this beat casts no die. */
-    difficulty: number | null;
     risk: ActionCard['risk'];
 }

@@ -3,7 +3,8 @@ import { computed } from 'vue';
 import HowPanel from '@/components/game/HowPanel.vue';
 import TargetStrip from '@/components/game/TargetStrip.vue';
 import VerbBoard from '@/components/game/VerbBoard.vue';
-import { difficultyAt, targetKey, type TargetOption } from '@/lib/odds';
+import { targetKey } from '@/lib/odds';
+import type { TargetOption } from '@/lib/odds';
 import type { CarriedBonus } from '@/lib/odds';
 import type { ActionCard, SlotChoice } from '@/types/game';
 
@@ -56,12 +57,7 @@ const chosenTargetKey = computed(() =>
     card.value === null ? null : targetKey(card.value),
 );
 
-const stanceFor = (option: ActionCard) =>
-    option.id === props.modelValue?.card_id
-        ? (props.modelValue.modifiers.approach ?? 'balanced')
-        : 'balanced';
-
-/** WHAT: one chip per thing this verb can be aimed at, each with its own DC. */
+/** WHAT: one chip per thing this verb can be aimed at. */
 const targets = computed<TargetOption[]>(() => {
     const grouped = new Map<string, ActionCard[]>();
 
@@ -78,9 +74,6 @@ const targets = computed<TargetOption[]>(() => {
         return {
             key,
             name: shown.target?.name ?? shown.label,
-            difficulty: shown.forecast.rolls
-                ? difficultyAt(shown, stanceFor(shown))
-                : null,
             risk: shown.risk,
         };
     });

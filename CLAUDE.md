@@ -304,16 +304,33 @@ adjudicates legality or outcomes — it is only ever handed resolved facts.
   ladder is how a card starts promising a DC the dice do not honor. The
   modifier is always displayed, `+0` included — hiding it when it happens to
   be zero is exactly when its absence is worth stating. The TOTAL is what must
-  never be hidden; the itemization is a reading aid, so the constant every roll
-  in the game shares (`Base difficulty`) is not printed as a line item — a
-  number that never varies teaches nobody anything and buried the parts that do.
-  And a two-sided trade must show BOTH sides where the number is: a stance chip
-  prints its difficulty delta AND its terms (`terms` on the modifier option),
-  because "creep −2 DC / dash +2 DC" on its own reads as the engine claiming
-  running is harder than tiptoeing. It is not a movement rule — it is the same
-  trade on every card: caution buys a surer roll and spends the top of the result
-  (never better than plainly working, no wild faces), boldness pays for the
-  reverse.
+  never be hidden; the ITEMIZATION is only a reading aid, and at choose-time it
+  is no longer printed at all: `OddsLedger` shows the DC, the band, and the
+  modifier, and nothing else. Eight lines of arithmetic under every card is a
+  paragraph the player learns to scroll past, which buries the two numbers that
+  decide the beat in a wall that looks equally important. The parts are still on
+  the forecast and on every resolved roll, so `DiceTable` shows the working
+  AFTER the fact, where it reads as an explanation rather than a form. The DC is
+  quoted once per beat, in the panel for the beat actually chosen — never on the
+  target chips, where six things to aim at all printed the same "· 13" until the
+  number was wallpaper. Risk colouring stays on the chips: that genuinely differs
+  per target.
+- The stance (`approach`) is no longer offered anywhere, on the same terms as
+  `Downtime`. The three chips asked the same question on every card in the game
+  — trade the top of the result for an easier roll, or the reverse — and the
+  honest answer was almost always "balanced", so it read as a toll booth between
+  choosing a beat and committing to it. The ENGINE half is untouched and this
+  must stay a UI-only removal: `Odds` still prices all three stances, the
+  composer still returns the modifier, and every submission still carries
+  `approach: balanced` because it is the modifier's FIRST option (`choiceFor`
+  takes `options[0]`) — so reordering that table would silently re-price every
+  beat in the game. Putting the picker back is a template change. If it does come
+  back, the old terms come with it: a two-sided trade must show BOTH sides where
+  the number is, the delta AND its `terms`, because "creep −2 DC / dash +2 DC"
+  alone reads as the engine claiming running is harder than tiptoeing. It is not
+  a movement rule — it is the same trade on every card: caution buys a surer roll
+  and spends the top of the result (never better than plainly working, no wild
+  faces), boldness pays for the reverse.
 - The scene arrives thin. Openings and transitions draw few features and often
   no actors at all; an empty room is a legitimate reading of a place, and a
   scene that spends the whole world on arrival leaves nothing to appear later.

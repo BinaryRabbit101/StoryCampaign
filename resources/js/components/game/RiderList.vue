@@ -9,8 +9,6 @@ import {
     threadLine,
     grantLine,
     riskLabel,
-    signed,
-    stanceDelta,
     targetKey,
 } from '@/lib/odds';
 import type { CarriedBonus, TargetOption } from '@/lib/odds';
@@ -121,9 +119,12 @@ const targetsOf = (row: Row): TargetOption[] =>
     row.cards.map((card) => ({
         key: targetKey(card),
         name: card.target?.name ?? card.label,
-        difficulty: dc(card),
         risk: card.risk,
     }));
+
+/** The stance is no longer picked here either — see HowPanel for why. */
+const pickableIn = (row: Row) =>
+    (selectedIn(row)?.modifiers ?? []).filter((m) => m.key !== 'approach');
 
 function pickTarget(row: Row, key: string) {
     const card = row.cards.find((c) => targetKey(c) === key);
@@ -235,12 +236,12 @@ function setNote(note: string) {
                     </div>
 
                     <div
-                        v-if="selectedIn(row)!.modifiers.length"
+                        v-if="pickableIn(row).length"
                         class="mt-1.5 space-y-1.5"
                         @click.stop
                     >
                         <div
-                            v-for="modifier in selectedIn(row)!.modifiers"
+                            v-for="modifier in pickableIn(row)"
                             :key="modifier.key"
                         >
                             <div
@@ -264,26 +265,7 @@ function setNote(note: string) {
                                         setModifier(modifier.key, option.value)
                                     "
                                 >
-                                    {{ option.label
-                                    }}<span
-                                        v-if="
-                                            modifier.key === 'approach' &&
-                                            stanceDelta(
-                                                selectedIn(row)!,
-                                                option.value,
-                                            )
-                                        "
-                                        class="ml-1 tabular-nums opacity-80"
-                                        >({{
-                                            signed(
-                                                stanceDelta(
-                                                    selectedIn(row)!,
-                                                    option.value,
-                                                )!,
-                                            )
-                                        }}
-                                        DC)</span
-                                    >
+                                    {{ option.label }}
                                 </button>
                             </div>
                         </div>
@@ -294,7 +276,6 @@ function setNote(note: string) {
                             :card="selectedIn(row)!"
                             :stance="stanceOf(selectedIn(row)!)"
                             :carried="carried"
-                            collapsible
                         />
                     </div>
 

@@ -9,7 +9,6 @@ import {
     riskChipClass,
     riskLabel,
     signed,
-    stanceDelta,
 } from '@/lib/odds';
 import type { CarriedBonus } from '@/lib/odds';
 import type { ActionCard, CardModifier, SlotChoice } from '@/types/game';
@@ -39,6 +38,26 @@ const emit = defineEmits<{
 }>();
 
 const stance = computed(() => props.choice.modifiers.approach ?? 'balanced');
+
+/**
+ * The modifiers the player actually picks between.
+ *
+ * `approach` is not one of them any more. The stance was three chips on every
+ * card in the game asking the same question — trade some of the top of the
+ * result for an easier roll, or the reverse — and the honest answer was almost
+ * always "balanced", so it read as a toll booth between choosing a beat and
+ * committing to it rather than a decision. Every beat now resolves at the plain
+ * reading, which is what the default already was.
+ *
+ * The ENGINE side is untouched and this is the whole removal: `Odds` still
+ * prices all three stances, the composer still offers the modifier, and the
+ * submission still carries `approach: balanced` because it is the first option.
+ * Putting the picker back is a template change, exactly as it was for the
+ * downtime stance.
+ */
+const pickable = computed(() =>
+    props.card.modifiers.filter((modifier) => modifier.key !== 'approach'),
+);
 
 /** The bodies that serve this verb here — one chip each, when there are two. */
 const manners = computed(() => {
@@ -280,10 +299,10 @@ const placeholder = computed(
         </div>
 
         <div
-            v-if="card.modifiers.length"
+            v-if="pickable.length"
             class="mt-2 space-y-2 border-t border-sidebar-border/50 pt-2"
         >
-            <div v-for="modifier in card.modifiers" :key="modifier.key">
+            <div v-for="modifier in pickable" :key="modifier.key">
                 <div class="mb-1 text-xs font-medium text-muted-foreground">
                     {{ modifier.label }}
                 </div>
@@ -300,21 +319,7 @@ const placeholder = computed(
                         "
                         @click="setModifier(modifier.key, option.value)"
                     >
-                        {{
-                            option.label
-                        }}<!-- A stance that moves the difficulty says by how
-                             much, on the chip that moves it. -->
-                        <span
-                            v-if="
-                                modifier.key === 'approach' &&
-                                stanceDelta(card, option.value)
-                            "
-                            class="ml-1 tabular-nums opacity-80"
-                            >({{
-                                signed(stanceDelta(card, option.value)!)
-                            }}
-                            DC)</span
-                        >
+                        {{ option.label }}
                     </button>
                 </div>
                 <!-- And what that number is the price of.
