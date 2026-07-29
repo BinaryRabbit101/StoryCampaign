@@ -77,10 +77,24 @@ adjudicates legality or outcomes — it is only ever handed resolved facts.
   quote a DC the dice won't honor), `TurnResolver` (slot chain with
   legality-driven abort, seeded `Dice`, enemy reaction, branch triggers,
   next-turn generation), `SituationBoard` (the state of play as grouped
-  bullets + the prose compilation the narrator prompt reads), `SceneDresser`
+  bullets + the prose compilation the narrator prompt reads — including the
+  `place` group: the scene's own name, its zone, and every unwalked way out
+  with its heading), `SceneDresser`
   (scene generation: a seeded SUBSET of zone templates instantiated as
   scene-scoped copies + spawned actors + a zone `locales` title, marked
-  `state.dressed`), `Grudges` (the nemesis system: an enemy who newly flees
+  `state.dressed` — plus `mintExits`: 1–3 `scene_exits` rows with compass
+  headings, each carrying the locale it leads toward),
+  `Compass` (the four headings as engine vocabulary — north/east/south/west,
+  opposites, and the map offset; a heading never moves a number anywhere),
+  `Fortune` (the fortune die: the closed ELIGIBLE subset of quiet verbs casts
+  a d20 beside its certain outcome — ≥`fortune.lucky_from` a lucky find,
+  ≤`fortune.unlucky_to` an unfortunate wrinkle, the wide middle silence. The
+  beat itself still simply happens; every effect routes through machinery that
+  already existed (tempo pools, the alarm counter, an enemy's angle tag, the
+  scouted exit, the sanctioned engine reveal), a face with nothing to give or
+  cost passes in silence, and declarations/consent verbs stay outside it.
+  Carried on `BeatOutcome::$fortune`, shown as its own DC-less card on the
+  dice table), `Grudges` (the nemesis system: an enemy who newly flees
   becomes a campaign-scoped `grudges` row keyed by NAME — heat 0–3, a
   disposition rolled from the flee circumstances, append-only history the
   narrator quotes; the engine alone rolls returns at scene transition
@@ -161,7 +175,8 @@ adjudicates legality or outcomes — it is only ever handed resolved facts.
   row per zone — clamped ±3, append-only `{turn_id, event, shift}` history —
   moved ONLY by a closed table of facts the resolver already fixed (captive
   freed / elite beaten / rival spared +1; grudge born / ground wrecked, once
-  per scene / alarm answered −1). It tiers into plain words
+  per scene / alarm answered / innocent struck — the first swing at a person
+  who had raised no hand, read off the strike path's kind flip — −1). It tiers into plain words
   (hostile/wary/silent/known/welcome) the board and narrator carry, prices the
   SOCIAL verbs alone by one itemized `Odds::STANDING` point in either direction,
   and biases a newly arrived enemy's FIRST telegraph through the existing seeded
@@ -204,6 +219,14 @@ adjudicates legality or outcomes — it is only ever handed resolved facts.
   and actor carries capability-free `inspect`/`improvise`/`speak` cards, so
   ground the character's gifts don't fit is still actionable and the card
   list moves with the scene instead of collapsing to fixed fallbacks;
+  the physical verbs have untrained floors on the same principle — a visible
+  `hideable` feature offers hide, a `breakable` offers break, and anything at
+  or under `CardComposer::UNTRAINED_LIFT` offers a bare-hands lift, all
+  DEGRADED risk with no capability bonus, never better than the bought gift;
+  anyone in reach can be fought: strike is offered on every visible
+  non-companion actor ("Turn on X" when they are not hostile), and the swing
+  itself — landed or not — flips them to `kind = 'enemy'` (tags `was` +
+  `turned_on_turn`), routing them through every existing enemy path;
   dressed scenes make every transition new ground; features tagged `hidden` are discovery
   content (examine/scout reveal them); enemies telegraph intents
   (press/windup/guard/circle in `tags.intent`) that composer cards and
@@ -552,6 +575,42 @@ adjudicates legality or outcomes — it is only ever handed resolved facts.
   rather than announced: a seeded roll, a cap on the tale, a cooldown between
   them, one per turn, and one visit per source line. A memory that arrives on
   schedule has stopped being a memory.
+
+- The fortune die never touches the beat it rides on. A quiet beat's own
+  outcome is still certain — the forecast's "Certain" stays true, the beat's
+  `roll` stays 0 (that zero is load-bearing in the roll table, the dice-screen
+  skip, and Pressure's quiet-turn read), and fortune travels ONLY on
+  `BeatOutcome::$fortune`. It is the same class of thing as the alarm clock
+  and the pressure table — the world moving on its own — never a price on the
+  card: no effect may refuse, improve, or grade what the card promised. Every
+  payout routes through machinery that already existed, a face with nothing
+  to give or cost passes in silence rather than inventing a bill, and the
+  declaration/consent verbs (undertake, abandon, face, bargain,
+  companion_welcome/dismiss) stay outside it forever — answering a question
+  is not an act the world gets to trip you on.
+
+- The compass is orientation, never mechanics, and departure stays
+  irreversible. A heading moves no number: exits price as ordinary `cross`
+  with no capability, `Odds` never reads a direction, and the narrator is free
+  to render "north" in whatever way the land steers by. Every dressed scene
+  gets 1–3 exits with distinct headings, none pointing back the way the scene
+  was entered — the map (`scenes.from_scene_id`/`from_direction`/`grid_x`/
+  `grid_y` + `scene_exits`) is a TRAIL of where the tale has actually been,
+  drawn after the fact, never a promise of ground that does not exist yet. An
+  exit's destination locale is fixed at minting (north and east are genuinely
+  different doors), a walked exit points at the scene it became and is never
+  offered again, and non-exit departures (flee, track, venture) consume one of
+  the ground's unwalked ways when one exists. Board group `place` states the
+  scene, the zone, and the open ways in plain words, so the player is never
+  navigating from memory.
+
+- Nobody in the world reads the player a menu. The narrator never receives
+  the raw branch-trigger slug (only `BranchTrigger::description()`), and both
+  `ProseStyle::rules()` and the narrator's closing directive ban dialogue that
+  enumerates the ways forward — no "you have two choices", no A-or-B, no
+  asking which path the reader picks. Characters want things and say so; the
+  option list is the form's business, not the fiction's. The interviewer's
+  reply may not restate its suggestion chips for the same reason.
 
 ## Widget
 

@@ -8,7 +8,7 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Support\Collection;
 
-#[Fillable(['campaign_id', 'zone_id', 'title', 'description', 'status', 'state'])]
+#[Fillable(['campaign_id', 'zone_id', 'title', 'description', 'status', 'state', 'from_scene_id', 'from_direction', 'grid_x', 'grid_y'])]
 class Scene extends Model
 {
     protected function casts(): array
@@ -36,6 +36,18 @@ class Scene extends Model
     public function actors(): HasMany
     {
         return $this->hasMany(Actor::class);
+    }
+
+    /** The ways out the dresser gave this ground, headings and all. */
+    public function exits(): HasMany
+    {
+        return $this->hasMany(SceneExit::class);
+    }
+
+    /** The scene walked out of to get here — the map's road behind. */
+    public function cameFrom(): BelongsTo
+    {
+        return $this->belongsTo(self::class, 'from_scene_id');
     }
 
     /**

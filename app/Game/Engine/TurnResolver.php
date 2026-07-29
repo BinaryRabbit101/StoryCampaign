@@ -11,6 +11,7 @@ use App\Models\Actor;
 use App\Models\Character;
 use App\Models\Grudge;
 use App\Models\Scene;
+use App\Models\SceneExit;
 use App\Models\Turn;
 use App\Models\Zone;
 use App\Services\Echoes;
@@ -135,6 +136,7 @@ class TurnResolver
             $outcomes = [];
             $trigger = null;
             $moved = false;
+            $movedExit = null;
             $wasInDanger = Meters::healthInDangerBand($character);
 
             // What the player set themselves to, and what came of it. Only the
@@ -223,6 +225,11 @@ class TurnResolver
                 ], true)
                     && $outcome->degree !== BeatOutcome::FAILURE) {
                     $moved = true;
+                    // A cross through a named way carries its heading into the
+                    // transition: the door the player picked is the door used.
+                    if (($card['target']['type'] ?? null) === 'exit' && ($card['target']['id'] ?? null) !== null) {
+                        $movedExit = SceneExit::find($card['target']['id']);
+                    }
                 }
             }
 
@@ -366,7 +373,7 @@ class TurnResolver
                     Clocks::onSceneExit($sceneBefore, $scene);
                 }
             } elseif ($moved) {
-                $scene = $this->transitionScene($scene, $dice, $turn, $companionEvents);
+                $scene = $this->transitionScene($scene, $dice, $turn, $companionEvents, $movedExit);
             } else {
                 $this->rollEnemyIntents($scene, $dice);
             }
@@ -688,6 +695,15 @@ class TurnResolver
             return 'Their hands are already full.';
         }
 
+        // A named way out is legal while it is still this scene's own and
+        // still unwalked.
+        if (($target['type'] ?? null) === 'exit' && ($target['id'] ?? null) !== null) {
+            $way = SceneExit::find($target['id']);
+            if ($way === null || $way->scene_id !== $scene->id || $way->to_scene_id !== null) {
+                return 'That way has already been taken.';
+            }
+        }
+
         // A venture card is only legal toward the campaign's own pre-forged
         // frontier zone — never an arbitrary zone id.
         if (($target['type'] ?? null) === 'zone'
@@ -715,7 +731,7 @@ class TurnResolver
 
         // Tempo and quiet beats auto-succeed; everything else rolls.
         if (! Odds::rolls($verb)) {
-            return $this->quietBeat($card, $character, $scene, $conditions, $turn, $this->note($choice));
+            return $this->quietBeat($card, $character, $scene, $conditions, $turn, $dice, $this->note($choice));
         }
 
         // The ledger, not a second copy of it. The card the player committed
@@ -762,7 +778,7 @@ class TurnResolver
         // decides which of two legal readings of the same beat happens — never
         // how hard the beat was, which is why it reaches only the effects and
         // never the ledger above.
-        $facts = $this->applyBeatEffects($verb, $card, $degree, $approach, $character, $scene, $conditions, $dice, $crit,
+        $facts = $this->applyBeatEffects($verb, $card, $degree, $approach, $character, $scene, $conditions, $dice, $turn, $crit,
             intent: $choice['modifiers']['intent'] ?? null);
 
         if ($crit !== null) {
@@ -820,7 +836,7 @@ class TurnResolver
         return $note === '' ? null : $note;
     }
 
-    private function quietBeat(array $card, Character $character, Scene $scene, array &$conditions, Turn $turn, ?string $note = null): BeatOutcome
+    private function quietBeat(array $card, Character $character, Scene $scene, array &$conditions, Turn $turn, Dice $dice, ?string $note = null): BeatOutcome
     {
         $facts = [];
 
@@ -977,8 +993,18 @@ class TurnResolver
                 break;
         }
 
+        // The fortune die — the good/bad weather every rolling beat already
+        // has, cast on the quiet ones too. It never touches what the beat
+        // itself did (everything above already happened, certain as the card
+        // promised); it only lets the moment break one way or the other
+        // around it, through machinery the scene already owned.
+        $fortune = Fortune::roll($dice, $card['verb'], $character, $scene);
+        if (($fortune['fact'] ?? null) !== null) {
+            $facts[] = $fortune['fact'];
+        }
+
         return new BeatOutcome($card['slot'], $card['verb'], $card['target'] ?? null,
-            BeatOutcome::SUCCESS, 0, 0, 0, $facts, note: $note);
+            BeatOutcome::SUCCESS, 0, 0, 0, $facts, note: $note, fortune: $fortune);
     }
 
     /**
@@ -1066,7 +1092,7 @@ class TurnResolver
      *                             verb's own effect lands.
      * @return list<string>
      */
-    private function applyBeatEffects(string $verb, array $card, string $degree, string $approach, Character $character, Scene $scene, array &$conditions, Dice $dice, ?string $crit = null, ?string $intent = null): array
+    private function applyBeatEffects(string $verb, array $card, string $degree, string $approach, Character $character, Scene $scene, array &$conditions, Dice $dice, Turn $turn, ?string $crit = null, ?string $intent = null): array
     {
         $facts = [];
         $targetName = $card['target']['name'] ?? 'the scene';
@@ -1091,6 +1117,18 @@ class TurnResolver
 
             case Verb::Strike:
                 $actor = Actor::find($card['target']['id']);
+                // Turning on someone the scene had not made an enemy: the
+                // swing itself writes the quarrel, landed or not — they saw
+                // it come. The kind flip routes them through every existing
+                // enemy path (reaction, flights, grudges, loot); who they
+                // were is kept so the town can bill the right deed.
+                if ($actor !== null && ! in_array($actor->kind, ['enemy', 'companion'], true)) {
+                    $tags = $actor->tags ?? [];
+                    $tags['was'] = $actor->kind;
+                    $tags['turned_on_turn'] = $turn->id;
+                    $actor->update(['kind' => 'enemy', 'tags' => $tags]);
+                    $facts[] = "{$actor->name} wanted no fight until the swing came — whatever stood between them before, they answer as an enemy now.";
+                }
                 $damage = match ($degree) {
                     BeatOutcome::STRONG => 3,
                     BeatOutcome::SUCCESS => 2,
@@ -2247,6 +2285,16 @@ class TurnResolver
             $events[] = Standings::ALARM_ANSWERED;
         }
 
+        // The first swing at somebody who had raised no hand. Read off the
+        // kind flip the strike path wrote this turn — a missed swing counts
+        // the same as a landed one, because the place saw it come either way.
+        // Only a person moves the town; the wild's own creatures are between
+        // the player and the wild.
+        $turnedOn = Actor::whereIn('scene_id', array_unique([$before->id, $after->id]))->get()
+            ->filter(fn (Actor $a) => ($a->tags['turned_on_turn'] ?? null) === $turn->id
+                && ($a->tags['was'] ?? null) === 'npc')->count();
+        $events = array_merge($events, array_fill(0, $turnedOn, Standings::INNOCENT_STRUCK));
+
         return $events;
     }
 
@@ -2362,7 +2410,7 @@ class TurnResolver
      * with its own draw of the zone's features (some hidden, waiting to be
      * found) and its own inhabitants — never a copy of the ground just left.
      */
-    private function transitionScene(Scene $scene, Dice $dice, Turn $turn, array &$companionEvents = []): Scene
+    private function transitionScene(Scene $scene, Dice $dice, Turn $turn, array &$companionEvents = [], ?SceneExit $exit = null): Scene
     {
         // Scene exit decides what became of whoever went down in it. Rolled
         // against the bond and nothing else, and only ever here: a companion on
@@ -2387,7 +2435,25 @@ class TurnResolver
             $scene->campaign->update(['next_zone_id' => null]);
         }
 
-        $locale = $this->dresser->locale($zone, $dice, exclude: $scene->title);
+        // Which way they went. A cross through a named exit is that exit; any
+        // other departure (a flee through the scouted way, a pursuit, a
+        // venture over the border) takes one of the ground's unwalked ways
+        // when it has one, and a heading rolled fresh when it does not —
+        // legacy scenes from before the compass have no exits to consume.
+        $exit ??= ($unwalked = $scene->exits()->whereNull('to_scene_id')->get())->isEmpty()
+            ? null
+            : $unwalked[$dice->between(0, $unwalked->count() - 1)];
+        $direction = $exit?->direction ?? Compass::DIRECTIONS[$dice->between(0, 3)];
+
+        // The ground the way promised, when the way was inside this zone. A
+        // border crossing lands wherever the new zone opens.
+        $locale = $zone->id === $scene->zone_id && $exit?->locale !== null
+            ? $exit->locale
+            : $this->dresser->locale($zone, $dice, exclude: $scene->title);
+
+        [$gridX, $gridY] = $zone->id === $scene->zone_id
+            ? $this->gridFor($scene, $direction)
+            : [0, 0];
 
         $next = Scene::create([
             'campaign_id' => $scene->campaign_id,
@@ -2396,7 +2462,15 @@ class TurnResolver
             'description' => $locale['description'],
             'status' => 'active',
             'state' => ['dressed' => true],
+            'from_scene_id' => $scene->id,
+            'from_direction' => $direction,
+            'grid_x' => $gridX,
+            'grid_y' => $gridY,
         ]);
+
+        // The way is walked, once and for all: the map draws it as a road
+        // now instead of a stub, and the composer stops offering it.
+        $exit?->update(['to_scene_id' => $next->id]);
 
         // Thin on purpose. Ground that arrives already crowded with five
         // props and two strangers reads as a set rather than a place, and it
@@ -2457,7 +2531,38 @@ class TurnResolver
         // Last, so the draws above keep the exact stream they have always had.
         $this->dresser->rollAmbient($next, $dice);
 
+        // And its own ways out, headings and all — after the air for the same
+        // stream-stability reason as everything else down here.
+        $this->dresser->mintExits($next, $zone, $dice);
+
         return $next;
+    }
+
+    /**
+     * Where the step lands on the zone's map. One square along the heading;
+     * if that square is already walked ground, keep going the same way until
+     * an empty one — the map stays planar and the heading stays true.
+     *
+     * @return array{0:int,1:int}
+     */
+    private function gridFor(Scene $from, string $direction): array
+    {
+        [$dx, $dy] = Compass::offset($direction);
+        $x = $from->grid_x + $dx;
+        $y = $from->grid_y + $dy;
+
+        if ($dx === 0 && $dy === 0) {
+            return [$x, $y];
+        }
+
+        while (Scene::where('campaign_id', $from->campaign_id)
+            ->where('zone_id', $from->zone_id)
+            ->where('grid_x', $x)->where('grid_y', $y)->exists()) {
+            $x += $dx;
+            $y += $dy;
+        }
+
+        return [$x, $y];
     }
 
     private function openNextTurn(Turn $turn, Character $character, Scene $scene, BranchTrigger $trigger, Dice $dice): Turn

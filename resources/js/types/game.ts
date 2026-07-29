@@ -183,6 +183,30 @@ export interface ChapterEvent {
  * was cast by the engine before the screen existed — the table replays them,
  * it never produces them.
  */
+/** One visited scene on the trail map. */
+export interface PlaceMapNode {
+    id: number;
+    title: string;
+    x: number;
+    y: number;
+    from: number | null;
+    current: boolean;
+}
+
+/** An unwalked way out of the current ground. */
+export interface PlaceExit {
+    direction: string;
+    label: string;
+}
+
+/** Where the tale is standing right now, and the country already walked. */
+export interface Place {
+    zone: { name: string };
+    scene: { id: number; title: string };
+    map: PlaceMapNode[];
+    exits: PlaceExit[];
+}
+
 export interface RollRow {
     id: string;
     side: 'player' | 'ally' | 'foe';
@@ -202,6 +226,12 @@ export interface RollRow {
     /** Why the difficulty was what it was, and where the modifier came from. */
     difficulty_parts: OddsPart[];
     bonus_parts: OddsPart[];
+    /**
+     * A fortune die: the good/bad weather a quiet beat casts beside its
+     * certain outcome. No DC, no sum — the face is the whole event, and
+     * degree holds lucky | plain | unlucky instead of a success band.
+     */
+    fortune?: boolean;
 }
 
 export interface RollTable {

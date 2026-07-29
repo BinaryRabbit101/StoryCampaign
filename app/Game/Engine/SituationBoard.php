@@ -123,6 +123,17 @@ class SituationBoard
                 ->reject(fn ($f) => Hands::isHolding($character, $f->id))
                 ->pluck('name')->take(6)->all());
 
+        // Where this ground is, and where it leads. The place gets its name on
+        // the board — losing track of where you are standing was the most
+        // ordinary way this game got confusing — and every unwalked way out is
+        // stated with its heading, so the player is holding a compass and not
+        // a guess. Walked ways say nothing: they are the map's business now.
+        $where = ["This is {$scene->title}, in {$scene->zone->name}."];
+        foreach ($scene->exits()->whereNull('to_scene_id')->orderBy('id')->get() as $way) {
+            $where[] = ucfirst($way->direction).' — toward '.$way->label.'.';
+        }
+        $groups[] = self::group('place', 'Where you stand', 'ground', $where);
+
         // Ways already tried and refused. A card that silently stopped being
         // offered reads as a bug; the same card gone with one plain line saying
         // why reads as the world — and it is the ground's own answer, so it
@@ -199,7 +210,7 @@ class SituationBoard
             }
 
             $parts[] = match ($group['key']) {
-                'moment', 'alarm', 'pressure', 'sky', 'standing', 'finale' => implode(' ', $items),
+                'moment', 'alarm', 'pressure', 'sky', 'standing', 'finale', 'place' => implode(' ', $items),
                 'self' => implode('. ', $items).'.',
                 default => "{$group['title']}: ".implode(', ', $items).'.',
             };

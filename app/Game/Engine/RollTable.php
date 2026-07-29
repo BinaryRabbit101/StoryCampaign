@@ -32,9 +32,30 @@ class RollTable
         $hero = $turn->campaign?->character?->name ?? 'You';
 
         foreach ($resolution['beats'] ?? [] as $beat) {
-            // Quiet beats and beats that never happened cast no die: a table
-            // full of blank cards would teach the player to distrust it.
+            // Quiet beats and beats that never happened cast no d20 against a
+            // difficulty — but a quiet beat that cast the FORTUNE die still
+            // has a die to pick up, and it goes on the table as its own kind
+            // of card: no DC, no sum, just the face and which way it broke.
             if (($beat['skipped'] ?? false) || (int) ($beat['roll'] ?? 0) <= 0) {
+                $fortune = $beat['fortune'] ?? null;
+                if (! ($beat['skipped'] ?? false) && ($fortune['roll'] ?? 0) > 0) {
+                    $row = self::row(
+                        id: 'r'.++$n,
+                        side: 'player',
+                        actor: $hero,
+                        action: self::actionLabel($beat),
+                        verb: $beat['verb'],
+                        difficulty: 0,
+                        roll: (int) $fortune['roll'],
+                        total: (int) $fortune['roll'],
+                        degree: $fortune['kind'] ?? 'plain',
+                        crit: null,
+                        outcome: $fortune['fact'] ?? null,
+                    );
+                    $row['fortune'] = true;
+                    $rows[] = $row;
+                }
+
                 continue;
             }
 
@@ -115,6 +136,10 @@ class RollTable
             // arithmetic without the reasons for those.
             'difficulty_parts' => array_values($difficultyParts),
             'bonus_parts' => array_values($bonusParts),
+            // A fortune card shows no DC and no sum: the die is the whole
+            // event. Flipped on after construction by the one caller that
+            // builds such a row.
+            'fortune' => false,
         ];
     }
 

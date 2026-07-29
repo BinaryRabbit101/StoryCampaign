@@ -219,6 +219,7 @@ class StandingTest extends TestCase
             Standings::GRUDGE_BORN => -1,
             Standings::GROUND_WRECKED => -1,
             Standings::ALARM_ANSWERED => -1,
+            Standings::INNOCENT_STRUCK => -1,
         ], Standings::EVENTS);
 
         foreach (Standings::EVENTS as $event => $shift) {

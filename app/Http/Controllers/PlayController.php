@@ -13,6 +13,7 @@ use App\Game\Hands;
 use App\Game\TurnSlot;
 use App\Game\Verb;
 use App\Models\Campaign;
+use App\Models\Scene;
 use App\Models\Turn;
 use App\Services\Claude\Narrator;
 use App\Services\Mementos;
@@ -63,11 +64,40 @@ class PlayController extends Controller
         $narrating = $unnarrated !== null && ! $unnarrated->narrationIsLate();
         $narrationStalled = $unnarrated !== null && $unnarrated->narrationIsLate();
 
+        // Where they are standing, and the country they have already walked.
+        // The map is a trail, not a promise: it draws only ground the tale has
+        // actually touched, in the zone the player is currently in, plus the
+        // unwalked ways out of the ground they stand on.
+        $scene = $turn?->scene()->first() ?? $campaign->activeScene;
+        $place = null;
+        if ($scene !== null) {
+            $visited = $scene->campaign_id === null ? collect() : Scene::query()
+                ->where('campaign_id', $scene->campaign_id)
+                ->where('zone_id', $scene->zone_id)
+                ->orderBy('id')
+                ->get(['id', 'title', 'status', 'from_scene_id', 'from_direction', 'grid_x', 'grid_y']);
+            $place = [
+                'zone' => $scene->zone->only(['name']),
+                'scene' => ['id' => $scene->id, 'title' => $scene->title],
+                'map' => $visited->map(fn ($s) => [
+                    'id' => $s->id,
+                    'title' => $s->title,
+                    'x' => $s->grid_x,
+                    'y' => $s->grid_y,
+                    'from' => $s->from_scene_id,
+                    'current' => $s->id === $scene->id,
+                ])->values(),
+                'exits' => $scene->exits()->whereNull('to_scene_id')->orderBy('id')
+                    ->get()->map(fn ($e) => ['direction' => $e->direction, 'label' => $e->label])->values(),
+            ];
+        }
+
         return Inertia::render('Play', [
             'narrating' => $narrating,
             'narrationStalled' => $narrationStalled,
             'rollTable' => $this->pendingRollTable($campaign),
             'campaign' => $campaign->only(['id', 'name', 'status']),
+            'place' => $place,
             'character' => [
                 'name' => $character->name,
                 'description' => $character->description,

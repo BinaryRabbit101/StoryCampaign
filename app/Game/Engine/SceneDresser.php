@@ -4,6 +4,7 @@ namespace App\Game\Engine;
 
 use App\Models\Actor;
 use App\Models\Scene;
+use App\Models\SceneExit;
 use App\Models\SceneFeature;
 use App\Models\Zone;
 
@@ -35,6 +36,62 @@ class SceneDresser
         }
 
         return $locales[$dice->between(0, $locales->count() - 1)];
+    }
+
+    /**
+     * Mint this ground's ways out: one to three exits, each with a heading
+     * and the locale it leads toward. The heading walked to ARRIVE here never
+     * reappears as a way out — departure is irreversible in this game, and an
+     * exit pointing back the way you came would be a promise the engine does
+     * not keep. Idempotent: ground that already has its ways keeps them.
+     *
+     * The destination locale is drawn when the exit is minted, not when it is
+     * walked — which is what makes north and east genuinely different doors
+     * rather than two buttons on the same random draw.
+     */
+    public function mintExits(Scene $scene, Zone $zone, Dice $dice): void
+    {
+        if ($scene->exits()->exists()) {
+            return;
+        }
+
+        $pool = array_values(array_diff(
+            Compass::DIRECTIONS,
+            $scene->from_direction !== null ? [Compass::opposite($scene->from_direction)] : [],
+        ));
+
+        // Shuffle the headings with the same seeded stream everything else
+        // dressing this scene uses, then keep 1-3 of them.
+        for ($i = count($pool) - 1; $i > 0; $i--) {
+            $j = $dice->between(0, $i);
+            [$pool[$i], $pool[$j]] = [$pool[$j], $pool[$i]];
+        }
+        $count = min(count($pool), $dice->between(1, 3));
+
+        // Each exit leads toward its own locale, no two the same, never the
+        // ground it leaves. When the zone runs out of named places the way
+        // still exists — it just leads deeper in.
+        $locales = collect($zone->tags['locales'] ?? [])
+            ->reject(fn (array $l) => $l['title'] === $scene->title)
+            ->values()->all();
+        for ($i = count($locales) - 1; $i > 0; $i--) {
+            $j = $dice->between(0, $i);
+            [$locales[$i], $locales[$j]] = [$locales[$j], $locales[$i]];
+        }
+
+        foreach (array_slice($pool, 0, $count) as $k => $direction) {
+            $locale = $locales[$k] ?? [
+                'title' => 'Deeper into '.$zone->name,
+                'description' => 'New ground, reached in motion. The old scene lies behind.',
+            ];
+
+            SceneExit::create([
+                'scene_id' => $scene->id,
+                'direction' => $direction,
+                'label' => $locale['title'],
+                'locale' => $locale,
+            ]);
+        }
     }
 
     /**

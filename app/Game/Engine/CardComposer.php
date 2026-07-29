@@ -25,6 +25,9 @@ class CardComposer
 
     private const GAPS = ['short' => 1, 'medium' => 2, 'far' => 3];
 
+    /** The heaviest thing untrained arms may take up — one-hand territory, far below where the lift gift starts paying. */
+    private const UNTRAINED_LIFT = 40;
+
     /**
      * @param  Dice|null  $dice  The seeded stream the bargain pass rolls on. The
      *                           resolver hands down the turn's own dice so the
@@ -79,6 +82,22 @@ class CardComposer
                 description: 'Slip out through the route your companion found. It holds until the scene turns.',
                 target: ['type' => 'exit', 'id' => null, 'name' => 'the scouted way out'],
                 modifiers: [$this->approachModifier(Verb::Flee)],
+            );
+        }
+
+        // The ground's own ways out, headings and all. Every dressed scene
+        // has at least one, no capability gates walking, and each names the
+        // ground it leads toward — so leaving is always a real choice between
+        // named doors, and the map the player keeps in their head has words
+        // to hang on. An exit already walked is a road on the map, not a card.
+        foreach ($scene->exits()->whereNull('to_scene_id')->get() as $way) {
+            $cards['main'][] = new ActionCard(
+                slot: TurnSlot::Main,
+                verb: Verb::Cross->value,
+                label: 'Head '.$way->direction.' — toward '.$way->label,
+                description: "Leave this ground by the {$way->direction} way. It runs toward {$way->label}.",
+                target: ['type' => 'exit', 'id' => $way->id, 'name' => 'the way '.$way->direction],
+                modifiers: [$this->approachModifier(Verb::Cross)],
             );
         }
 
@@ -493,18 +512,27 @@ class CardComposer
             }
         }
 
-        // hideable — concealment
-        if (($affordances['hideable'] ?? false) === true && isset($capabilities['conceal'])) {
+        // hideable — concealment. Trained cover is the conceal capability's
+        // ground, but ducking behind what is actually here is something every
+        // body can try: the untrained hide is the same floor improvise gives
+        // DO, offered at degraded risk with no capability bonus — never better
+        // than the bought gift. The size gate holds either way; no amount of
+        // nerve fits a large frame into a small vent.
+        if (($affordances['hideable'] ?? false) === true) {
             $blocked = isset($affordances['max_size'])
                 && (self::SIZES[$capabilities['squeeze']->grade ?? 'medium'] ?? 2) > (self::SIZES[$affordances['max_size']] ?? 3);
             if (! $blocked) {
+                $trained = isset($capabilities['conceal']);
                 $cards[] = new ActionCard(
                     slot: TurnSlot::Pre,
                     verb: Verb::Hide->value,
                     label: "Take cover behind {$feature->name}",
-                    description: "Conceal yourself using {$feature->name} before acting.",
+                    description: $trained
+                        ? "Conceal yourself using {$feature->name} before acting."
+                        : "Duck behind {$feature->name} and trust it to hold you out of sight — no craft to it, just cover and stillness.",
                     target: $target,
-                    capability: 'conceal',
+                    capability: $trained ? 'conceal' : null,
+                    risk: $trained ? 'safe' : 'degraded',
                 );
             }
         }
@@ -525,16 +553,23 @@ class CardComposer
             );
         }
 
-        // breakable / liftable — brute manipulation
-        if (isset($affordances['breakable']) && isset($capabilities['break'])) {
+        // breakable / liftable — brute manipulation. The trained break rides
+        // the bought capability; the untrained one is bare hands and body
+        // weight against the same thing, degraded and bonusless — offered
+        // because a door that only trained shoulders may test reads as a
+        // locked verb, not a hard door.
+        if (isset($affordances['breakable'])) {
+            $trainedBreak = isset($capabilities['break']);
             $cards[] = new ActionCard(
                 slot: TurnSlot::Main,
                 verb: Verb::Break->value,
                 label: "Break {$feature->name}",
-                description: "Force {$feature->name} open or apart.",
+                description: $trainedBreak
+                    ? "Force {$feature->name} open or apart."
+                    : "Throw your weight at {$feature->name} and hope it gives before you do — no training behind it.",
                 target: $target,
-                capability: 'break',
-                risk: 'risky',
+                capability: $trainedBreak ? 'break' : null,
+                risk: $trainedBreak ? 'risky' : 'degraded',
                 modifiers: [$this->approachModifier(Verb::Break)],
             );
         }
@@ -542,22 +577,31 @@ class CardComposer
         // Lifting ends with the thing IN THEIR HANDS, not merely moved: the
         // card has to promise that, and it has to say what holding it costs,
         // because the hands it fills are the same hands the next card wants.
-        if (isset($affordances['lift_weight']) && isset($capabilities['lift'])) {
+        if (isset($affordances['lift_weight'])) {
             $weight = (int) $affordances['lift_weight'];
-            $mag = $capabilities['lift']->magnitude ?? 0;
+            $mag = isset($capabilities['lift']) ? ($capabilities['lift']->magnitude ?? 0) : 0;
             $hands = Hands::handsFor($weight);
             $grip = $hands >= 2 ? 'It needs both hands.' : 'One hand stays on it.';
-            if ($mag >= $weight * 0.75 && Hands::free($character) >= $hands) {
+            $trainedLift = $mag >= $weight * 0.75;
+            // Anything light enough for ordinary arms may be taken up without
+            // the bought gift — degraded, bonusless, and capped well below
+            // where trained strength starts to matter. A scene of loose small
+            // things should never be dark to a character who simply never
+            // bought a strong back.
+            $bareHands = ! $trainedLift && $weight <= self::UNTRAINED_LIFT;
+            if (($trainedLift || $bareHands) && Hands::free($character) >= $hands) {
                 $cards[] = new ActionCard(
                     slot: TurnSlot::Main,
                     verb: Verb::Lift->value,
                     label: "Take up {$feature->name}",
-                    description: $mag >= $weight
-                        ? "Heave {$feature->name} up and hold it. {$grip}"
-                        : "{$feature->name} is heavier than anything you've lifted — you might get it up, straining. {$grip}",
+                    description: match (true) {
+                        $trainedLift && $mag >= $weight => "Heave {$feature->name} up and hold it. {$grip}",
+                        $trainedLift => "{$feature->name} is heavier than anything you've lifted — you might get it up, straining. {$grip}",
+                        default => "Get your arms around {$feature->name} and take it up — awkward, but within an ordinary body's power. {$grip}",
+                    },
                     target: $target,
-                    capability: 'lift',
-                    risk: $mag >= $weight ? 'safe' : 'degraded',
+                    capability: $trainedLift ? 'lift' : null,
+                    risk: $trainedLift && $mag >= $weight ? 'safe' : 'degraded',
                 );
             }
         }
@@ -733,6 +777,24 @@ class CardComposer
                     target: $target,
                 );
             }
+        } elseif ($actor->kind !== 'companion') {
+            // Anyone in reach can be fought — a beast, a bystander, a rival
+            // who has not raised a hand yet. The card tells the truth about
+            // what the swing buys: the target answers as an enemy from the
+            // first blow on, and a person struck unprovoked is something this
+            // place will hold against you. Same strike, same ladder; the only
+            // thing the engine adds is the quarrel the player started.
+            $cards[] = new ActionCard(
+                slot: TurnSlot::Main,
+                verb: Verb::Strike->value,
+                label: "Turn on {$actor->name}",
+                description: $actor->kind === 'npc'
+                    ? "Attack {$actor->name}, who has raised no hand against you. They will fight or fall as an enemy — and this place will remember who swung first."
+                    : "Attack {$actor->name}. It has offered you no violence yet; it will answer with everything it has.",
+                target: $target,
+                risk: 'risky',
+                modifiers: [$this->approachModifier(Verb::Strike), $this->methodModifier($character)],
+            );
         }
 
         if (($tags['intimidatable'] ?? false) && isset($capabilities['intimidate'])) {

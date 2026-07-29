@@ -78,6 +78,10 @@ class TurnStarter
         // against it, and a forecast written under the wrong sky is a lie.
         $this->dresser->rollAmbient($scene, $dice);
 
+        // And the ground's ways out — before the cards too, since each
+        // unwalked way IS a card. The opening scene sits at the map's origin.
+        $this->dresser->mintExits($scene, $zone, $dice);
+
         $character = $campaign->character()->firstOrFail();
         $scene = $scene->fresh();
         $cards = $this->composer->compose($character, $scene);

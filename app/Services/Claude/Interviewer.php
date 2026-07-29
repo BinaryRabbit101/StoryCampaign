@@ -822,7 +822,7 @@ Rules:
 
 Respond with ONLY a JSON object:
 {
-  "reply": "<your next in-world line to the player>",
+  "reply": "<your next in-world line to the player. Never restate or enumerate the suggestions inside it — they render as their own chips right below your words, so a reply that lists them reads the menu aloud twice. Ask the question; let the chips be the examples.>",
   "suggestions": <3-4 example answers to YOUR question, as objects: {"text": "<the answer in the PLAYER's voice, sendable exactly as written — one plain sentence, ≤ 160 characters>", "kind": "gift" | "price" | "both"}. Pull them in genuinely different directions (different bodies, prices, temperaments), so a stuck player discovers what kinds of answers are possible. Their MIX is set by "Where the bargain stands" above and is not yours to override.
     "gift" — asks for a power, a way through the world, something others cannot do, and gives up nothing.
     "price" — names a cost, a limit, a thing this character cannot do or will not survive.

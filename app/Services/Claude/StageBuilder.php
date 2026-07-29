@@ -127,6 +127,7 @@ If it names how the tale opens, that moment is not a suggestion: this scene IS t
 ## Hard budget (engine-enforced): at most {$budget['features']} features, {$budget['actors']} actors.
 Actors: kind enemy|npc|creature, tier regular|elite, health max ≤ 12, attack ≤ 4. Open gently — at most one enemy, and only if the stage calls for early danger. Give NPCs tags like {"talkable": true, "persuadeable": true, "companionable": true} and enemies {"intimidatable": true, "restrainable": true}.
 Feature affordances use keys like: reachable_via (climb|swing|leap + height), crossable_via (+ gap short|medium|far), flee_destination (+ squeeze_required small|medium|large), hideable (+ max_size), breakable, lift_weight.
+The fiction and the tags must agree: any feature a body could plausibly duck behind or slip inside MUST carry hideable; a breakable thing carries breakable; a portable thing carries lift_weight. A feature whose fiction promises something its tags don't deliver is a door painted on a wall.
 
 Respond with ONLY a JSON object:
 {

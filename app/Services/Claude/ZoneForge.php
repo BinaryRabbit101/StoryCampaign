@@ -319,6 +319,7 @@ Every name, feature, and creature you invent must belong to this world — its l
 ## Hard budget (engine-enforced): at most {$budget['features']} feature templates, {$budget['actors']} actor templates, {$budget['locales']} locales.
 Locales are the named grounds scenes open onto inside this zone — each a distinct spot with a 1-2 sentence description.
 Feature affordances use ONLY these keys: reachable_via (climb|swing|leap|glide, + height 1-30), crossable_via (swim|swing|leap|glide, + gap short|medium|far), flee_destination (+ squeeze_required small|medium|large), hideable (+ max_size small|medium|large), breakable, lift_weight (10-400), hidden (true for 1-2 secret features found only by examining or scouting).
+The fiction and the tags must agree: any feature a body could plausibly duck behind or slip inside — a vent, a locker, a stand of reeds, a doorway — MUST carry hideable, and at least ONE feature in the zone must be hideable without also being hidden. A breakable thing carries breakable; a portable thing carries lift_weight. A feature whose fiction promises something its tags don't deliver is a door painted on a wall.
 Actors: kind enemy|npc|creature, tier regular|elite, health max ≤ 12, attack ≤ 4. Mix threats with people worth talking to. Give NPCs tags like {"talkable": true, "persuadeable": true, "companionable": true} and enemies {"intimidatable": true, "restrainable": true, "deceiveable": true} as fits.
 
 Respond with ONLY a JSON object:

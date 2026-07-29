@@ -143,6 +143,13 @@ const bandClass = (band: string) =>
     })[band] ?? 'text-rose-700 dark:text-rose-400';
 
 const degreeLabel = (row: RollRow) => {
+    if (row.fortune) {
+        return (
+            { lucky: 'A lucky turn', unlucky: 'An unlucky turn', plain: 'Steady' }[
+                row.degree
+            ] ?? row.degree
+        );
+    }
     if (row.crit === 'success') return 'Critical success';
     if (row.crit === 'failure') return 'Critical failure';
 
@@ -157,6 +164,13 @@ const degreeLabel = (row: RollRow) => {
 };
 
 const degreeClass = (row: RollRow) => {
+    if (row.fortune) {
+        return row.degree === 'lucky'
+            ? 'text-emerald-700 dark:text-emerald-400'
+            : row.degree === 'unlucky'
+              ? 'text-rose-600 dark:text-rose-400'
+              : 'text-muted-foreground';
+    }
     if (row.crit === 'success') return 'text-amber-600 dark:text-amber-300';
     if (row.crit === 'failure') return 'text-rose-600 dark:text-rose-400';
 
@@ -303,17 +317,31 @@ const hasReasons = (row: RollRow) =>
                                 </p>
                             </div>
                             <div class="shrink-0 text-right">
-                                <p
-                                    class="text-[0.6rem] tracking-[0.15em] text-muted-foreground uppercase"
-                                >
-                                    DC {{ row.difficulty }}
-                                </p>
-                                <p
-                                    class="text-xs font-semibold"
-                                    :class="bandClass(row.band)"
-                                >
-                                    {{ row.band }}
-                                </p>
+                                <template v-if="row.fortune">
+                                    <p
+                                        class="text-[0.6rem] tracking-[0.15em] text-muted-foreground uppercase"
+                                    >
+                                        Fortune
+                                    </p>
+                                    <p
+                                        class="text-xs font-semibold text-muted-foreground"
+                                    >
+                                        No stakes set
+                                    </p>
+                                </template>
+                                <template v-else>
+                                    <p
+                                        class="text-[0.6rem] tracking-[0.15em] text-muted-foreground uppercase"
+                                    >
+                                        DC {{ row.difficulty }}
+                                    </p>
+                                    <p
+                                        class="text-xs font-semibold"
+                                        :class="bandClass(row.band)"
+                                    >
+                                        {{ row.band }}
+                                    </p>
+                                </template>
                             </div>
                         </div>
 
@@ -383,6 +411,13 @@ const hasReasons = (row: RollRow) =>
                                  zero is the one case where its absence is
                                  worth stating out loud. -->
                                 <p
+                                    v-if="row.fortune"
+                                    class="text-xs text-muted-foreground tabular-nums"
+                                >
+                                    d20 {{ row.roll }} — the moment's own die
+                                </p>
+                                <p
+                                    v-else
                                     class="text-xs text-muted-foreground tabular-nums"
                                 >
                                     d20 {{ row.roll }}

@@ -272,6 +272,21 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Fortune (the world's weather on the beats that never roll)
+    |--------------------------------------------------------------------------
+    | Quiet beats cast a fortune d20 beside their certain outcome: faces at or
+    | above lucky_from break the moment their way, faces at or below unlucky_to
+    | break it against them, and the wide middle is silence. The beat's own
+    | promise is untouched either way.
+    */
+
+    'fortune' => [
+        'lucky_from' => 18,
+        'unlucky_to' => 2,
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
     | Scars (going down marks you instead of erasing you)
     |--------------------------------------------------------------------------
     | Health reaching zero used to be a dead end: `status = 'downed'` and

@@ -9,6 +9,7 @@ import {
 } from 'vue';
 import AmbientBackdrop from '@/components/game/AmbientBackdrop.vue';
 import BeatPicker from '@/components/game/BeatPicker.vue';
+import MapPanel from '@/components/game/MapPanel.vue';
 import RecapPanel from '@/components/game/RecapPanel.vue';
 import RiderList from '@/components/game/RiderList.vue';
 import { costClass, reasonsFor, signed } from '@/lib/odds';
@@ -23,6 +24,7 @@ import type {
     Endeavor,
     GrowthMessage,
     Memento,
+    Place,
     RecapPanel as RecapPanelData,
     RollTable,
     SituationGroup,
@@ -32,6 +34,11 @@ import type {
 
 const props = defineProps<{
     campaign: { id: number; name: string; status: string };
+    /**
+     * Where the tale is standing — zone, scene, the trail already walked and
+     * the open ways out. Null only when no scene exists yet.
+     */
+    place: Place | null;
     character: {
         name: string;
         description: string;
@@ -1419,6 +1426,18 @@ const healthPct = computed(
                 </div>
             </Transition>
         </Teleport>
+
+        <!-- Where you are: the trail map, above the situation it explains.
+             The board says the same things in words; this is the picture. -->
+        <MapPanel
+            v-if="place && place.map.length"
+            class="sc-rise"
+            style="animation-delay: 140ms"
+            :zone-name="place.zone.name"
+            :scene-title="place.scene.title"
+            :map="place.map"
+            :exits="place.exits"
+        />
 
         <!-- Situation + form / lock -->
         <div

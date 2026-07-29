@@ -54,6 +54,9 @@ class Standings
     /** They stayed toe-to-toe long enough that the district had to answer. */
     public const ALARM_ANSWERED = 'alarm_answered';
 
+    /** The player swung first at somebody who had raised no hand — a person, not the wild's own. */
+    public const INNOCENT_STRUCK = 'innocent_struck';
+
     /**
      * The closed table. Each event is worth exactly one point, and nothing
      * outside this list may move a standing — which is what keeps it readable
@@ -68,6 +71,7 @@ class Standings
         self::GRUDGE_BORN => -1,
         self::GROUND_WRECKED => -1,
         self::ALARM_ANSWERED => -1,
+        self::INNOCENT_STRUCK => -1,
     ];
 
     /**

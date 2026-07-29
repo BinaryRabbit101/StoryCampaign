@@ -320,6 +320,11 @@ class Scars
 
         $locale = $dresser->locale($scene->zone, $dice, exclude: $scene->title);
 
+        // Adjacent ground on the map too: one step off where they fell, in
+        // whatever direction the dice say they were carried or crawled.
+        $direction = Compass::DIRECTIONS[$dice->between(0, 3)];
+        [$dx, $dy] = Compass::offset($direction);
+
         $woke = Scene::create([
             'campaign_id' => $scene->campaign_id,
             'zone_id' => $scene->zone_id,
@@ -327,6 +332,10 @@ class Scars
             'description' => $locale['description'],
             'status' => 'active',
             'state' => ['dressed' => true],
+            'from_scene_id' => $scene->id,
+            'from_direction' => $direction,
+            'grid_x' => $scene->grid_x + $dx,
+            'grid_y' => $scene->grid_y + $dy,
         ]);
 
         $scene->update(['status' => 'past']);
@@ -340,6 +349,7 @@ class Scars
         }
 
         $dresser->rollAmbient($woke, $dice);
+        $dresser->mintExits($woke, $scene->zone, $dice);
 
         $fact = $outcome === self::DRAGGED_CLEAR
             ? self::helperName($companions).' got them out of it and away, and stayed with them until they woke.'

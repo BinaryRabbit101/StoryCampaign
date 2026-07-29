@@ -55,6 +55,8 @@ class BeatOutcome
         public readonly ?string $crit = null,
         public readonly array $difficultyParts = [],
         public readonly array $bonusParts = [],
+        /** The fortune die a quiet beat cast: {roll, kind: lucky|unlucky|plain, fact}. Null on rolling beats — their texture is the d20 itself. */
+        public readonly ?array $fortune = null,
     ) {}
 
     public function succeeded(): bool
@@ -78,6 +80,7 @@ class BeatOutcome
             'crit' => $this->crit,
             'difficulty_parts' => $this->difficultyParts,
             'bonus_parts' => $this->bonusParts,
+            'fortune' => $this->fortune,
         ];
     }
 

@@ -2,6 +2,7 @@
 
 namespace App\Services\Claude;
 
+use App\Game\BranchTrigger;
 use App\Game\Engine\Ambient;
 use App\Game\Engine\ChapterEvents;
 use App\Game\Engine\Clocks;
@@ -354,6 +355,13 @@ WAIT;
 
         WORLD;
 
+        // The stop condition reaches the narrator as its plain-words
+        // description, never the raw enum slug: handing Claude
+        // "meaningful_fork" plus "decision point" language is how someone in
+        // the scene ends up reading the fork aloud as a menu.
+        $stopNote = BranchTrigger::tryFrom((string) $turn->branch_trigger)?->description()
+            ?? 'The moment settles; time passes.';
+
         $synopsis = trim((string) $campaign->synopsis);
         $storySoFar = $synopsis === '' ? '' : <<<SOFAR
 
@@ -401,12 +409,12 @@ Some beats carry the player's own words for that moment. Those words are voice a
 {$reaction}
 {$world}{$endeavor}{$figures}{$company}{$standing}{$sideStory}{$fall}{$closing}{$news}{$remembering}{$keepsake}{$criticals}
 ## Where the vignette stops
-{$turn->branch_trigger}: the chapter must end on this note, at a clean decision point, leaving the situation open for the player's next choice. {$wordLow}-{$wordHigh} words.
+{$stopNote} The chapter must end on this note, mid-situation and unresolved. {$wordLow}-{$wordHigh} words.
 
 ## The state of play as the chapter closes (fixed facts)
 {$aftermath}
 
-The reader makes their next choice from the page itself: close the chapter inside this moment, with the people and surroundings named above present in the prose, so nothing the player can act on appears unannounced. Do not summarize or list them — let the scene hold them naturally.
+Close the chapter inside this moment, with the people and surroundings named above present in the prose, so nothing the reader later acts on appears unannounced. Do not summarize or list them — let the scene hold them naturally. This binds dialogue too: no character may enumerate the ways forward, offer the reader a this-or-that, or ask which path they will take. End on the situation itself, not on a question about it.
 
 Respond with ONLY a JSON object:
 {"intent_line": "<the chapter's italic epigraph — the ONE place a turned phrase is welcome; a compact line in the spirit of 'She chose to take the rooftops.' or 'They read the shack before they read the woman.' The prose register's image limit does not bind this single line. Or null.>", "chapter": "<the chapter prose>", "synopsis_line": "<ONE factual line for the campaign's running record: what this chapter changed — names met, promises made, injuries taken, debts owed. Plain record-keeping, no style.>"{$mementoField}{$rumorField}{$echoField}}

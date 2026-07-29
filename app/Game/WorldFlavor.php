@@ -34,7 +34,7 @@ class WorldFlavor
         'high' => ['feature_type' => 'building', 'affordances' => ['reachable_via' => ['climb'], 'height' => 12]],
         'crossing' => ['feature_type' => 'crossing', 'affordances' => ['crossable_via' => ['leap', 'swing'], 'gap' => 'medium']],
         'cover' => ['feature_type' => 'cover', 'affordances' => ['hideable' => true, 'max_size' => 'large']],
-        'bolt_hole' => ['feature_type' => 'flee_route', 'affordances' => ['flee_destination' => true, 'squeeze_required' => 'medium']],
+        'bolt_hole' => ['feature_type' => 'flee_route', 'affordances' => ['flee_destination' => true, 'squeeze_required' => 'medium', 'hideable' => true, 'max_size' => 'medium']],
         'breakable' => ['feature_type' => 'obstacle', 'affordances' => ['breakable' => true, 'lift_weight' => 120]],
         'secret' => ['feature_type' => 'landmark', 'affordances' => ['hidden' => true, 'hideable' => true, 'max_size' => 'medium']],
     ];
