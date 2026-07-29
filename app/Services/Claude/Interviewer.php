@@ -672,6 +672,81 @@ PROMPT);
     }
 
     /**
+     * Where the bargain currently stands, and which way the next question and
+     * its offered answers should lean because of it.
+     *
+     * The prompt used to name only the STARTING allowance, so the narrator was
+     * blind to the running balance the player can see on screen — and a model
+     * that cannot tell whether a sheet is overspent hedges the only safe way
+     * it can, by asking about the price every single time. The interview
+     * answered "what else can you do?" with "and what does that cost you?"
+     * forever: every offered answer a burden, even for a character with points
+     * sitting unspent. That is not caution, it is talking the player out of a
+     * character they have already paid for.
+     *
+     * So the engine, which prices the sheet for the screen anyway, hands the
+     * same number to the narrator and states the lean plainly. The split holds:
+     * the ENGINE decides which way the bargain leans (it owns the arithmetic),
+     * Claude decides what the answers say. There is no text classifier here and
+     * there should never be one — "is this sentence a gift or a price?" over
+     * free prose is exactly the brittle guess this codebase avoids.
+     *
+     * @param  array{balance: int, gifts: list<array>, burdens: list<array>}|null  $ledger
+     *                                                                                      The priced draft, or null before the narrator has drafted one.
+     */
+    private function balanceSection(?array $ledger): string
+    {
+        // Nothing priced yet — the first exchange. Neither direction is right,
+        // because there is no bargain to be on one side of.
+        if ($ledger === null) {
+            return 'Nothing is priced yet — this is the opening of the conversation. '
+                .'Offer whole-character answers, each carrying a gift AND the price it drags, '
+                .'so the player sees that both halves belong to them from the very first message.';
+        }
+
+        $balance = (int) $ledger['balance'];
+        $sheet = $this->sheetSummary($ledger);
+
+        // Points in hand. The player is owed the generous question.
+        if ($balance > 0) {
+            $word = $balance === 1 ? 'point' : 'points';
+
+            return "{$sheet}\nThe player has {$balance} {$word} STILL UNSPENT — they can afford more than they are carrying.\n"
+                .'LEAN POSITIVE. Your question should be about what this character CAN do: what else this body, '
+                .'this temperament, this history opens up. At least three of your suggestions must be GIFTS — a way '
+                .'through the world, a thing others cannot do — and at most one may be a price. Do not ask what it '
+                .'costs them: they have already paid, and the change is sitting in their hand.';
+        }
+
+        // Overspent. The question is about the price — but never four ways down.
+        if ($balance < 0) {
+            $over = -$balance;
+
+            return "{$sheet}\nThe draft is OVERSPENT by {$over} — the scales refuse this bargain as it stands.\n"
+                .'LEAN TOWARD THE PRICE. Your question should be about what this costs. But at least ONE suggestion '
+                .'must be a way FORWARD rather than a way down — trading a large gift for its smaller version, or '
+                .'setting one aside — so the player is never handed four different ways to make their character '
+                .'worse. Name what they would still be, not only what they would lose.';
+        }
+
+        return "{$sheet}\nThe bargain is EXACTLY EVEN — every point spoken for, nothing owed.\n"
+            .'BALANCE THE OFFER. Some suggestions should reach for a new gift and name its price in the same '
+            .'breath; others should trade one thing already on the sheet for another. Neither direction is the '
+            .'safe one here, and a question that only asks for more prices reads as the world haggling with '
+            .'somebody who has already settled up.';
+    }
+
+    /** What the sheet is actually carrying, so the narrator does not offer it twice. */
+    private function sheetSummary(array $ledger): string
+    {
+        $gifts = collect($ledger['gifts'] ?? [])->pluck('label')->implode(', ');
+        $burdens = collect($ledger['burdens'] ?? [])->pluck('label')->implode(', ');
+
+        return 'On the sheet now — gifts: '.($gifts === '' ? 'none yet' : $gifts)
+            .'; prices carried: '.($burdens === '' ? 'none yet' : $burdens).'.';
+    }
+
+    /**
      * @param  string|null  $pending  The player's newest words, not yet written
      *                                to the transcript (they are committed only
      *                                once the narrator has answered).
@@ -698,6 +773,8 @@ PROMPT);
         $points = TraitCatalog::startingPoints();
         $prices = TraitCatalog::priceSheetForPrompt();
         $companionCost = TraitCatalog::companionCost();
+        // The bargain as it stands right now, not merely what it started as.
+        $balanceSection = $this->balanceSection($this->draftLedger($campaign));
 
         return <<<PROMPT
 You are conducting an in-world character creation interview for a living-world RPG. The player describes their character narratively; you translate it under the hood into a clean structured loadout. Ask one short, evocative question per reply.
@@ -712,11 +789,14 @@ Rules:
 - The character's NAME is set by the player in a dedicated field outside this conversation — never ask what they are called. If they volunteer a name in their words, put it on the sheet; otherwise leave your best working name and move on. It is display-only either way: the field wins at the end.
 - Capabilities must come from this vocabulary: {$vocabulary}
 - Every strong capability should drag a constraint with it (power/constraint coupling). Example: large intimidating size → cannot squeeze through narrow gaps, stealth penalty, breaks fragile surfaces.
-- HARD BUDGET (engine-enforced; the player can SEE this balance on screen while you talk): the sheet starts with {$points} points. {$prices} Balance the draft at zero or better — a gift-heavy character MUST carry real constraints to pay for it. Weave the accounting into your questions in-world ("every gift leaves a debt — where does yours come due?"), never as numbers. If the draft is currently overspent, your next question should be about the price, not about more gifts.
+- HARD BUDGET (engine-enforced; the player can SEE this balance on screen while you talk): the sheet starts with {$points} points. {$prices} Balance the draft at zero or better — a gift-heavy character MUST carry real constraints to pay for it. Weave the accounting into your questions in-world ("every gift leaves a debt — where does yours come due?"), never as numbers. Which way to lean right now is stated below under "Where the bargain stands" — read it before you write the question or the suggestions.
 - Magnitudes are clamped by the engine regardless of what you write; keep them modest (reach ≤ 15, lift ≤ 250 at creation).
 - Scoped social powers: e.g. intimidate should carry {"vs": "regular"} so it does not flatten elite encounters.
 - attack_styles: 3-6 short phrases for how this body attacks (e.g. "a bite", "a rake of claws", "a tail-whip", "a shoulder-slam"). Narration vocabulary only — they never change outcomes.
 - companions: if the player says they do not travel alone — a friend, a crewmate, a hired hand, a dog — put that ONE soul on the sheet as {"name": "...", "kind": "npc" or "creature", "what": "<one short line of who they are>"}. At most one, and only when the player actually said so: never invent company they did not mention, and never talk them out of it either. Someone at your side costs {$companionCost} of the same points a gift costs (they act on their own beat every turn), so it is a real part of the bargain — ask what carrying them costs the character, the same way you ask about any other gift. If they mention a whole crew, pick the one who is genuinely walking beside them and let the rest be people the world can hold.
+
+## Where the bargain stands
+{$balanceSection}
 
 ## Transcript so far
 {$transcript}
@@ -724,7 +804,7 @@ Rules:
 Respond with ONLY a JSON object:
 {
   "reply": "<your next in-world line to the player>",
-  "suggestions": <3-4 example answers to YOUR question, each in the PLAYER's voice and sendable exactly as written — one plain sentence, ≤ 160 characters. Pull them in genuinely different directions (different bodies, prices, temperaments), so a stuck player discovers what kinds of answers are possible.>,
+  "suggestions": <3-4 example answers to YOUR question, each in the PLAYER's voice and sendable exactly as written — one plain sentence, ≤ 160 characters. Pull them in genuinely different directions (different bodies, prices, temperaments), so a stuck player discovers what kinds of answers are possible. Their MIX of gifts and prices is set by "Where the bargain stands" above, and it is not yours to override.>,
   "character": <ALWAYS your best current draft, never null — even after one exchange, even if half-guessed. This is what the player sees priced on screen and what they step into the world as if they press Begin now, so it must always be a playable sheet: {"name": "...", "description": "<2-3 sentence distillation>", "attack_styles": ["a bite", "a rake of claws", ...], "capabilities": [{"capability": "reach", "magnitude": 12, "grade": null, "scope": null}, ...], "constraints": [{"name": "stealth_penalty", "params": {"size": "large"}, "coupled_capability": "intimidate"}, ...], "companions": [] or one entry as described above}>
 }
 
@@ -782,7 +862,7 @@ Respond with ONLY a JSON object:
   "reply": "<in-world answer — say plainly whether the world grants this, and what it costs>",
   "granted": <bool>,
   "changes": <null or [{"capability": "...", "magnitude": <int|null>, "grade": <string|null>, "scope": <object|null>}]>,
-  "suggestions": <2-4 things the player could ask for NEXT, each in the player's own voice, one plain sentence, ≤ 120 characters — a refusal should suggest the smaller version of what they wanted>
+  "suggestions": <2-4 things the player could ask for NEXT, each in the player's own voice, one plain sentence, ≤ 120 characters. A refusal should suggest the smaller version of what they wanted; a GRANT should suggest what the new gift opens up next, not what it costs. Never answer a yes with four ways to ask for less.>
 }
 PROMPT);
 

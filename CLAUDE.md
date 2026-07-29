@@ -269,6 +269,18 @@ adjudicates legality or outcomes — it is only ever handed resolved facts.
 - Every turn stop must offer ≥ 2 legal cards (generic fallbacks guarantee it).
 - Improvise resolves against base stats with no bonus — never better than a
   real enumerated option.
+- The creation interview leans with the bargain, and the ENGINE decides which
+  way. The narrator prompt carries the RUNNING balance (`Interviewer::
+  balanceSection`, off the same `draftLedger` the screen reads), never just the
+  starting allowance: a narrator that cannot tell whether a sheet is overspent
+  hedges the only safe way it can — by asking what everything costs, every
+  time — and the interview then answers "what else can you do?" with a fourth
+  burden for a character with points still in hand. Points unspent leans the
+  question and ≥3 of 4 offered answers POSITIVE; even offers both; overspent
+  leans to the price but must still hand back at least one way FORWARD (trade
+  a gift down, set one aside) rather than four ways to be worse. Claude writes
+  the words and may never override the lean; there is no text classifier
+  deciding what counts as positive, and there should never be one.
 - Nothing about a card's odds may be a surprise. Turns commit on submit — the
   player cannot go back and re-pick — so every card carries a `forecast` (DC
   per stance, the bonuses already standing, and what a set-up beat grants the
