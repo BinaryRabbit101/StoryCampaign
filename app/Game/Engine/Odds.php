@@ -436,7 +436,7 @@ class Odds
      */
     public static function bargainPart(?string $key, string $side): ?array
     {
-        $rule = self::BARGAINS[$key] ?? null;
+        $rule = $key === null ? null : (self::BARGAINS[$key] ?? null);
 
         if ($rule === null || $rule['side'] !== $side) {
             return null;
@@ -448,7 +448,7 @@ class Odds
     /** The player-facing wording for a bargain's edge, quoted on the card before the commit. */
     public static function bargainLabel(?string $key): ?string
     {
-        return self::BARGAINS[$key]['label'] ?? null;
+        return $key === null ? null : (self::BARGAINS[$key]['label'] ?? null);
     }
 
     /** @return list<string> */
@@ -467,7 +467,7 @@ class Odds
     {
         $parts = [];
 
-        foreach (self::AMBIENT[$ambient] ?? [] as $rule) {
+        foreach (($ambient === null ? [] : self::AMBIENT[$ambient] ?? []) as $rule) {
             $matched = in_array($verb, $rule['verbs'] ?? [], true)
                 || ($capability !== null && in_array($capability, $rule['capabilities'] ?? [], true));
 
@@ -489,7 +489,7 @@ class Odds
     {
         $parts = [];
 
-        foreach (self::HOURS[$hour] ?? [] as $rule) {
+        foreach (($hour === null ? [] : self::HOURS[$hour] ?? []) as $rule) {
             $matched = in_array($verb, $rule['verbs'] ?? [], true)
                 || ($capability !== null && in_array($capability, $rule['capabilities'] ?? [], true));
 
