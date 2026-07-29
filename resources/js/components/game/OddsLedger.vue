@@ -4,7 +4,9 @@ import {
     bandClass,
     bonusesFor,
     bonusTotal,
+    costClass,
     difficultyAt,
+    reasonsFor,
     signed,
 } from '@/lib/odds';
 import type { CarriedBonus } from '@/lib/odds';
@@ -35,6 +37,10 @@ const open = ref(!props.collapsible);
 const difficulty = computed(() => difficultyAt(props.card, props.stance));
 const bonuses = computed(() => bonusesFor(props.card, props.carried ?? []));
 const modifier = computed(() => bonusTotal(props.card, props.carried ?? []));
+
+// The reasons, without the constant every roll in the game shares. The total
+// below is still the whole figure the die is measured against.
+const reasons = computed(() => reasonsFor(props.card.forecast.parts));
 </script>
 
 <template>
@@ -84,16 +90,17 @@ const modifier = computed(() => bonusTotal(props.card, props.carried ?? []));
             @click.stop
         >
             <p
-                v-for="part in card.forecast.parts"
+                v-for="part in reasons"
                 :key="`d-${part.label}`"
                 class="flex justify-between gap-3"
             >
                 <span class="text-muted-foreground">{{ part.label }}</span>
-                <span class="tabular-nums">{{
-                    part.label === 'Base difficulty'
-                        ? part.amount
-                        : signed(part.amount)
+                <span class="tabular-nums" :class="costClass(part.amount)">{{
+                    signed(part.amount)
                 }}</span>
+            </p>
+            <p v-if="!reasons.length" class="text-muted-foreground">
+                Nothing here makes this harder or easier than usual.
             </p>
             <p
                 class="flex justify-between gap-3 border-t border-sidebar-border/50 pt-0.5 font-medium"

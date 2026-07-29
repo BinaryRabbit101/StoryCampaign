@@ -9,6 +9,7 @@ use App\Game\Engine\Downtime;
 use App\Game\Engine\SituationBoard;
 use App\Game\Engine\TurnResolver;
 use App\Game\Meters;
+use App\Game\TraitCatalog;
 use App\Models\Actor;
 use App\Models\Campaign;
 use App\Models\Character;
@@ -1186,5 +1187,174 @@ class CompanionBondTest extends TestCase
         );
         $entry = collect($cards['companions'])->firstWhere('id', $companion->id);
         $this->assertNotContains(Companions::FORAGE, collect($entry['cards'] ?? [])->pluck('verb')->all());
+    }
+
+    /**
+     * Asking somebody along is what a conversation can be FOR.
+     *
+     * It used to be a second verb standing beside "Speak with them" under the
+     * board's SPEAK word, which put two entries there for what the player reads
+     * as one act. Now it is a chip on the conversation — still an engine-offered,
+     * engine-validated option, because a note colours the telling and can never
+     * reach a mechanic, and "I ask them to join me" typed into a box has to stay
+     * exactly as inert as every other note in the game.
+     */
+    public function test_asking_someone_along_is_an_intent_on_the_conversation()
+    {
+        $campaign = $this->createCampaign();
+        $turn = $this->openBareTurn($campaign);
+        $scene = $campaign->activeScene;
+
+        $willing = $this->placeBystander($scene, 'the lamp-trimmer', ['companionable' => true]);
+        $turn = $this->recompose($turn);
+
+        // One card, not two: no recruit verb anywhere on the offer.
+        $this->assertNull($this->mainCard($turn, 'recruit', $willing->id));
+
+        $talk = collect($turn->cards['main'])->first(
+            fn (array $c) => $c['verb'] === 'speak' && ($c['target']['id'] ?? null) === $willing->id,
+        );
+        $this->assertNotNull($talk);
+
+        $intent = collect($talk['modifiers'])->firstWhere('key', 'intent');
+        $this->assertNotNull($intent, 'the conversation never offered anything to ask for');
+        $this->assertSame(['talk', 'recruit'], array_column($intent['options'], 'value'));
+
+        // Both readings are priced identically, which is what makes the chip
+        // honest: the DC on the card is the DC either answer is measured against.
+        $this->assertSame(
+            $talk['forecast']['difficulty'],
+            $talk['forecast']['stances']['balanced'],
+        );
+
+        // Roll until the ask lands: the engine decides, and a refusal is a real
+        // outcome rather than a bug.
+        $joined = false;
+        for ($attempt = 0; $attempt < 12 && ! $joined; $attempt++) {
+            $open = $campaign->fresh()->currentTurn;
+
+            if ($open === null) {
+                break;
+            }
+
+            $card = $this->mainCard($this->recompose($open), 'speak', $willing->id);
+
+            if ($card === null) {
+                break;
+            }
+
+            $this->play($open->fresh(), [
+                'main' => ['card_id' => $card, 'modifiers' => ['intent' => 'recruit']],
+            ]);
+
+            $joined = $willing->fresh()->kind === 'companion';
+        }
+
+        $this->assertTrue($joined, 'the ask never landed');
+
+        // The same one door every companion comes through, whichever card
+        // reached it: bond zero, stranger, and a joined_via that says how.
+        $companion = $willing->fresh();
+        $this->assertSame(Companions::ASKED, $companion->tags['joined_via']);
+        $this->assertSame(0, Companions::bond($companion));
+        $this->assertSame(Companions::STRANGER, Companions::tier($companion));
+    }
+
+    /**
+     * Somebody who was already there when the tale started — and paid for.
+     *
+     * A companion is a whole extra beat every turn, so a crew, a friend, or a dog
+     * that walked out of the interview for free would be the one gift in the game
+     * nobody was priced for. They cost points on the same ledger a long reach
+     * comes off, they are on their feet in the opening scene (with their own
+     * request slot on the very first turn), and they start at bond zero like
+     * everyone else: a long history is a story fact, and story facts never move
+     * numbers.
+     */
+    public function test_a_companion_bought_at_creation_walks_in_with_them()
+    {
+        $campaign = $this->createCampaign();
+
+        $turn = app(TurnStarter::class)->openFirstTurn($campaign, null, [
+            ['name' => 'Bosun', 'kind' => 'npc', 'what' => 'Sailed with them for years.'],
+        ]);
+
+        $scene = $campaign->activeScene;
+        $bosun = $scene->actors()->where('name', 'Bosun')->first();
+
+        $this->assertNotNull($bosun, 'nobody walked in with them');
+        $this->assertSame('companion', $bosun->kind);
+        $this->assertSame(Companions::ORIGIN, $bosun->tags['joined_via']);
+        $this->assertSame(0, Companions::bond($bosun));
+        $this->assertSame(Companions::STRANGER, Companions::tier($bosun));
+
+        // Their own request slot, on turn one. A companion the player paid for
+        // and then could not ask anything of until turn two would read as the
+        // sheet lying to them.
+        $entry = collect($turn->cards['companions'])->firstWhere('id', $bosun->id);
+        $this->assertNotNull($entry);
+        $this->assertNotEmpty($entry['cards']);
+
+        // The board says who is beside them, in plain words and never a number.
+        $board = collect(SituationBoard::for($campaign->character->fresh(), $scene->fresh()))
+            ->firstWhere('key', 'allies');
+        $this->assertNotNull($board);
+        $this->assertStringContainsString('Bosun', implode(' ', $board['items']));
+    }
+
+    /** Priced like a gift, capped below the party cap, and never Claude's to invent. */
+    public function test_a_starting_companion_is_priced_and_capped()
+    {
+        $cost = TraitCatalog::companionCost();
+        $this->assertGreaterThan(0, $cost, 'a free companion is unpriced power');
+
+        $bare = TraitCatalog::sheetBalance([['capability' => 'swim']], []);
+        $withCompany = TraitCatalog::sheetBalance(
+            [['capability' => 'swim']], [], [['name' => 'Bosun', 'kind' => 'npc', 'what' => '']],
+        );
+        $this->assertSame($bare - $cost, $withCompany);
+
+        // And it is named on the ledger, where the player can decide against it.
+        $ledger = TraitCatalog::sheetLedger(
+            [], [], [['name' => 'Bosun', 'kind' => 'npc', 'what' => '']],
+        );
+        $this->assertContains(
+            ['label' => 'Bosun at your side', 'cost' => $cost],
+            $ledger['gifts'],
+        );
+
+        // However many the interview names, only the cap walks in — the world
+        // still has to have somewhere to put the grateful and the stray.
+        $proposed = [
+            ['name' => 'Bosun', 'kind' => 'npc'],
+            ['name' => 'Deckhand', 'kind' => 'npc'],
+            ['name' => 'The dog', 'kind' => 'creature'],
+        ];
+        $clean = TraitCatalog::companionsFrom($proposed);
+        $this->assertCount(TraitCatalog::companionCap(), $clean);
+        $this->assertLessThan((int) config('game.companions.cap'), count($clean));
+
+        // The kind is the engine's, not Claude's: the signature table is keyed to
+        // it, so anything it does not understand becomes a person.
+        $this->assertSame('npc', TraitCatalog::companionsFrom([
+            ['name' => 'Something', 'kind' => 'eldritch'],
+        ])[0]['kind']);
+
+        // Nameless proposals are not people and do not walk in.
+        $this->assertSame([], TraitCatalog::companionsFrom([['kind' => 'npc']]));
+    }
+
+    /** The party cap holds against the sheet as hard as against the road. */
+    public function test_a_bought_companion_still_yields_to_the_party_cap()
+    {
+        $campaign = $this->createCampaign();
+        $scene = $this->openBareTurn($campaign)->scene;
+
+        $this->makeCompanion($scene, 'the first');
+        $this->makeCompanion($scene, 'the second');
+
+        $this->assertTrue(Companions::atCap($scene->fresh()));
+        $this->assertNull(Companions::plant($scene->fresh(), ['name' => 'the third', 'kind' => 'npc']));
+        $this->assertNull($scene->fresh()->actors()->where('name', 'the third')->first());
     }
 }

@@ -352,8 +352,23 @@ return [
     | interception. Rare, and only in a fight the player did not win.
     */
 
+    /*
+    | `creation_cost` is what somebody already at your side costs at creation,
+    | in the same coin every gift is priced in. A companion is mechanical power
+    | — a whole extra beat every turn, in their own slot — so a crew, a friend,
+    | or a pet that walked out of the interview for free would be the one gift
+    | in the game nobody paid for. Priced, it is an ordinary choice on the
+    | ledger the player can read while they talk.
+    |
+    | `creation_cap` is one, not two: the world still has to have somewhere to
+    | put the grateful and the stray, and a party that arrives full has closed
+    | every door the companion system opens.
+    */
+
     'companions' => [
         'cap' => 2,
+        'creation_cost' => 2,
+        'creation_cap' => 1,
         'bond_max' => 6,
         'tiers' => ['fellow' => 2, 'sworn' => 5],
         'grateful_chance' => 0.40,

@@ -38,6 +38,31 @@ class ActionCard
         public readonly ?array $bargain = null,
     ) {}
 
+    /**
+     * The same beat, offered in a different position in the turn.
+     *
+     * Every one of the player's three picks offers the whole list, so a beat is
+     * composed once and then stands in all three. The slot is part of id(), so
+     * the three copies are three distinct, individually validated cards rather
+     * than one card the submission could point at from anywhere.
+     */
+    public function withSlot(TurnSlot $slot): self
+    {
+        return $slot === $this->slot ? $this : new self(
+            slot: $slot,
+            verb: $this->verb,
+            label: $this->label,
+            description: $this->description,
+            target: $this->target,
+            capability: $this->capability,
+            risk: $this->risk,
+            cost: $this->cost,
+            modifiers: $this->modifiers,
+            composed: $this->composed,
+            bargain: $this->bargain,
+        );
+    }
+
     public function id(): string
     {
         return substr(hash('sha256', implode('|', [

@@ -60,7 +60,10 @@ adjudicates legality or outcomes — it is only ever handed resolved facts.
   `TraitCatalog` (the point-buy creation path: engine-priced gifts cost
   points, burdens refund them, builds must break even against
   `creation_points`; Claude only writes prose around the finished sheet),
-  `CapabilityGroup` (slot scoping), `TurnSlot` (pre/main/post), `BranchTrigger`
+  `CapabilityGroup` (slot scoping), `TurnSlot` (pre/main/post — the RESOLUTION
+  order of the player's three beats, and nothing else: every one of the three
+  offers the same composed list, so position no longer decides what may stand in
+  it. See `CardComposer::unify` and the ONE LIST invariant), `BranchTrigger`
   (the 8 vignette stop conditions), `Meters` (tempo regens in real time across
   the idle wait; health only via recovery beats), `Hands` (what is physically
   held: a successful `lift` puts scene matter IN the character's two hands,
@@ -85,12 +88,19 @@ adjudicates legality or outcomes — it is only ever handed resolved facts.
   wary arrives `lurking`, scheming arrives under `truce` with an engine-picked
   deal the roll-free `bargain` verb accepts); the evolver only tends simmering
   grudges within actor clamps and +1 heat/run; killed/kept/bargained is
-  `resolved` and terminal), `Downtime` (the idle wait as a choice: a closed,
-  engine-composed set of stances — rest / keep watch / tend gear / walk the
-  ground — offered on `turns.downtime` when a turn opens, picked on the
-  resolved-turn screen, and paid out at the top of the next resolution from
-  the REAL elapsed minutes, clamped by `config/game.php` `downtime`
-  (floor/cap)), `Ambient` (the air a scene stands in: ONE abstract key —
+  `resolved` and terminal), `Attempts` (a way already tried and refused: a
+  FAILURE on the short closed list `flee`/`cross`/`ascend`/`scout`/`track`,
+  keyed to the thing it was aimed at (or to the scene, for a beat aimed at no
+  one thing), closes that exact card for the rest of that scene — written by the
+  resolver after the die is read, filtered by the composer before the card is
+  ever offered, and stated on the board in plain words so an absence never reads
+  as a bug. Only a failure closes anything, only that thing, and only there),
+  `Downtime` (the idle wait as a choice — CURRENTLY UNOFFERED: the engine half
+  stands (a closed set of stances written to `turns.downtime` when a turn opens,
+  paid out at the top of the next resolution from the REAL elapsed minutes,
+  clamped by `config/game.php` `downtime`) but no screen shows the picker any
+  more, so the wait passes as it did before the feature existed — tempo regen
+  and nothing else), `Ambient` (the air a scene stands in: ONE abstract key —
   `gloom` low light / `haze` obscured air / `squall` violent air / `clear` —
   rolled by `SceneDresser` from the scene's seeded dice when the ground is
   dressed, stored on `scenes.state.ambient` and fixed for that scene's life,
@@ -266,7 +276,17 @@ adjudicates legality or outcomes — it is only ever handed resolved facts.
   `bonus_parts`. Both come from `Odds` and nowhere else: a second copy of that
   ladder is how a card starts promising a DC the dice do not honor. The
   modifier is always displayed, `+0` included — hiding it when it happens to
-  be zero is exactly when its absence is worth stating.
+  be zero is exactly when its absence is worth stating. The TOTAL is what must
+  never be hidden; the itemization is a reading aid, so the constant every roll
+  in the game shares (`Base difficulty`) is not printed as a line item — a
+  number that never varies teaches nobody anything and buried the parts that do.
+  And a two-sided trade must show BOTH sides where the number is: a stance chip
+  prints its difficulty delta AND its terms (`terms` on the modifier option),
+  because "creep −2 DC / dash +2 DC" on its own reads as the engine claiming
+  running is harder than tiptoeing. It is not a movement rule — it is the same
+  trade on every card: caution buys a surer roll and spends the top of the result
+  (never better than plainly working, no wild faces), boldness pays for the
+  reverse.
 - The scene arrives thin. Openings and transitions draw few features and often
   no actors at all; an empty room is a legitimate reading of a place, and a
   scene that spends the whole world on arrival leaves nothing to appear later.
@@ -318,15 +338,29 @@ adjudicates legality or outcomes — it is only ever handed resolved facts.
   world-level content directly. `campaigns.opening` is where the player asked
   the first scene to find them — it rides in `stageBrief()`, so the stage
   builder must open ON that moment, not approach it.
-- Downtime is optional and defaults to none: a player who submits and closes
-  the app gets tempo regen and nothing else. The pick happens AFTER a turn
-  resolves and never gates or delays resolution; a wait shorter than the floor
-  pays nothing and one past the cap pays no more; each stance costs the other
-  three (rest heals but keeps no watch; watch reveals only ENTRY-time lurkers;
-  tend gear grants the existing `readied` condition from `Odds::CONDITIONS`,
-  never a parallel buff; walk the ground is not offered when the scene hides
-  nothing). Narration gets one plain sentence about the wait — no numbers, no
-  stance names.
+- Downtime is no longer offered anywhere. The picker was removed from both the
+  dice table and the play page: it asked the player to price four abstractions
+  against time they had not spent yet, and it read as noise between the dice and
+  the chapter. Everything under it still works — the offer is still written to
+  `turns.downtime`, a recorded stance is still paid out, the widget still reports
+  one — so putting it back is a UI job, not a rebuild. What holds now is what
+  held before the feature existed: a player who submits and closes the app gets
+  tempo regen and nothing else. If it does come back, the old terms come back
+  with it (the pick happens AFTER a turn resolves and never gates resolution; a
+  wait under the floor pays nothing and one past the cap pays no more; each
+  stance costs the other three; narration gets one plain sentence about the wait,
+  no numbers and no stance names).
+- ONE LIST, THREE POSITIONS. The player's turn is still a chain that resolves
+  pre → companions → main → post, and order is still the whole point of a set-up
+  beat — but every one of the three picks offers the SAME composed list, and the
+  player decides what belongs where. Composed once and copied (`ActionCard::
+  withSlot`), so a beat can never be priced differently depending on which pick
+  reached it; the slot rides in `id()`, so the three copies are three distinct
+  cards a submission points at individually and "never resolve a card the engine
+  didn't offer" still holds by construction. Only `main` is required. Position
+  must never become a second gate on what a beat may be: a card that only makes
+  sense before the act says so in its own words and in what it grants, which is
+  the player's information to act on rather than the form's to enforce.
 - The air is abstract, priced in the open, and never a revealer. Ambient keys
   are engine vocabulary that must work on an ash steppe and aboard a derelict
   station alike — the engine never says "rain"; the narrator translates the key
@@ -405,7 +439,19 @@ adjudicates legality or outcomes — it is only ever handed resolved facts.
   the number. Joining is consensual on both sides: every path the world
   initiates ends in an engine-offered accept/decline pair, sending someone on
   their way is never a dead choice, and a third candidate's offer simply does
-  not fire while the party is at its cap of two.
+  not fire while the party is at its cap of two. Asking somebody along is not a
+  card of its own: it is an engine-offered `intent` chip on the plain
+  conversation with them (`speak`, offered only where recruiting is actually
+  legal), because talking to somebody is one act as the player reads it. The chip
+  is validated like every modifier and both readings price identically — and the
+  note box still cannot recruit anyone, because a note colours the telling and
+  never reaches a mechanic. A companion may also be bought AT CREATION
+  (`Companions::plant`, `joined_via` origin, planted before the first turn's
+  cards are composed so their request slot exists on turn one) — priced on the
+  creation ledger at `companions.creation_cost` like any other gift, capped at
+  `companions.creation_cap` (below the party cap, so the world still has room to
+  offer the grateful and the stray), and starting at bond ZERO like everybody
+  else: a long history is a story fact, and story facts never move numbers.
 - A standing is earned in front of the people who hold it, and zero says
   nothing. It moves ONLY through the closed event table — notes, genre, drive,
   land, narration, and the evolver never touch it, and the history is

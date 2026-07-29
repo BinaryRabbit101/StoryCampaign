@@ -1,6 +1,14 @@
 export interface CardModifierOption {
     value: string;
     label: string;
+    /**
+     * What choosing this option actually trades, in the engine's own words.
+     * A difficulty delta on its own reads as nonsense on half the verbs in the
+     * game ("creeping away is easier than running?"), because the delta is only
+     * one side of the deal — the other side is which results stay on the table.
+     * The engine states both; the page never works either out.
+     */
+    terms?: string;
 }
 
 export interface CardModifier {
@@ -134,30 +142,6 @@ export interface TurnCards {
     main: ActionCard[];
     post: ActionCard[];
     companions?: CompanionCards[];
-}
-
-/**
- * One way to spend the idle stretch ahead. The terms are the whole point:
- * the payout is priced on the option before it is picked, the same way a
- * card prints its difficulty before it is committed to.
- */
-export interface DowntimeStance {
-    id: string;
-    label: string;
-    terms: string;
-    /**
-     * Present only on the stances that take words — today, the campfire. The
-     * line is colour for the chapter and never touches a number, exactly like
-     * a per-beat note.
-     */
-    note?: string;
-}
-
-/** The wait ahead: what is offered, and what has already been chosen for it. */
-export interface DowntimeOffer {
-    offer: DowntimeStance[];
-    /** Chosen once and only once — null until the player says. */
-    stance: string | null;
 }
 
 export interface HealthMeter {

@@ -53,6 +53,12 @@ class Companions
     /** How they came to be walking here. */
     public const ASKED = 'asked';
 
+    /**
+     * They were already there when the tale opened — bought and paid for at
+     * creation rather than met on the road.
+     */
+    public const ORIGIN = 'origin';
+
     public const GRATEFUL = 'grateful';
 
     public const STRAY = 'stray';
@@ -238,6 +244,51 @@ class Companions
         ]);
 
         return $actor->fresh();
+    }
+
+    /**
+     * Somebody who was already there when the tale started.
+     *
+     * A crew, a friend, a dog: the interview asks about the company a character
+     * keeps, and a character who answered used to walk in alone anyway. This is
+     * that answer, made real — and it is priced at creation like any other gift
+     * (App\Game\TraitCatalog::companionCost), because a whole extra beat every
+     * turn is power, and free power is the one thing the sheet may never grant.
+     *
+     * The row is the engine's, not Claude's: the name and one line of who they
+     * are is all the fiction that gets through, and the stats, the tags, and the
+     * tier come from here. They start at bond zero like everyone else — a long
+     * history is a story fact, and story facts never move numbers. What they
+     * have instead is `joined_via` origin, which is how the narrator knows this
+     * one was not met on the road.
+     *
+     * @param  array{name:string,kind:string,what?:string}  $spec
+     */
+    public static function plant(Scene $scene, array $spec): ?Actor
+    {
+        if (self::atCap($scene)) {
+            return null;
+        }
+
+        $kind = in_array($spec['kind'] ?? 'npc', ['creature', 'npc'], true) ? $spec['kind'] : 'npc';
+
+        $actor = Actor::create([
+            'scene_id' => $scene->id,
+            'zone_id' => $scene->zone_id,
+            'name' => $spec['name'],
+            'kind' => $kind,
+            'tier' => 'regular',
+            'stats' => ['health' => ['current' => 4, 'max' => 4], 'attack' => 1],
+            'tags' => array_filter([
+                'talkable' => true,
+                'companionable' => true,
+                'what' => trim((string) ($spec['what'] ?? '')) ?: null,
+            ]),
+            'status' => 'active',
+            'source' => 'creation',
+        ]);
+
+        return self::join($actor, self::ORIGIN);
     }
 
     /**

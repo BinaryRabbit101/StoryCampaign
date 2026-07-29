@@ -113,11 +113,11 @@ class Bargains
      * every one of them is asking the same question: would this complication
      * actually cost the player anything, here, tonight?
      *
-     * @param  list<ActionCard>  $preCards  The set-up beats already composed —
-     *                                      the only place concealment can be bought this turn.
+     * @param  list<ActionCard>  $offered  Every beat composed for this turn —
+     *                                     where concealment being buyable at all is read from.
      * @return array<string,mixed>
      */
-    public static function sceneState(Character $character, Scene $scene, array $preCards): array
+    public static function sceneState(Character $character, Scene $scene, array $offered): array
     {
         $active = $scene->activeActors();
 
@@ -130,9 +130,9 @@ class Bargains
             // Concealment is a within-turn condition — it never survives a
             // resolution — so "are you concealed?" cannot be asked at compose
             // time. What can be asked is whether cover is IN PLAY: a hide card
-            // standing in the pre slot is concealment the player may hold when
-            // the reckless beat lands.
-            'cover' => collect($preCards)->contains(fn (ActionCard $c) => $c->verb === 'hide'),
+            // among this turn's beats is concealment the player may be holding
+            // by the time the reckless one lands.
+            'cover' => collect($offered)->contains(fn (ActionCard $c) => $c->verb === 'hide'),
             'holding' => Hands::used($character) > 0,
             'reserve' => self::reserve($character),
             'provokable' => $active

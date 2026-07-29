@@ -23,6 +23,39 @@ export interface CarriedBonus {
     slot: string | null;
 }
 
+/**
+ * The reasons a difficulty is what it is, minus the one that is never a reason.
+ *
+ * Every roll in the game starts from the same base, so printing it as a line
+ * item taught nobody anything — it was a constant taking up the top of the list
+ * the player was trying to read the interesting part of. The TOTAL still stands
+ * (in the ledger, on the card, and on the dice table), so nothing is hidden;
+ * what is gone is the row that never varied.
+ */
+export const reasonsFor = (parts: OddsPart[]): OddsPart[] =>
+    parts.filter((part) => part.label !== 'Base difficulty');
+
+/**
+ * Colour for one line of the difficulty ledger, by how much it costs.
+ *
+ * Difficulty parts run the wrong way round from bonuses: a positive number is
+ * the world making this harder. Nothing (amber) reads differently from a lot
+ * (red), which is the point — a wall of identically-coloured numbers is a wall.
+ * A negative part is the world helping, and it reads like a bonus does.
+ */
+export function costClass(amount: number): string {
+    if (amount < 0) {
+        return 'text-emerald-700 dark:text-emerald-400';
+    }
+    if (amount === 0) {
+        return 'text-muted-foreground';
+    }
+
+    return amount >= 3
+        ? 'text-red-600 dark:text-red-400'
+        : 'text-orange-600 dark:text-orange-400';
+}
+
 /** What this card must beat, at a given stance. */
 export function difficultyAt(card: ActionCard, stance: string): number {
     return card.forecast.stances[stance] ?? card.forecast.difficulty;

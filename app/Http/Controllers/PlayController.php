@@ -103,11 +103,6 @@ class PlayController extends Controller
                 // the prose those turns were written with.
                 'board' => $turn->situation_board,
                 'cards' => $turn->isOpen() ? $this->withVocabulary($turn->cards) : null,
-                // The wait ahead, and whether it has been spoken for. Only
-                // while the turn is open: once it is submitted the wait it
-                // offered is over, and a picker on a locked turn would be
-                // offering something already gone.
-                'downtime' => $turn->isOpen() ? $this->downtimeOffer($turn) : null,
             ],
             // The endeavor under way, if the player took one on: the goal in
             // its own words and how far along it is. It stands beside the
@@ -224,24 +219,6 @@ class PlayController extends Controller
     }
 
     /**
-     * The stances offered for the wait ahead, and the one already taken.
-     * Turns opened before downtime existed carry none, and the picker simply
-     * does not appear for them.
-     *
-     * @return array{offer:list<array{id:string,label:string,terms:string}>,stance:?string}|null
-     */
-    private function downtimeOffer(Turn $turn): ?array
-    {
-        $downtime = $turn->downtime ?? [];
-        $offer = $downtime['offer'] ?? [];
-
-        return $offer === [] ? null : [
-            'offer' => array_values($offer),
-            'stance' => $downtime['stance'] ?? null,
-        ];
-    }
-
-    /**
      * How the character spends the wait before this turn is played.
      *
      * A normal engine-offered choice: submitted by id and checked against the
@@ -249,6 +226,13 @@ class PlayController extends Controller
      * nothing else — the payout is the engine's, computed from the real
      * elapsed minutes at the top of the next resolution, so a pick can never
      * make the resolution itself wait on anything.
+     *
+     * NOTHING OFFERS THIS ANY MORE. The picker was removed from both screens:
+     * the wait now passes the way it did before downtime existed, with tempo
+     * regenerating and nothing else. The engine half is left standing (the
+     * resolver still pays out a stance if one is somehow recorded, and the
+     * offer is still written onto each turn), so the feature can be put back on
+     * screen without being rebuilt — but no player-facing surface reaches here.
      */
     public function downtime(Request $request, Campaign $campaign): RedirectResponse
     {

@@ -131,6 +131,32 @@ function blocked(trait: TraitOption): boolean {
     );
 }
 
+/**
+ * The balance, as a signed number with a colour.
+ *
+ * It used to read "Balance: 0 / 3", which is two numbers and a slash for one
+ * fact: whether the bargain currently holds. Nobody reads a fraction as "you
+ * have spent everything and it balances" — so what is on screen is the one
+ * figure that matters, signed, in the colour of what it means. Points left to
+ * spend, an even bargain, or a shortfall the world will not accept.
+ */
+const signed = (points: number) =>
+    `${points > 0 ? '+' : points < 0 ? '−' : ''}${Math.abs(points)}`;
+
+const balanceClass = (points: number) =>
+    points < 0
+        ? 'text-red-500'
+        : points > 0
+          ? 'text-violet-400'
+          : 'text-emerald-500';
+
+const balanceWord = (points: number) =>
+    points < 0
+        ? 'overspent'
+        : points > 0
+          ? `${points === 1 ? 'point' : 'points'} still to spend`
+          : 'an even bargain';
+
 function toggle(trait: TraitOption) {
     if (blocked(trait)) return;
     selected.value = selected.value.includes(trait.key)
@@ -315,16 +341,12 @@ watch(() => props.messages.length, scrollDown);
                 </p>
                 <p
                     class="shrink-0 text-sm font-semibold tabular-nums"
-                    :class="
-                        draft.balance < 0
-                            ? 'text-amber-500'
-                            : 'text-violet-400'
-                    "
+                    :class="balanceClass(draft.balance)"
                 >
-                    Balance: {{ draft.balance }}
-                    <span class="text-xs font-normal text-muted-foreground"
-                        >/ {{ draft.points }}</span
-                    >
+                    {{ signed(draft.balance) }}
+                    <span class="text-xs font-normal text-muted-foreground">{{
+                        balanceWord(draft.balance)
+                    }}</span>
                 </p>
             </div>
 
@@ -425,9 +447,8 @@ watch(() => props.messages.length, scrollDown);
                     />
                 </span>
                 <span v-if="beginning || building">
-                    The world is making room for you — this one takes a
-                    moment. You can close this; you will be told when it is
-                    ready.
+                    The world is making room for you — this one takes a moment.
+                    You can close this; you will be told when it is ready.
                 </span>
                 <span v-else>The narrator considers…</span>
             </p>
@@ -445,11 +466,13 @@ watch(() => props.messages.length, scrollDown);
                     </p>
                     <p
                         class="text-sm font-semibold tabular-nums"
-                        :class="
-                            balance < 0 ? 'text-red-500' : 'text-violet-400'
-                        "
+                        :class="balanceClass(balance)"
                     >
-                        Balance: {{ balance }}
+                        {{ signed(balance) }}
+                        <span
+                            class="text-xs font-normal text-muted-foreground"
+                            >{{ balanceWord(balance) }}</span
+                        >
                     </p>
                 </div>
 

@@ -123,6 +123,12 @@ class SituationBoard
                 ->reject(fn ($f) => Hands::isHolding($character, $f->id))
                 ->pluck('name')->take(6)->all());
 
+        // Ways already tried and refused. A card that silently stopped being
+        // offered reads as a bug; the same card gone with one plain line saying
+        // why reads as the world — and it is the ground's own answer, so it
+        // belongs beside the ground.
+        $groups[] = self::group('answered', 'Already tried', 'ground', Attempts::boardLines($scene));
+
         // The air this ground stands in, and the light it stands in. Abstract,
         // because the engine's words have to work in a canopy town and on a
         // derelict station alike — the chapter is where it becomes rain, or

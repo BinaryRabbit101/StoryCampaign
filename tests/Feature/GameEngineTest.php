@@ -158,13 +158,19 @@ class GameEngineTest extends TestCase
         $this->placeFeature($campaign->activeScene, 'the collapsed archway');
         $turn = $this->refreshCards($turn);
 
-        // a large character squeezing into a medium alley: degraded, not absent
-        $alley = collect($turn->cards['main'])->first(fn ($c) => str_contains($c['label'], 'narrow alley'));
+        // a large character squeezing into a medium alley: degraded, not absent.
+        // Matched on the capability rather than on the name, because the ground
+        // also carries the capability-free cards every visible thing carries —
+        // looking closer at the alley is not a squeeze and is not degraded.
+        $squeezes = collect($turn->cards['main'])->filter(fn ($c) => $c['capability'] === 'squeeze');
+
+        $alley = $squeezes->first(fn ($c) => str_contains($c['label'], 'narrow alley'));
         $this->assertNotNull($alley);
         $this->assertSame('degraded', $alley['risk']);
 
         // the large archway fits cleanly
-        $arch = collect($turn->cards['main'])->first(fn ($c) => str_contains($c['label'], 'archway'));
+        $arch = $squeezes->first(fn ($c) => str_contains($c['label'], 'archway'));
+        $this->assertNotNull($arch);
         $this->assertSame('safe', $arch['risk']);
     }
 
@@ -631,12 +637,23 @@ class GameEngineTest extends TestCase
         $this->placeActor($scene, 'a dockside tough');
         $this->placeActor($scene, 'the lantern watchman');
 
-        // The companionable watchman offers a recruit card while enemies
-        // are present.
+        // The companionable watchman can be asked along — as what a conversation
+        // is FOR, on the conversation's own card, rather than as a second verb
+        // standing beside it under the board's SPEAK word.
         $cards = app(CardComposer::class)->compose($campaign->character, $scene->fresh());
-        $recruit = collect($cards['main'])->first(fn ($c) => $c['verb'] === 'recruit');
-        $this->assertNotNull($recruit);
-        $this->assertSame('the lantern watchman', $recruit['target']['name']);
+        $talk = collect($cards['main'])->first(
+            fn ($c) => $c['verb'] === 'speak'
+                && ($c['target']['name'] ?? null) === 'the lantern watchman',
+        );
+        $this->assertNotNull($talk);
+        $this->assertNull(
+            collect($cards['main'])->first(fn ($c) => $c['verb'] === 'recruit'),
+            'asking someone along is an intent on the conversation, not a card of its own',
+        );
+
+        $intent = collect($talk['modifiers'])->firstWhere('key', 'intent');
+        $this->assertNotNull($intent);
+        $this->assertSame(['talk', 'recruit'], array_column($intent['options'], 'value'));
 
         // Once a companion, coordination requests appear in the companion's
         // OWN slot — requests aimed at the companion, never direct control,

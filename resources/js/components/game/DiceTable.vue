@@ -11,6 +11,7 @@
  */
 import { computed, nextTick, onBeforeUnmount, onMounted, ref } from 'vue';
 import { DiceStage, supportsWebGL } from '@/lib/dice3d';
+import { costClass, reasonsFor, signed } from '@/lib/odds';
 import type { RollRow } from '@/types/game';
 
 const props = defineProps<{
@@ -187,9 +188,6 @@ const sideLabel = (row: RollRow) => (row.side === 'player' ? 'You' : row.actor);
 // the sum is always written in full, and the reasons behind both numbers are
 // one tap away.
 
-const signed = (amount: number) =>
-    `${amount > 0 ? '+' : '−'}${Math.abs(amount)}`;
-
 const expanded = ref<Set<string>>(new Set());
 
 function toggleWhy(id: string) {
@@ -209,9 +207,21 @@ const hasReasons = (row: RollRow) =>
 </script>
 
 <template>
-    <div
-        class="fixed inset-0 z-50 overflow-y-auto bg-background/95 backdrop-blur-md"
-    >
+    <!-- Three layers, and the order of them is load-bearing.
+         The dice canvas is positioned against the VIEWPORT and each die is
+         drawn into the scissor rectangle its card reports, which only lines up
+         while the canvas and those rectangles share one coordinate space. It
+         used to sit inside the scrolling, backdrop-blurred overlay — and a
+         backdrop-filter makes its element the containing block for `fixed`
+         descendants, so the canvas quietly became a child of the scroll content
+         and slid up the page while the cards reported viewport coordinates. The
+         dice drifted out of their cards, further with every pixel scrolled.
+         So the blur is its own layer, the scrolling is its own layer, and the
+         canvas is a sibling of both — anchored to the viewport, where it is
+         measuring from. -->
+    <div class="fixed inset-0 z-50">
+        <div class="absolute inset-0 bg-background/95 backdrop-blur-md" />
+
         <!-- One renderer for the whole grid: each die is drawn into the
              scissor rectangle of its own card, so the table can scroll. It
              sits above the cards — a card's own background is translucent,
@@ -223,281 +233,286 @@ const hasReasons = (row: RollRow) =>
             class="pointer-events-none fixed inset-0 z-30 h-full w-full"
         />
 
-        <div class="relative z-20 mx-auto w-full max-w-2xl p-4 pb-28">
-            <header class="sc-rise mb-5 text-center">
-                <p
-                    class="text-[0.7rem] tracking-[0.2em] text-muted-foreground uppercase"
-                >
-                    Chapter {{ turnNumber }} · before the ink
-                </p>
-                <h1 class="mt-1 text-2xl font-semibold">The dice fall</h1>
-                <p class="mt-2 text-sm text-muted-foreground">
-                    <template v-if="waitingOnPlayer">
-                        The scene has thrown. Pick up your own.
-                    </template>
-                    <template v-else-if="!allSettled">
-                        The scene is throwing…
-                    </template>
-                    <template v-else>
-                        That is what happened. Now it gets written.
-                    </template>
-                </p>
-            </header>
+        <div class="absolute inset-0 z-20 overflow-y-auto">
+            <!-- Click anywhere once the table is read: under the cards, over
+                 the backdrop, and anchored to the viewport so it stays under
+                 whatever is on screen. -->
+            <button
+                v-if="allSettled"
+                class="fixed inset-0 z-0 cursor-pointer"
+                aria-label="Continue to the chapter"
+                @click="done"
+            />
 
-            <div class="grid gap-3 sm:grid-cols-2">
-                <div
-                    v-for="row in rows"
-                    :key="row.id"
-                    class="sc-rise relative flex flex-col rounded-xl border bg-background/70 p-3 backdrop-blur-sm transition-colors"
-                    :class="[
-                        ringClass(row),
-                        row.side === 'player' &&
-                        !revealed.has(row.id) &&
-                        !rolling.has(row.id)
-                            ? 'sc-waiting cursor-pointer text-primary hover:bg-background/90'
-                            : '',
-                    ]"
-                    @click="row.side === 'player' ? cast(row) : undefined"
-                >
-                    <!-- Who and what -->
-                    <div class="flex items-start justify-between gap-2">
-                        <div class="min-w-0">
-                            <p
-                                class="text-[0.65rem] tracking-[0.15em] uppercase"
-                                :class="
-                                    row.side === 'foe'
-                                        ? 'text-rose-700 dark:text-rose-400'
-                                        : row.side === 'ally'
-                                          ? 'text-emerald-700 dark:text-emerald-400'
-                                          : 'text-muted-foreground'
-                                "
-                            >
-                                {{ sideLabel(row) }}
-                            </p>
-                            <p class="truncate text-sm font-medium">
-                                <span aria-hidden="true">{{
-                                    ICONS[row.icon] ?? ICONS.beat
-                                }}</span>
-                                {{ row.action }}
-                            </p>
-                        </div>
-                        <div class="shrink-0 text-right">
-                            <p
-                                class="text-[0.6rem] tracking-[0.15em] text-muted-foreground uppercase"
-                            >
-                                DC {{ row.difficulty }}
-                            </p>
-                            <p
-                                class="text-xs font-semibold"
-                                :class="bandClass(row.band)"
-                            >
-                                {{ row.band }}
-                            </p>
-                        </div>
-                    </div>
-
-                    <!-- The die's own patch of the card. The 3D canvas scissors
-                         into exactly this box, so it must stay empty when
-                         there is a die to draw; the numeral is what a reader
-                         without WebGL gets instead. -->
-                    <div
-                        :ref="(el) => setSlot(row.id, el)"
-                        class="relative my-2 flex h-24 items-center justify-center"
-                    >
-                        <span
-                            v-if="!webgl"
-                            class="text-3xl font-bold tabular-nums"
-                            :class="
-                                revealed.has(row.id)
-                                    ? ''
-                                    : 'text-muted-foreground/40'
-                            "
-                            aria-hidden="true"
-                        >
-                            <template v-if="revealed.has(row.id)">{{
-                                row.roll
-                            }}</template>
-                            <template v-else>·</template>
-                        </span>
-                        <span class="sr-only">
-                            {{ sideLabel(row) }}:
-                            {{
-                                revealed.has(row.id)
-                                    ? `rolled ${row.roll}`
-                                    : 'not yet rolled'
-                            }}
-                        </span>
-                    </div>
-
+            <div class="relative z-20 mx-auto w-full max-w-2xl p-4 pb-28">
+                <header class="sc-rise mb-5 text-center">
                     <p
-                        v-if="
+                        class="text-[0.7rem] tracking-[0.2em] text-muted-foreground uppercase"
+                    >
+                        Chapter {{ turnNumber }} · before the ink
+                    </p>
+                    <h1 class="mt-1 text-2xl font-semibold">The dice fall</h1>
+                    <p class="mt-2 text-sm text-muted-foreground">
+                        <template v-if="waitingOnPlayer">
+                            The scene has thrown. Pick up your own.
+                        </template>
+                        <template v-else-if="!allSettled">
+                            The scene is throwing…
+                        </template>
+                        <template v-else>
+                            That is what happened. Now it gets written.
+                        </template>
+                    </p>
+                </header>
+
+                <div class="grid gap-3 sm:grid-cols-2">
+                    <div
+                        v-for="row in rows"
+                        :key="row.id"
+                        class="sc-rise relative flex flex-col rounded-xl border bg-background/70 p-3 backdrop-blur-sm transition-colors"
+                        :class="[
+                            ringClass(row),
                             row.side === 'player' &&
                             !revealed.has(row.id) &&
                             !rolling.has(row.id)
-                        "
-                        class="text-center text-xs font-medium"
+                                ? 'sc-waiting cursor-pointer text-primary hover:bg-background/90'
+                                : '',
+                        ]"
+                        @click="row.side === 'player' ? cast(row) : undefined"
                     >
-                        Tap to roll
-                    </p>
-
-                    <!-- The arithmetic, once there is any to show -->
-                    <Transition name="unfold">
-                        <div v-if="revealed.has(row.id)" class="text-center">
-                            <p
-                                v-if="row.crit"
-                                class="sc-flare text-xs font-bold tracking-[0.15em] uppercase"
-                                :class="degreeClass(row)"
-                            >
-                                {{
-                                    row.crit === 'success'
-                                        ? '★ Natural 20 ★'
-                                        : '☠ Natural 1 ☠'
-                                }}
-                            </p>
-                            <!-- Always the whole sum, including a +0. A
-                                 modifier that vanishes when it happens to be
-                                 zero is the one case where its absence is
-                                 worth stating out loud. -->
-                            <p
-                                class="text-xs text-muted-foreground tabular-nums"
-                            >
-                                d20 {{ row.roll }} {{ signed(row.modifier) }} =
-                                <span class="font-semibold text-foreground">{{
-                                    row.total
-                                }}</span>
-                                vs DC {{ row.difficulty }}
-                            </p>
-                            <p
-                                class="text-sm font-semibold"
-                                :class="degreeClass(row)"
-                            >
-                                {{ degreeLabel(row) }}
-                            </p>
-                            <p
-                                v-if="row.outcome"
-                                class="mt-1 text-xs text-muted-foreground"
-                            >
-                                {{ row.outcome }}
-                            </p>
-
-                            <button
-                                v-if="hasReasons(row)"
-                                type="button"
-                                class="mt-1.5 text-[10px] text-muted-foreground underline underline-offset-2 hover:text-foreground"
-                                @click.stop="toggleWhy(row.id)"
-                            >
-                                {{
-                                    expanded.has(row.id)
-                                        ? 'hide the maths'
-                                        : 'where these numbers came from'
-                                }}
-                            </button>
-
-                            <!-- The same ledger the card printed before the
-                                 commit, read back afterwards. -->
-                            <div
-                                v-if="expanded.has(row.id)"
-                                class="mt-1.5 space-y-0.5 rounded-md bg-muted/60 p-2 text-left text-[11px]"
-                            >
+                        <!-- Who and what -->
+                        <div class="flex items-start justify-between gap-2">
+                            <div class="min-w-0">
                                 <p
-                                    v-for="part in row.difficulty_parts"
-                                    :key="`d-${part.label}`"
-                                    class="flex justify-between gap-3"
+                                    class="text-[0.65rem] tracking-[0.15em] uppercase"
+                                    :class="
+                                        row.side === 'foe'
+                                            ? 'text-rose-700 dark:text-rose-400'
+                                            : row.side === 'ally'
+                                              ? 'text-emerald-700 dark:text-emerald-400'
+                                              : 'text-muted-foreground'
+                                    "
                                 >
-                                    <span class="text-muted-foreground">{{
-                                        part.label
+                                    {{ sideLabel(row) }}
+                                </p>
+                                <p class="truncate text-sm font-medium">
+                                    <span aria-hidden="true">{{
+                                        ICONS[row.icon] ?? ICONS.beat
                                     }}</span>
-                                    <span class="tabular-nums">{{
-                                        part.amount
-                                    }}</span>
+                                    {{ row.action }}
+                                </p>
+                            </div>
+                            <div class="shrink-0 text-right">
+                                <p
+                                    class="text-[0.6rem] tracking-[0.15em] text-muted-foreground uppercase"
+                                >
+                                    DC {{ row.difficulty }}
                                 </p>
                                 <p
-                                    class="flex justify-between gap-3 border-t border-sidebar-border/50 pt-0.5 font-medium"
+                                    class="text-xs font-semibold"
+                                    :class="bandClass(row.band)"
                                 >
-                                    <span>Had to beat</span>
-                                    <span class="tabular-nums">{{
-                                        row.difficulty
-                                    }}</span>
-                                </p>
-                                <p
-                                    v-for="part in row.bonus_parts"
-                                    :key="`b-${part.label}`"
-                                    class="flex justify-between gap-3 text-emerald-700 dark:text-emerald-400"
-                                >
-                                    <span>{{ part.label }}</span>
-                                    <span class="tabular-nums">{{
-                                        signed(part.amount)
-                                    }}</span>
-                                </p>
-                                <p
-                                    v-if="!row.bonus_parts.length"
-                                    class="text-muted-foreground"
-                                >
-                                    Nothing was added to this roll.
+                                    {{ row.band }}
                                 </p>
                             </div>
                         </div>
-                    </Transition>
-                </div>
-            </div>
 
-            <!-- Word from elsewhere, at the same weight as the wait below it:
+                        <!-- The die's own patch of the card. The 3D canvas scissors
+                         into exactly this box, so it must stay empty when
+                         there is a die to draw; the numeral is what a reader
+                         without WebGL gets instead. -->
+                        <div
+                            :ref="(el) => setSlot(row.id, el)"
+                            class="relative my-2 flex h-24 items-center justify-center"
+                        >
+                            <span
+                                v-if="!webgl"
+                                class="text-3xl font-bold tabular-nums"
+                                :class="
+                                    revealed.has(row.id)
+                                        ? ''
+                                        : 'text-muted-foreground/40'
+                                "
+                                aria-hidden="true"
+                            >
+                                <template v-if="revealed.has(row.id)">{{
+                                    row.roll
+                                }}</template>
+                                <template v-else>·</template>
+                            </span>
+                            <span class="sr-only">
+                                {{ sideLabel(row) }}:
+                                {{
+                                    revealed.has(row.id)
+                                        ? `rolled ${row.roll}`
+                                        : 'not yet rolled'
+                                }}
+                            </span>
+                        </div>
+
+                        <p
+                            v-if="
+                                row.side === 'player' &&
+                                !revealed.has(row.id) &&
+                                !rolling.has(row.id)
+                            "
+                            class="text-center text-xs font-medium"
+                        >
+                            Tap to roll
+                        </p>
+
+                        <!-- The arithmetic, once there is any to show -->
+                        <Transition name="unfold">
+                            <div
+                                v-if="revealed.has(row.id)"
+                                class="text-center"
+                            >
+                                <p
+                                    v-if="row.crit"
+                                    class="sc-flare text-xs font-bold tracking-[0.15em] uppercase"
+                                    :class="degreeClass(row)"
+                                >
+                                    {{
+                                        row.crit === 'success'
+                                            ? '★ Natural 20 ★'
+                                            : '☠ Natural 1 ☠'
+                                    }}
+                                </p>
+                                <!-- Always the whole sum, including a +0. A
+                                 modifier that vanishes when it happens to be
+                                 zero is the one case where its absence is
+                                 worth stating out loud. -->
+                                <p
+                                    class="text-xs text-muted-foreground tabular-nums"
+                                >
+                                    d20 {{ row.roll }}
+                                    {{ signed(row.modifier) }} =
+                                    <span
+                                        class="font-semibold text-foreground"
+                                        >{{ row.total }}</span
+                                    >
+                                    vs DC {{ row.difficulty }}
+                                </p>
+                                <p
+                                    class="text-sm font-semibold"
+                                    :class="degreeClass(row)"
+                                >
+                                    {{ degreeLabel(row) }}
+                                </p>
+                                <p
+                                    v-if="row.outcome"
+                                    class="mt-1 text-xs text-muted-foreground"
+                                >
+                                    {{ row.outcome }}
+                                </p>
+
+                                <button
+                                    v-if="hasReasons(row)"
+                                    type="button"
+                                    class="mt-1.5 text-[10px] text-muted-foreground underline underline-offset-2 hover:text-foreground"
+                                    @click.stop="toggleWhy(row.id)"
+                                >
+                                    {{
+                                        expanded.has(row.id)
+                                            ? 'hide the maths'
+                                            : 'where these numbers came from'
+                                    }}
+                                </button>
+
+                                <!-- The same ledger the card printed before the
+                                 commit, read back afterwards. -->
+                                <div
+                                    v-if="expanded.has(row.id)"
+                                    class="mt-1.5 space-y-0.5 rounded-md bg-muted/60 p-2 text-left text-[11px]"
+                                >
+                                    <p
+                                        v-for="part in reasonsFor(
+                                            row.difficulty_parts,
+                                        )"
+                                        :key="`d-${part.label}`"
+                                        class="flex justify-between gap-3"
+                                    >
+                                        <span class="text-muted-foreground">{{
+                                            part.label
+                                        }}</span>
+                                        <span
+                                            class="tabular-nums"
+                                            :class="costClass(part.amount)"
+                                            >{{ signed(part.amount) }}</span
+                                        >
+                                    </p>
+                                    <p
+                                        class="flex justify-between gap-3 border-t border-sidebar-border/50 pt-0.5 font-medium"
+                                    >
+                                        <span>Had to beat</span>
+                                        <span class="tabular-nums">{{
+                                            row.difficulty
+                                        }}</span>
+                                    </p>
+                                    <p
+                                        v-for="part in row.bonus_parts"
+                                        :key="`b-${part.label}`"
+                                        class="flex justify-between gap-3 text-emerald-700 dark:text-emerald-400"
+                                    >
+                                        <span>{{ part.label }}</span>
+                                        <span class="tabular-nums">{{
+                                            signed(part.amount)
+                                        }}</span>
+                                    </p>
+                                    <p
+                                        v-if="!row.bonus_parts.length"
+                                        class="text-muted-foreground"
+                                    >
+                                        Nothing was added to this roll.
+                                    </p>
+                                </div>
+                            </div>
+                        </Transition>
+                    </div>
+                </div>
+
+                <!-- Word from elsewhere, at the same weight as the wait below it:
                  no badge, no colour, nothing to answer. The world has been
                  moving while they were busy, and this is the first time the
                  character rather than the reader gets to hear about it. -->
-            <p
-                v-if="heard"
-                class="mt-5 text-center text-sm text-muted-foreground italic"
-            >
-                {{ heard }}
-            </p>
+                <p
+                    v-if="heard"
+                    class="mt-5 text-center text-sm text-muted-foreground italic"
+                >
+                    {{ heard }}
+                </p>
 
-            <!-- And a line out of a book of theirs that is already closed,
+                <!-- And a line out of a book of theirs that is already closed,
                  at exactly the weight of the news above it. No badge, no
                  colour, nothing to answer — the shelf leaning in once, and
                  then leaving them to it. -->
-            <p
-                v-if="remembered"
-                class="mt-5 text-center text-sm text-muted-foreground italic"
-            >
-                {{ remembered }}
-            </p>
-
-            <!-- The wait ahead, offered where the player already is. The
-                 table is the one screen they sit on between turns, so the
-                 choice about the stretch after it belongs here — quiet,
-                 optional, and never in the way of reading the chapter. -->
-            <div class="mt-5">
-                <slot name="downtime" />
-            </div>
-
-            <div class="mt-6 flex flex-col items-center gap-3">
-                <button
-                    v-if="waitingOnPlayer && mine.length > 1"
-                    class="text-xs text-muted-foreground underline underline-offset-4 hover:text-foreground"
-                    @click="castAll"
+                <p
+                    v-if="remembered"
+                    class="mt-5 text-center text-sm text-muted-foreground italic"
                 >
-                    Throw them all
-                </button>
+                    {{ remembered }}
+                </p>
 
-                <Transition name="pop">
+                <div class="mt-6 flex flex-col items-center gap-3">
                     <button
-                        v-if="allSettled"
-                        class="sc-breathe rounded-lg bg-primary px-6 py-3 text-sm font-semibold text-primary-foreground"
-                        @click="done"
+                        v-if="waitingOnPlayer && mine.length > 1"
+                        class="text-xs text-muted-foreground underline underline-offset-4 hover:text-foreground"
+                        @click="castAll"
                     >
-                        Read the chapter →
+                        Throw them all
                     </button>
-                </Transition>
+
+                    <Transition name="pop">
+                        <button
+                            v-if="allSettled"
+                            class="sc-breathe rounded-lg bg-primary px-6 py-3 text-sm font-semibold text-primary-foreground"
+                            @click="done"
+                        >
+                            Read the chapter →
+                        </button>
+                    </Transition>
+                </div>
             </div>
         </div>
-
-        <!-- Click anywhere once the table is read. -->
-        <button
-            v-if="allSettled"
-            class="fixed inset-0 z-0 cursor-pointer"
-            aria-label="Continue to the chapter"
-            @click="done"
-        />
     </div>
 </template>

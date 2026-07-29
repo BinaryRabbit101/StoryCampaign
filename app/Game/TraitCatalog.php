@@ -22,6 +22,63 @@ class TraitCatalog
     }
 
     /**
+     * What somebody already walking beside you costs.
+     *
+     * A companion is real mechanical power — one more beat every turn, rolled
+     * in their own slot — so a character who arrives with a crew, a friend, or
+     * a dog pays for them out of the same allowance a long reach comes out of.
+     * Free would make it the one gift in the game nobody was priced for, and
+     * "powers come only from the engine-priced sheet and items" is not a rule
+     * that bends for a sympathetic one.
+     */
+    public static function companionCost(): int
+    {
+        return (int) config('game.companions.creation_cost', 2);
+    }
+
+    /** How many may walk in with the player, however many the interview named. */
+    public static function companionCap(): int
+    {
+        return max(0, (int) config('game.companions.creation_cap', 1));
+    }
+
+    /**
+     * The souls a sheet says are already at the player's side, clamped to the
+     * creation cap and reduced to what the engine can actually build: a name, a
+     * kind the signature table knows, and one line of who they are.
+     *
+     * Claude may propose these (the interview asks about the company you keep)
+     * and the point-buy path may too — but the engine authors the row either
+     * way, prices it, and never lets more than the cap through.
+     *
+     * @return list<array{name:string,kind:string,what:string}>
+     */
+    public static function companionsFrom(mixed $proposed): array
+    {
+        $clean = [];
+
+        foreach (is_array($proposed) ? $proposed : [] as $entry) {
+            $name = trim((string) (is_array($entry) ? ($entry['name'] ?? '') : $entry));
+
+            if ($name === '' || count($clean) >= self::companionCap()) {
+                continue;
+            }
+
+            $kind = is_array($entry) ? (string) ($entry['kind'] ?? 'npc') : 'npc';
+
+            $clean[] = [
+                'name' => mb_substr($name, 0, 40),
+                // The kind is what Companions keys a signature to, so it is
+                // clamped to the two the engine understands rather than trusted.
+                'kind' => in_array($kind, ['creature', 'npc'], true) ? $kind : 'npc',
+                'what' => mb_substr(trim((string) (is_array($entry) ? ($entry['what'] ?? '') : '')), 0, 140),
+            ];
+        }
+
+        return $clean;
+    }
+
+    /**
      * Gifts. `group` marks mutually exclusive tiers of the same thing.
      *
      * @return array<string, array{label: string, description: string, cost: int, group?: string, grants: list<array>}>
@@ -81,6 +138,15 @@ class TraitCatalog
                 'grants' => [['capability' => 'time_slow']]],
             'quickened-blood' => ['label' => 'Quickened blood', 'description' => 'In bursts, you move before anyone can answer. Spends from a charge pool.', 'cost' => 3,
                 'grants' => [['capability' => 'haste']]],
+
+            // Not a capability: a person. They arrive in the opening scene with
+            // their own slot on the turn, which is why they cost what a real
+            // gift costs. Two of them are deliberately not on offer — see
+            // `companions.creation_cap`.
+            'a-companion' => ['label' => 'Someone at your side', 'description' => 'You did not come here alone. One soul walks in with you — coordinated, never commanded, and they answer for how their own attempts go.', 'cost' => self::companionCost(), 'group' => 'company',
+                'companion' => ['kind' => 'npc']],
+            'a-creature' => ['label' => 'A creature at your heel', 'description' => 'Something that is not a person keeps pace with you, and has since before this tale started.', 'cost' => self::companionCost(), 'group' => 'company',
+                'companion' => ['kind' => 'creature']],
         ];
     }
 
@@ -245,8 +311,10 @@ class TraitCatalog
      *
      * @param  list<array>  $capabilities
      * @param  list<array>  $constraints
+     * @param  list<array>  $companions  Whoever the sheet says is already at
+     *                                   their side, each priced like a gift.
      */
-    public static function sheetBalance(array $capabilities, array $constraints): int
+    public static function sheetBalance(array $capabilities, array $constraints, array $companions = []): int
     {
         $points = self::startingPoints();
 
@@ -257,7 +325,7 @@ class TraitCatalog
             $points += self::constraintRefund($constraint);
         }
 
-        return $points;
+        return $points - count($companions) * self::companionCost();
     }
 
     /**
@@ -270,12 +338,22 @@ class TraitCatalog
      *
      * @param  list<array>  $capabilities
      * @param  list<array>  $constraints
+     * @param  list<array>  $companions
      * @return array{points: int, balance: int, gifts: list<array{label: string, cost: int}>, burdens: list<array{label: string, refund: int}>}
      */
-    public static function sheetLedger(array $capabilities, array $constraints): array
+    public static function sheetLedger(array $capabilities, array $constraints, array $companions = []): array
     {
         $gifts = [];
         $burdens = [];
+
+        // Named on the ledger like everything else. A gift the player cannot see
+        // the price of is a gift they cannot decide against.
+        foreach ($companions as $companion) {
+            $gifts[] = [
+                'label' => ($companion['name'] ?? 'someone').' at your side',
+                'cost' => self::companionCost(),
+            ];
+        }
 
         foreach ($capabilities as $entry) {
             $cost = self::capabilityCost($entry);
@@ -297,7 +375,7 @@ class TraitCatalog
 
         return [
             'points' => self::startingPoints(),
-            'balance' => self::sheetBalance($capabilities, $constraints),
+            'balance' => self::sheetBalance($capabilities, $constraints, $companions),
             'gifts' => $gifts,
             'burdens' => $burdens,
         ];
@@ -323,6 +401,7 @@ class TraitCatalog
         return 'Costs: time_slow 5; reach>8 or lift>120 4; intimidate, detect, haste, leap(2+), squeeze(small) 3; '
             .'most capabilities 2; swim, grapple, pull, throw, quiet_move, descend, delay, ready, leap(1) 1; '
             .'squeeze(large) −2 (a big body pays back). '
+            .'Someone already at your side costs '.self::companionCost().'. '
             .'Refunds: ponderous, stealth_penalty 2; any other real constraint 1.';
     }
 
@@ -332,16 +411,25 @@ class TraitCatalog
      * prose that will be written around them.
      *
      * @param  list<string>  $keys
-     * @return array{capabilities: list<array>, constraints: list<array>, health: int, gifts: list<string>, burdens: list<string>}
+     * @return array{capabilities: list<array>, constraints: list<array>, companions: list<array{kind:string,what:string}>, health: int, gifts: list<string>, burdens: list<string>}
      */
     public static function compile(array $keys): array
     {
         $all = self::all();
         $positives = self::positives();
-        $build = ['capabilities' => [], 'constraints' => [], 'health' => 0, 'gifts' => [], 'burdens' => []];
+        $build = ['capabilities' => [], 'constraints' => [], 'companions' => [], 'health' => 0, 'gifts' => [], 'burdens' => []];
 
         foreach ($keys as $key) {
             $entry = $all[$key];
+
+            // A soul rather than a capability. The name is not the catalog's to
+            // give — whoever builds the sheet names them.
+            if (isset($entry['companion']) && count($build['companions']) < self::companionCap()) {
+                $build['companions'][] = [
+                    'kind' => $entry['companion']['kind'],
+                    'what' => $entry['description'],
+                ];
+            }
 
             foreach ($entry['grants'] ?? [] as $grant) {
                 $build['capabilities'][] = [

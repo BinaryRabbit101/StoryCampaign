@@ -402,7 +402,19 @@ class DowntimeTest extends TestCase
         $this->assertSame(Downtime::REST, $next->fresh()->downtime['stance']);
     }
 
-    public function test_the_play_page_carries_the_offer_and_the_widget_carries_the_choice()
+    /**
+     * The play page no longer offers the wait at all.
+     *
+     * The picker was removed from both screens: it asked the player to price
+     * four abstractions against a stretch of real time they had not spent yet,
+     * and it read as noise between the dice and the chapter. Everything below
+     * this line still works — the offer is still written onto the turn, a stance
+     * recorded some other way is still paid out, and the widget still reports
+     * one — so the feature can come back without being rebuilt. What is gone is
+     * the surface: a player who submits and closes the app gets tempo regen and
+     * nothing else, which is exactly what happened before downtime existed.
+     */
+    public function test_the_play_page_no_longer_offers_the_wait_and_the_widget_still_carries_a_choice()
     {
         $campaign = $this->createCampaign();
         $turn = $this->openTurnWithOffer($campaign);
@@ -412,10 +424,10 @@ class DowntimeTest extends TestCase
 
         $this->actingAs($campaign->user)
             ->get("/play/{$campaign->id}")
-            ->assertInertia(fn ($page) => $page
-                ->where('turn.downtime.stance', null)
-                ->where('turn.downtime.offer.0.id', Downtime::REST)
-                ->has('turn.downtime.offer.0.terms'));
+            ->assertInertia(fn ($page) => $page->missing('turn.downtime'));
+
+        // ...while the engine's own record of it is untouched.
+        $this->assertNotEmpty($turn->fresh()->downtime['offer']);
 
         Downtime::choose($turn->fresh(), Downtime::WATCH);
 

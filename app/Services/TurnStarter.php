@@ -3,6 +3,7 @@
 namespace App\Services;
 
 use App\Game\Engine\CardComposer;
+use App\Game\Engine\Companions;
 use App\Game\Engine\Dice;
 use App\Game\Engine\SceneDresser;
 use App\Game\Engine\SituationBoard;
@@ -29,7 +30,13 @@ class TurnStarter
         private readonly ZoneForge $forge,
     ) {}
 
-    public function openFirstTurn(Campaign $campaign, ?array $opening = null): Turn
+    /**
+     * @param  list<array{name:string,kind:string,what?:string}>  $companions  Whoever
+     *                                                                         the finished sheet paid for at their side. Separate from the opening
+     *                                                                         plan on purpose: a tale whose stage plan fell through still walks in
+     *                                                                         with the company the player bought.
+     */
+    public function openFirstTurn(Campaign $campaign, ?array $opening = null, array $companions = []): Turn
     {
         // Every tale opens in its own forged world. The interviewer forges
         // it ahead of the transaction; this is the defensive fallback.
@@ -56,6 +63,14 @@ class TurnStarter
         } else {
             $this->dresser->instantiateFeatures($scene, $dice, 2, 3);
             $this->dresser->spawnActors($scene, $dice, 0, 2);
+        }
+
+        // Whoever walked in with them. Paid for on the creation ledger and
+        // planted before the cards are composed, so their own request slot is on
+        // the very first turn — a companion the player bought and then could not
+        // ask anything of until turn two would read as the sheet lying.
+        foreach ($companions as $companion) {
+            Companions::plant($scene, $companion);
         }
 
         // The air the tale opens in, rolled once and kept. It has to land

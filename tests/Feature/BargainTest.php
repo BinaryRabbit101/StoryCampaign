@@ -200,12 +200,25 @@ class BargainTest extends TestCase
         return $beat;
     }
 
-    /** @return list<array> */
+    /**
+     * The deals on the table, counted as BEATS.
+     *
+     * Every one of the player's three picks offers the same list now, so one
+     * deal reaches the player as three cards with three ids — one per position
+     * it may be taken in. "One deal per turn" is a statement about how many
+     * bargained beats the pass created, so the copies collapse here on the
+     * identity that made them: the verb, the thing, and the deal itself.
+     *
+     * @return list<array>
+     */
     private function bargainsIn(array $cards): array
     {
         return collect($cards)->only(['pre', 'main', 'post'])
             ->flatMap(fn (array $slot) => $slot)
             ->filter(fn (array $c) => ($c['bargain'] ?? null) !== null)
+            ->unique(fn (array $c) => implode('|', [
+                $c['verb'], $c['target']['id'] ?? '-', $c['bargain']['key'],
+            ]))
             ->values()->all();
     }
 

@@ -12,7 +12,7 @@ import {
     stanceDelta,
 } from '@/lib/odds';
 import type { CarriedBonus } from '@/lib/odds';
-import type { ActionCard, SlotChoice } from '@/types/game';
+import type { ActionCard, CardModifier, SlotChoice } from '@/types/game';
 
 /**
  * HOW: the last step of the sentence.
@@ -83,6 +83,16 @@ const dc = (card: ActionCard) =>
               card.id === props.card.id ? stance.value : 'balanced',
           )
         : null;
+
+/** What the option now chosen on this row trades, in the engine's own words. */
+function terms(modifier: CardModifier): string | null {
+    const chosen = props.choice.modifiers[modifier.key];
+
+    return (
+        modifier.options.find((option) => option.value === chosen)?.terms ??
+        null
+    );
+}
 
 function setModifier(key: string, value: string) {
     emit('update:choice', {
@@ -307,6 +317,19 @@ const placeholder = computed(
                         >
                     </button>
                 </div>
+                <!-- And what that number is the price of.
+                     A difficulty delta alone is unreadable on half the verbs in
+                     the game: creeping away priced under sprinting away looks
+                     like the engine claiming running is harder than tiptoeing,
+                     because the delta is one side of a trade whose other side —
+                     which results stay on the table — was never on screen. The
+                     engine states both; this only prints the one now chosen. -->
+                <p
+                    v-if="terms(modifier)"
+                    class="mt-1 text-[11px] text-muted-foreground"
+                >
+                    {{ terms(modifier) }}
+                </p>
             </div>
         </div>
 

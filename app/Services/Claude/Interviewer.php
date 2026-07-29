@@ -5,6 +5,7 @@ namespace App\Services\Claude;
 use App\Game\Capability;
 use App\Game\Engine\Scars;
 use App\Game\Meters;
+use App\Game\NameForge;
 use App\Game\TraitCatalog;
 use App\Models\Campaign;
 use App\Models\Chapter;
@@ -286,7 +287,10 @@ LANDING;
 
         $clamped = $this->clamp->clamp($sheet['capabilities'] ?? []);
         $constraints = array_merge($sheet['constraints'] ?? [], $clamped['constraints']);
-        $ledger = TraitCatalog::sheetLedger($clamped['capabilities'], $constraints);
+        // Whoever the draft says is already at their side, clamped to the
+        // creation cap and priced on the same ledger as a long reach.
+        $companions = TraitCatalog::companionsFrom($sheet['companions'] ?? []);
+        $ledger = TraitCatalog::sheetLedger($clamped['capabilities'], $constraints, $companions);
 
         return $ledger + [
             'name' => $sheet['name'] ?? null,
@@ -361,7 +365,10 @@ PROMPT)) ?: $this->stockPrologue($name);
         $sheet = $response['character'];
         $clamped = $this->clamp->clamp($sheet['capabilities'] ?? []);
         $allConstraints = array_merge($sheet['constraints'] ?? [], $clamped['constraints']);
-        $balance = TraitCatalog::sheetBalance($clamped['capabilities'], $allConstraints);
+        // The company they keep, engine-authored from whatever the interview
+        // said about it, capped, and priced into the same balance below.
+        $companions = TraitCatalog::companionsFrom($sheet['companions'] ?? []);
+        $balance = TraitCatalog::sheetBalance($clamped['capabilities'], $allConstraints, $companions);
 
         // The same coin as the point-buy path: the sheet must break even
         // against the creation allowance. The running balance is on screen
@@ -399,7 +406,7 @@ PROMPT)) ?: $this->stockPrologue($name);
         $this->forge->ensureStartingZone($campaign);
         $opening = $this->stage->plan($campaign, $sheet['description'] ?? '');
 
-        $turn = DB::transaction(function () use ($campaign, $opening, $sheet, $clamped) {
+        $turn = DB::transaction(function () use ($campaign, $opening, $sheet, $clamped, $companions) {
 
             $meters = Meters::default();
             foreach ($clamped['capabilities'] as $entry) {
@@ -436,7 +443,7 @@ PROMPT)) ?: $this->stockPrologue($name);
 
             $campaign->update(['status' => 'active', 'started_at' => now(), 'pending_sheet' => null]);
 
-            return $this->starter->openFirstTurn($campaign, $opening);
+            return $this->starter->openFirstTurn($campaign, $opening, $companions);
         });
 
         // Written last, into the scene that now exists — see landing().
@@ -468,12 +475,25 @@ PROMPT)) ?: $this->stockPrologue($name);
             $build['burdens'][] = 'a debt to the world';
         }
 
+        // The catalog prices a companion and says what kind they are; it has no
+        // business naming one. The die that suggests the hero's name suggests
+        // theirs too, off the same seeded pool, skipping whatever the player
+        // took for themselves.
+        $companions = [];
+        $pool = array_values(array_filter(
+            NameForge::pool($campaign->id, 12),
+            fn (string $suggestion) => mb_strtolower($suggestion) !== mb_strtolower($name),
+        ));
+        foreach ($build['companions'] as $index => $companion) {
+            $companions[] = $companion + ['name' => $pool[$index] ?? 'a familiar face'];
+        }
+
         // Slow CLI calls run before the transaction, as everywhere else.
         $this->forge->ensureStartingZone($campaign);
         $prose = $this->traitProse($campaign, $name, $build);
         $opening = $this->stage->plan($campaign, $prose['description']);
 
-        $turn = DB::transaction(function () use ($campaign, $build, $name, $prose, $opening) {
+        $turn = DB::transaction(function () use ($campaign, $build, $name, $prose, $opening, $companions) {
             $meters = Meters::default();
             $meters['health']['max'] = max(4, $meters['health']['max'] + $build['health']);
             $meters['health']['current'] = $meters['health']['max'];
@@ -517,7 +537,7 @@ PROMPT)) ?: $this->stockPrologue($name);
 
             $campaign->update(['status' => 'active', 'started_at' => now()]);
 
-            return $this->starter->openFirstTurn($campaign, $opening);
+            return $this->starter->openFirstTurn($campaign, $opening, $companions);
         });
 
         // Written last, into the scene that now exists — see landing().
@@ -677,6 +697,7 @@ PROMPT);
         $stageSection = $stage === '' ? '' : "\n## The player set the stage (speak and shape the prologue in its spirit)\n{$stage}\n";
         $points = TraitCatalog::startingPoints();
         $prices = TraitCatalog::priceSheetForPrompt();
+        $companionCost = TraitCatalog::companionCost();
 
         return <<<PROMPT
 You are conducting an in-world character creation interview for a living-world RPG. The player describes their character narratively; you translate it under the hood into a clean structured loadout. Ask one short, evocative question per reply.
@@ -695,6 +716,7 @@ Rules:
 - Magnitudes are clamped by the engine regardless of what you write; keep them modest (reach ≤ 15, lift ≤ 250 at creation).
 - Scoped social powers: e.g. intimidate should carry {"vs": "regular"} so it does not flatten elite encounters.
 - attack_styles: 3-6 short phrases for how this body attacks (e.g. "a bite", "a rake of claws", "a tail-whip", "a shoulder-slam"). Narration vocabulary only — they never change outcomes.
+- companions: if the player says they do not travel alone — a friend, a crewmate, a hired hand, a dog — put that ONE soul on the sheet as {"name": "...", "kind": "npc" or "creature", "what": "<one short line of who they are>"}. At most one, and only when the player actually said so: never invent company they did not mention, and never talk them out of it either. Someone at your side costs {$companionCost} of the same points a gift costs (they act on their own beat every turn), so it is a real part of the bargain — ask what carrying them costs the character, the same way you ask about any other gift. If they mention a whole crew, pick the one who is genuinely walking beside them and let the rest be people the world can hold.
 
 ## Transcript so far
 {$transcript}
@@ -703,7 +725,7 @@ Respond with ONLY a JSON object:
 {
   "reply": "<your next in-world line to the player>",
   "suggestions": <3-4 example answers to YOUR question, each in the PLAYER's voice and sendable exactly as written — one plain sentence, ≤ 160 characters. Pull them in genuinely different directions (different bodies, prices, temperaments), so a stuck player discovers what kinds of answers are possible.>,
-  "character": <ALWAYS your best current draft, never null — even after one exchange, even if half-guessed. This is what the player sees priced on screen and what they step into the world as if they press Begin now, so it must always be a playable sheet: {"name": "...", "description": "<2-3 sentence distillation>", "attack_styles": ["a bite", "a rake of claws", ...], "capabilities": [{"capability": "reach", "magnitude": 12, "grade": null, "scope": null}, ...], "constraints": [{"name": "stealth_penalty", "params": {"size": "large"}, "coupled_capability": "intimidate"}, ...]}>
+  "character": <ALWAYS your best current draft, never null — even after one exchange, even if half-guessed. This is what the player sees priced on screen and what they step into the world as if they press Begin now, so it must always be a playable sheet: {"name": "...", "description": "<2-3 sentence distillation>", "attack_styles": ["a bite", "a rake of claws", ...], "capabilities": [{"capability": "reach", "magnitude": 12, "grade": null, "scope": null}, ...], "constraints": [{"name": "stealth_penalty", "params": {"size": "large"}, "coupled_capability": "intimidate"}, ...], "companions": [] or one entry as described above}>
 }
 
 Keep this reply SHORT. The player is waiting on it in a live conversation, and there may be many exchanges before they are done — no prologue, no long prose, just the question and the draft behind it.

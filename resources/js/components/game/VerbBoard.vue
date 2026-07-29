@@ -111,6 +111,19 @@ watch(chosen, (card) => {
     }
 });
 
+/**
+ * Whether a word reads as chosen.
+ *
+ * A word carrying several verbs used to answer a tap by opening its drawer and
+ * lighting nothing — so the press produced a list somewhere below and no mark on
+ * the thing that had just been pressed, which reads as a tap that missed. A word
+ * whose drawer is open is a word the player is inside; it lights.
+ */
+const lit = (word: BoardWord) =>
+    props.selectedId !== null && chosen.value?.family === word.key
+        ? true
+        : openWord.value === word.key;
+
 /** The honest version first: a deal is never what a tap lands on by default. */
 const firstOf = (cards: ActionCard[]) =>
     cards.find((c) => c.bargain === null) ?? cards[0];
@@ -143,11 +156,11 @@ function tapVerb(group: VerbGroup) {
                 :key="word.key"
                 type="button"
                 :disabled="word.count === 0"
-                class="flex flex-col items-center gap-0.5 rounded-lg border px-1 py-2 text-[11px] font-semibold tracking-widest uppercase transition-all duration-200"
+                class="flex flex-col items-center gap-0.5 rounded-lg border px-1 py-2 text-[11px] font-semibold tracking-widest uppercase transition-all duration-200 active:scale-95"
                 :class="
                     word.count === 0
                         ? 'cursor-default border-dashed border-sidebar-border/50 text-muted-foreground/40'
-                        : chosen?.family === word.key
+                        : lit(word)
                           ? 'border-violet-500 bg-violet-500/10 text-violet-700 ring-1 ring-violet-500 dark:text-violet-300'
                           : 'border-sidebar-border/70 hover:-translate-y-0.5 hover:bg-accent/60 dark:border-sidebar-border'
                 "

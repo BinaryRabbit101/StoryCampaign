@@ -196,6 +196,12 @@ class TurnResolver
                     $conditions['prior_failure'] = true;
                 }
 
+                // The ground's answer, written down. A way that has been tried
+                // and refused stops being offered for the rest of this scene —
+                // read only by the composer, and only for the short closed list
+                // of verbs where a failure genuinely settles something.
+                Attempts::record($scene, $outcome);
+
                 // The endeavor, moved by the beat that just landed — only if
                 // the clock named this verb, and only if the die did not
                 // simply fail. The clock's own row decides both, which is the
@@ -752,7 +758,12 @@ class TurnResolver
             $degree = BeatOutcome::FAILURE;
         }
 
-        $facts = $this->applyBeatEffects($verb, $card, $degree, $approach, $character, $scene, $conditions, $dice, $crit);
+        // What a conversation was FOR, when the card offered the choice. It
+        // decides which of two legal readings of the same beat happens — never
+        // how hard the beat was, which is why it reaches only the effects and
+        // never the ledger above.
+        $facts = $this->applyBeatEffects($verb, $card, $degree, $approach, $character, $scene, $conditions, $dice, $crit,
+            intent: $choice['modifiers']['intent'] ?? null);
 
         if ($crit !== null) {
             $facts = array_merge(
@@ -1015,13 +1026,47 @@ class TurnResolver
     }
 
     /**
+     * Somebody asked to walk on with them, and whatever came of it.
+     *
+     * One place, two callers: the conversation whose intent was the ask, and the
+     * older `recruit` card that turns composed before the fold still carry.
+     * Joining stays consensual on both sides and still goes through the single
+     * door every companion comes through — Companions::join — so the bond ladder
+     * has exactly one entrance no matter which card reached it.
+     *
+     * @return list<string>
+     */
+    private function askedAlong(?Actor $actor, Scene $scene, string $degree, bool $succeeded, string $targetName): array
+    {
+        if ($succeeded && $actor !== null && ! Companions::atCap($scene)) {
+            Companions::join($actor, Companions::ASKED);
+
+            return ["{$actor->name} fell in beside them — a companion now, walking the same tale."];
+        }
+
+        if ($succeeded && $actor !== null) {
+            return ["{$actor->name} was willing enough — but there was no room beside them for another, and both of them could see it."];
+        }
+
+        if ($degree === BeatOutcome::PARTIAL && $actor !== null) {
+            $tags = $actor->tags ?? [];
+            $tags['disposition'] = 'swayed';
+            $actor->update(['tags' => $tags]);
+
+            return ["{$actor->name} wavered — not yet, but the door is open."];
+        }
+
+        return ["{$targetName} would not be drawn into it."];
+    }
+
+    /**
      * @param  string|null  $crit  The natural face, when it was 20 or 1. The
      *                             degree above already carries the crit's
      *                             verdict; this only sharpens how hard the
      *                             verb's own effect lands.
      * @return list<string>
      */
-    private function applyBeatEffects(string $verb, array $card, string $degree, string $approach, Character $character, Scene $scene, array &$conditions, Dice $dice, ?string $crit = null): array
+    private function applyBeatEffects(string $verb, array $card, string $degree, string $approach, Character $character, Scene $scene, array &$conditions, Dice $dice, ?string $crit = null, ?string $intent = null): array
     {
         $facts = [];
         $targetName = $card['target']['name'] ?? 'the scene';
@@ -1128,10 +1173,20 @@ class TurnResolver
                 break;
 
             case Verb::Speak:
+                $actor = Actor::find($card['target']['id']);
+
+                // The ask, when the card offered it as what this conversation
+                // was for. Same door every companion comes through, same
+                // consent, same cap — only the way in is a chip on the
+                // conversation now instead of a second verb beside it.
+                if ($intent === 'recruit') {
+                    $facts = array_merge($facts, $this->askedAlong($actor, $scene, $degree, $succeeded, $targetName));
+                    break;
+                }
+
                 // Plain conversation: no trained tongue behind it, so it
                 // opens a door at best — it never routs anyone the way the
                 // capability verbs can.
-                $actor = Actor::find($card['target']['id']);
                 if ($succeeded && $actor !== null) {
                     $tags = $actor->tags ?? [];
                     $tags['disposition'] = 'swayed';
@@ -1346,22 +1401,13 @@ class TurnResolver
                 break;
 
             case Verb::Recruit:
-                $actor = Actor::find($card['target']['id']);
-                if ($succeeded && $actor !== null && ! Companions::atCap($scene)) {
-                    // The asked path into the same one door every companion
-                    // comes through, so the bond ladder has exactly one entrance.
-                    Companions::join($actor, Companions::ASKED);
-                    $facts[] = "{$actor->name} fell in beside them — a companion now, walking the same tale.";
-                } elseif ($succeeded && $actor !== null) {
-                    $facts[] = "{$actor->name} was willing enough — but there was no room beside them for another, and both of them could see it.";
-                } elseif ($degree === BeatOutcome::PARTIAL && $actor !== null) {
-                    $tags = $actor->tags ?? [];
-                    $tags['disposition'] = 'swayed';
-                    $actor->update(['tags' => $tags]);
-                    $facts[] = "{$actor->name} wavered — not yet, but the door is open.";
-                } else {
-                    $facts[] = "{$targetName} would not be drawn into it.";
-                }
+                // Recruiting is a chip on the conversation now (see Speak
+                // above), but turns composed before that change still carry
+                // this card and still have to resolve exactly as they were
+                // offered.
+                $facts = array_merge($facts, $this->askedAlong(
+                    Actor::find($card['target']['id']), $scene, $degree, $succeeded, $targetName,
+                ));
                 break;
 
             case Verb::CompanionBlock:

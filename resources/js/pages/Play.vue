@@ -8,13 +8,10 @@ import {
     ref,
 } from 'vue';
 import AmbientBackdrop from '@/components/game/AmbientBackdrop.vue';
-import DowntimePicker from '@/components/game/DowntimePicker.vue';
-import HowPanel from '@/components/game/HowPanel.vue';
+import BeatPicker from '@/components/game/BeatPicker.vue';
 import RecapPanel from '@/components/game/RecapPanel.vue';
 import RiderList from '@/components/game/RiderList.vue';
-import TargetStrip from '@/components/game/TargetStrip.vue';
-import VerbBoard from '@/components/game/VerbBoard.vue';
-import { difficultyAt, signed, targetKey, type TargetOption } from '@/lib/odds';
+import { costClass, reasonsFor, signed } from '@/lib/odds';
 import { enablePush } from '@/lib/push';
 import type {
     ActionCard,
@@ -23,7 +20,6 @@ import type {
     ChapterEvent,
     CharacterItem,
     CharacterMeters,
-    DowntimeOffer,
     Endeavor,
     GrowthMessage,
     Memento,
@@ -77,12 +73,6 @@ const props = defineProps<{
         /** The same facts as `situation`, grouped. Null on pre-board turns. */
         board: SituationGroup[] | null;
         cards: TurnCards | null;
-        /**
-         * How the idle stretch before this turn is played may be spent.
-         * Null on turns opened before downtime existed — the picker simply
-         * does not appear, and the wait passes as it always did.
-         */
-        downtime: DowntimeOffer | null;
     } | null;
     /**
      * The multi-turn goal the player took on, if they took one on. Null the
@@ -135,9 +125,17 @@ const DiceTable = defineAsyncComponent(
     () => import('@/components/game/DiceTable.vue'),
 );
 
-const pre = ref<SlotChoice | null>(null);
-const main = ref<SlotChoice | null>(null);
-const post = ref<SlotChoice | null>(null);
+/**
+ * The turn being assembled: three beats, keyed by the slot they resolve in.
+ *
+ * One record rather than three refs, because the three picks are now the same
+ * offer read three times and the page walks them as a list.
+ */
+const plan = ref<Record<'pre' | 'main' | 'post', SlotChoice | null>>({
+    pre: null,
+    main: null,
+    post: null,
+});
 // One independent request per companion, keyed by companion id — their own
 // beat, never a claim on the player's three slots.
 const companionChoices = ref<Record<number, SlotChoice | null>>({});
@@ -171,12 +169,6 @@ const stalled = computed(() => props.narrationStalled && !locked.value);
 // the opposite of help. Empty groups are simply absent, so a quiet place
 // shows a short board rather than a list of reassurances nobody asked for.
 const board = computed<SituationGroup[]>(() => props.turn?.board ?? []);
-
-// The wait ahead, offered while the turn is open. Optional by construction:
-// nothing on this page waits for it, and no answer is a legal answer.
-const downtime = computed<DowntimeOffer | null>(
-    () => props.turn?.downtime ?? null,
-);
 
 // Turns opened before the board existed still carry the prose they were
 // written with. Nothing is lost on an old save; it just reads as one line.
@@ -267,11 +259,15 @@ interface Detail {
 
 const detail = ref<Detail | null>(null);
 
-// The detail card opens where the tapped anchor sits, not at a fixed spot
-// below the prose: the chapter article is the positioning context, and the
-// panel's top tracks the clicked element within it.
-const chapterEl = ref<HTMLElement | null>(null);
-const detailTop = ref(0);
+// The card opens beside whatever was tapped, wherever that was.
+//
+// It used to be positioned inside the chapter article, which was fine while the
+// chapter was the only thing carrying anchors. The situation board carries them
+// now too, and an anchor there would have opened its card several hundred pixels
+// up the page inside a different element. So the panel is anchored to the
+// viewport instead, off the clicked element's own rectangle, and it flips above
+// the anchor when there is no room below.
+const detailPos = ref({ top: 0, left: 0, flip: false });
 
 const detailEl = ref<HTMLElement | null>(null);
 
@@ -281,12 +277,22 @@ function openDetail(next: Detail, e: MouseEvent) {
         return;
     }
     detail.value = next;
+
     const anchor = e.currentTarget as HTMLElement | null;
-    if (anchor && chapterEl.value) {
-        const article = chapterEl.value.getBoundingClientRect();
-        detailTop.value =
-            anchor.getBoundingClientRect().bottom - article.top + 6;
-    }
+    if (!anchor) return;
+
+    const rect = anchor.getBoundingClientRect();
+    const width = Math.min(384, window.innerWidth - 24);
+    const flip = rect.bottom > window.innerHeight - 240;
+
+    detailPos.value = {
+        top: flip ? rect.top - 6 : rect.bottom + 6,
+        left: Math.min(
+            Math.max(12, rect.left - 12),
+            Math.max(12, window.innerWidth - width - 12),
+        ),
+        flip,
+    };
 }
 
 // Anywhere outside dismisses it. The card sits over the prose the reader is
@@ -305,6 +311,12 @@ function dismissDetail(e: Event) {
 
 function dismissOnEscape(e: KeyboardEvent) {
     if (e.key === 'Escape') detail.value = null;
+}
+
+// The card is pinned to the viewport and its anchor is not, so a scroll would
+// leave the two pointing at different things. Closing is the honest answer.
+function dismissOnScroll() {
+    detail.value = null;
 }
 
 const degreeClass = (event: ChapterEvent) =>
@@ -386,11 +398,50 @@ interface Segment {
     entity: ChapterEntity | null;
 }
 
+/**
+ * One run of text, split around every name the engine says can be touched.
+ *
+ * Used by the chapter and by the situation board both: the board names the same
+ * people and the same ground the prose does, and a name that is tappable in a
+ * paragraph and dead in a list two inches below it teaches the player that the
+ * anchors are decoration.
+ */
+function entitySegments(text: string): Segment[] {
+    const matcher = entityMatcher.value;
+
+    if (!matcher || !text) {
+        return [{ text, event: null, entity: null }];
+    }
+
+    const segments: Segment[] = [];
+    let cursor = 0;
+    matcher.pattern.lastIndex = 0;
+
+    for (const hit of text.matchAll(matcher.pattern)) {
+        const entity = matcher.byName.get(hit[1].toLowerCase());
+        if (!entity || hit.index === undefined) continue;
+        if (hit.index > cursor) {
+            segments.push({
+                text: text.slice(cursor, hit.index),
+                event: null,
+                entity: null,
+            });
+        }
+        segments.push({ text: hit[0], event: null, entity });
+        cursor = hit.index + hit[0].length;
+    }
+
+    if (cursor < text.length) {
+        segments.push({ text: text.slice(cursor), event: null, entity: null });
+    }
+
+    return segments;
+}
+
 // The chapter body split around both kinds of anchor. Unknown [[eN]] tokens
 // vanish silently; the stored body itself is never rewritten.
 const bodySegments = computed<Segment[]>(() => {
     const body = props.latestChapter?.body ?? '';
-    const matcher = entityMatcher.value;
     const segments: Segment[] = [];
 
     for (const part of body.split(/(\[\[e\d+\]\])/)) {
@@ -404,37 +455,21 @@ const bodySegments = computed<Segment[]>(() => {
             continue;
         }
 
-        if (!matcher || !part) {
-            segments.push({ text: part, event: null, entity: null });
-            continue;
-        }
-
-        let cursor = 0;
-        matcher.pattern.lastIndex = 0;
-        for (const hit of part.matchAll(matcher.pattern)) {
-            const entity = matcher.byName.get(hit[1].toLowerCase());
-            if (!entity || hit.index === undefined) continue;
-            if (hit.index > cursor) {
-                segments.push({
-                    text: part.slice(cursor, hit.index),
-                    event: null,
-                    entity: null,
-                });
-            }
-            segments.push({ text: hit[0], event: null, entity });
-            cursor = hit.index + hit[0].length;
-        }
-        if (cursor < part.length) {
-            segments.push({
-                text: part.slice(cursor),
-                event: null,
-                entity: null,
-            });
-        }
+        segments.push(...entitySegments(part));
     }
 
     return segments;
 });
+
+/**
+ * Every moment of record from the last chapter, in one row.
+ *
+ * The same icons the prose carries, gathered where the form is. They are read
+ * for the same reason the board is — to price what to do next — and reaching
+ * them meant scrolling back up through a page of serif prose to hunt for a
+ * glyph mid-sentence.
+ */
+const chapterMoments = computed(() => props.latestChapter?.events ?? []);
 
 // Events the narrator failed to anchor (or pre-feature chapters): still shown,
 // as a row of moments under the chapter, so no data is ever lost.
@@ -445,41 +480,71 @@ const unanchoredEvents = computed(() => {
     );
 });
 
+// ---- The turn: three beats, one list ----
+//
+// The engine offers the SAME cards for all three positions now, so the three
+// picks are three readings of one list rather than an act flanked by two short
+// piles of leftovers. Order still means everything — a set-up beat is only worth
+// anything ahead of the thing it sets up — so the picks are numbered and resolve
+// in that order, and each one is priced against what the ones ahead of it grant.
+//
+// Nothing here composes anything. Every tap terminates in a card id the engine
+// offered FOR THAT SLOT, and the payload leaving this page is the same shape it
+// always was: {pre?, main, post?, companions} of ids, modifiers, and notes.
+
+const STEPS = [
+    {
+        slot: 'pre' as const,
+        step: 1,
+        title: 'First',
+        hint: 'before the act',
+        required: false,
+    },
+    {
+        slot: 'main' as const,
+        step: 2,
+        title: 'The act',
+        hint: 'the beat this turn turns on',
+        required: true,
+    },
+    {
+        slot: 'post' as const,
+        step: 3,
+        title: 'Then',
+        hint: 'if the moment still allows it',
+        required: false,
+    },
+];
+
+/** One pick open at a time; the act is what the form opens on. */
+const openStep = ref<'pre' | 'main' | 'post' | null>('main');
+
+function toggleStep(slot: 'pre' | 'main' | 'post') {
+    openStep.value = openStep.value === slot ? null : slot;
+}
+
+const cardsIn = (slot: 'pre' | 'main' | 'post'): ActionCard[] =>
+    props.turn?.cards?.[slot] ?? [];
+
+const cardFor = (slot: 'pre' | 'main' | 'post'): ActionCard | null => {
+    const choice = plan.value[slot];
+
+    return choice === null
+        ? null
+        : (cardsIn(slot).find((c) => c.id === choice.card_id) ?? null);
+};
+
+const mainCard = computed<ActionCard | null>(() => cardFor('main'));
+
 /**
- * What the set-up beats already chosen will hand to the beats after them.
+ * The grants a set of chosen cards hands to whatever resolves after them.
  *
- * The engine states this on each card ("readied — +2 to whatever comes next")
- * so the page never has to re-derive the rules; it only adds up the cards the
- * player has actually picked. Passed down so the act's difficulty is quoted
- * against the plan being assembled rather than against an empty one.
+ * The engine states each one on the card that buys it ("readied — +2 to whatever
+ * comes next"), so the page never re-derives the rules; it only adds up what the
+ * player has actually picked.
  */
-const setupGrants = computed(() => {
-    const chosen: ActionCard[] = [];
-
-    if (pre.value && props.turn?.cards) {
-        const card = props.turn.cards.pre.find(
-            (c) => c.id === pre.value!.card_id,
-        );
-        if (card) {
-            chosen.push(card);
-        }
-    }
-
-    for (const companion of props.turn?.cards?.companions ?? []) {
-        const choice = companionChoices.value[companion.id];
-
-        if (!choice) {
-            continue;
-        }
-
-        const card = companion.cards.find((c) => c.id === choice.card_id);
-
-        if (card) {
-            chosen.push(card);
-        }
-    }
-
-    return chosen
+function grantsOf(cards: ActionCard[]) {
+    return cards
         .map((card) => card.forecast.grant)
         .filter((grant): grant is NonNullable<typeof grant> => grant !== null)
         .map((grant) => ({
@@ -489,115 +554,64 @@ const setupGrants = computed(() => {
             verbs: grant.verbs,
             slot: grant.slot,
         }));
+}
+
+/** The companion requests standing on this turn, as cards. */
+const companionCards = computed<ActionCard[]>(() => {
+    const chosen: ActionCard[] = [];
+
+    for (const companion of props.turn?.cards?.companions ?? []) {
+        const choice = companionChoices.value[companion.id];
+        if (!choice) continue;
+        const card = companion.cards.find((c) => c.id === choice.card_id);
+        if (card) chosen.push(card);
+    }
+
+    return chosen;
 });
 
-// ---- The sentence ----
-//
-// VERB, then WHAT, then HOW. Every step is a lens over the cards the engine
-// already offered: the board lights a word only when a card sits under it, and
-// every tap here terminates in one of those card ids. Nothing on this page
-// composes anything, and the payload leaving it is the same shape it always
-// was — {pre?, main, post?, companions} of ids, modifiers, and notes.
+/**
+ * What is already promised to a given pick by the time it resolves.
+ *
+ * Resolution order is pre → companions → main → post, and the quoting follows it
+ * exactly: nothing is ahead of the first beat, and a companion's flank cannot
+ * help the beat the player already spent before asking for it.
+ */
+function carriedFor(slot: 'pre' | 'main' | 'post' | 'companion') {
+    const preCard = cardFor('pre');
+    const ahead: ActionCard[] = preCard ? [preCard] : [];
 
-const mainCards = computed<ActionCard[]>(() => props.turn?.cards?.main ?? []);
-
-const mainCard = computed<ActionCard | null>(
-    () => mainCards.value.find((c) => c.id === main.value?.card_id) ?? null,
-);
-
-/** Every card standing under the verb currently chosen. */
-const verbCards = computed(() =>
-    mainCard.value === null
-        ? []
-        : mainCards.value.filter((c) => c.verb === mainCard.value!.verb),
-);
-
-const chosenTargetKey = computed(() =>
-    mainCard.value === null ? null : targetKey(mainCard.value),
-);
-
-const stanceFor = (card: ActionCard) =>
-    card.id === main.value?.card_id
-        ? (main.value.modifiers.approach ?? 'balanced')
-        : 'balanced';
-
-/** WHAT: one chip per thing this verb can be aimed at, each with its own DC. */
-const mainTargets = computed<TargetOption[]>(() => {
-    const grouped = new Map<string, ActionCard[]>();
-
-    for (const card of verbCards.value) {
-        const key = targetKey(card);
-        grouped.set(key, [...(grouped.get(key) ?? []), card]);
+    if (slot === 'pre') {
+        return grantsOf([]);
     }
 
-    return [...grouped.entries()].map(([key, cards]) => {
-        const shown =
-            cards.find((c) => c.id === main.value?.card_id) ?? cards[0];
-
-        return {
-            key,
-            name: shown.target?.name ?? shown.label,
-            difficulty: shown.forecast.rolls
-                ? difficultyAt(shown, stanceFor(shown))
-                : null,
-            risk: shown.risk,
-        };
-    });
-});
-
-/** HOW: the manners and the deal available on the target now chosen. */
-const mainVariants = computed(() =>
-    verbCards.value.filter((c) => targetKey(c) === chosenTargetKey.value),
-);
-
-function choiceFor(card: ActionCard, note = ''): SlotChoice {
-    const modifiers: Record<string, string> = {};
-
-    for (const modifier of card.modifiers) {
-        modifiers[modifier.key] = modifier.options[0]?.value ?? '';
+    if (slot === 'companion') {
+        return grantsOf(ahead);
     }
 
-    return { card_id: card.id, modifiers, note };
-}
+    ahead.push(...companionCards.value);
 
-/** A new verb is a new beat, so the words written for the old one go with it. */
-function pickVerb(card: ActionCard) {
-    main.value = choiceFor(card);
-}
-
-/** A new target or manner is the same beat re-aimed — the note survives it. */
-function pickVariant(card: ActionCard) {
-    if (card.id !== main.value?.card_id) {
-        main.value = choiceFor(card, main.value?.note ?? '');
+    if (slot === 'post') {
+        const act = cardFor('main');
+        if (act) ahead.push(act);
     }
+
+    return grantsOf(ahead);
 }
 
-function pickTarget(key: string) {
-    const cards = verbCards.value.filter((c) => targetKey(c) === key);
-    // The honest version first: a deal is never what a tap lands on by default.
-    const card = cards.find((c) => c.bargain === null) ?? cards[0];
-
-    if (card) {
-        pickVariant(card);
-    }
-}
+/** What a companion's request is priced against: the set-up beat ahead of it. */
+const companionCarried = computed(() => carriedFor('companion'));
 
 // Staged, visible resource commitment: the running cost of the whole chain.
 const runningCost = computed(() => {
     const totals: Record<string, number> = {};
-    for (const [choice, slot] of [
-        [pre.value, 'pre'],
-        [main.value, 'main'],
-        [post.value, 'post'],
-    ] as const) {
-        if (!choice || !props.turn?.cards) continue;
-        const card = props.turn.cards[slot].find(
-            (c) => c.id === choice.card_id,
-        );
-        for (const cost of card?.cost ?? []) {
+
+    for (const step of STEPS) {
+        for (const cost of cardFor(step.slot)?.cost ?? []) {
             totals[cost.meter] = (totals[cost.meter] ?? 0) + cost.amount;
         }
     }
+
     return Object.entries(totals);
 });
 
@@ -625,11 +639,13 @@ onMounted(() => {
     void enablePush();
     document.addEventListener('pointerdown', dismissDetail);
     document.addEventListener('keydown', dismissOnEscape);
+    window.addEventListener('scroll', dismissOnScroll, { passive: true });
 });
 onUnmounted(() => {
     if (timer) clearInterval(timer);
     document.removeEventListener('pointerdown', dismissDetail);
     document.removeEventListener('keydown', dismissOnEscape);
+    window.removeEventListener('scroll', dismissOnScroll);
 });
 
 // The table is shown once. Stamping it server-side means the same dice never
@@ -650,20 +666,21 @@ function rollsSeen() {
 }
 
 function submit() {
-    if (!main.value || submitting.value) return;
+    if (!plan.value.main || submitting.value) return;
     submitting.value = true;
     router.post(
         `/play/${props.campaign.id}`,
         {
-            pre: pre.value,
-            main: main.value,
-            post: post.value,
+            pre: plan.value.pre,
+            main: plan.value.main,
+            post: plan.value.post,
             companions: companionChoices.value,
         },
         {
             onSuccess: () => {
-                pre.value = main.value = post.value = null;
+                plan.value = { pre: null, main: null, post: null };
                 companionChoices.value = {};
+                openStep.value = 'main';
             },
             onFinish: () => (submitting.value = false),
         },
@@ -737,16 +754,7 @@ const healthPct = computed(
         :heard="rollTable.heard"
         :remembered="rollTable.remembered"
         @continue="rollsSeen"
-    >
-        <template #downtime>
-            <DowntimePicker
-                v-if="downtime && turn"
-                :campaign-id="campaign.id"
-                :turn-id="turn.id"
-                :downtime="downtime"
-            />
-        </template>
-    </DiceTable>
+    />
 
     <div
         class="relative isolate mx-auto flex w-full max-w-2xl flex-1 flex-col gap-5 p-4 pb-16"
@@ -827,8 +835,8 @@ const healthPct = computed(
                     />
                 </span>
                 <span class="truncate"
-                    >{{ endeavor.name }} —
-                    {{ endeavor.filled }} of {{ endeavor.segments }}</span
+                    >{{ endeavor.name }} — {{ endeavor.filled }} of
+                    {{ endeavor.segments }}</span
                 >
             </div>
 
@@ -1201,7 +1209,6 @@ const healthPct = computed(
              it is being written. -->
         <article
             v-if="latestChapter && !waiting"
-            ref="chapterEl"
             :key="`${latestChapter.kind}-${latestChapter.number}`"
             class="sc-rise relative rounded-xl border border-sidebar-border/70 bg-background/60 p-5 backdrop-blur-sm dark:border-sidebar-border"
             style="animation-delay: 80ms"
@@ -1292,17 +1299,28 @@ const healthPct = computed(
                     {{ icon(event.icon) }}
                 </button>
             </div>
+        </article>
 
-            <!-- One detail card for both kinds of anchor: what the engine
-                 resolved, or what a named person or piece of ground is. -->
+        <!-- One detail card for every anchor on the page: a moment the engine
+             resolved, or a named person or piece of ground. It lives out here
+             rather than inside the chapter because the board carries the same
+             anchors now, and it is pinned to the viewport off the rectangle of
+             whatever was tapped. -->
+        <Teleport to="body">
             <Transition name="pop">
                 <div
                     v-if="detail"
                     :key="detail.key"
                     ref="detailEl"
                     data-detail
-                    class="absolute right-3 left-3 z-10 rounded-lg border border-violet-500/40 bg-popover p-3 text-sm shadow-lg shadow-violet-500/10"
-                    :style="{ top: `${detailTop}px` }"
+                    class="fixed z-50 w-[min(24rem,calc(100vw-1.5rem))] rounded-lg border border-violet-500/40 bg-popover p-3 text-sm shadow-lg shadow-violet-500/10"
+                    :style="{
+                        top: `${detailPos.top}px`,
+                        left: `${detailPos.left}px`,
+                        transform: detailPos.flip
+                            ? 'translateY(-100%)'
+                            : undefined,
+                    }"
                 >
                     <div class="flex items-start justify-between gap-2">
                         <p class="font-medium">
@@ -1373,14 +1391,18 @@ const healthPct = computed(
                             class="mt-1 space-y-0.5 text-[11px] text-muted-foreground"
                         >
                             <li
-                                v-for="part in detail.roll.difficulty_parts"
+                                v-for="part in reasonsFor(
+                                    detail.roll.difficulty_parts,
+                                )"
                                 :key="`d-${part.label}`"
                                 class="flex justify-between gap-3"
                             >
                                 <span>{{ part.label }}</span>
-                                <span class="tabular-nums">{{
-                                    part.amount
-                                }}</span>
+                                <span
+                                    class="tabular-nums"
+                                    :class="costClass(part.amount)"
+                                    >{{ signed(part.amount) }}</span
+                                >
                             </li>
                             <li
                                 v-for="part in detail.roll.bonus_parts"
@@ -1396,7 +1418,7 @@ const healthPct = computed(
                     </template>
                 </div>
             </Transition>
-        </article>
+        </Teleport>
 
         <!-- Situation + form / lock -->
         <div
@@ -1409,11 +1431,41 @@ const healthPct = computed(
                  short when the ground is quiet, because an empty room is a
                  real answer and does not need padding out. -->
             <template v-if="!waiting">
-                <p
-                    class="mb-2 text-xs tracking-widest text-muted-foreground uppercase"
-                >
-                    The situation
-                </p>
+                <div class="mb-2 flex items-baseline justify-between gap-2">
+                    <p
+                        class="text-xs tracking-widest text-muted-foreground uppercase"
+                    >
+                        The situation
+                    </p>
+
+                    <!-- The last chapter's moments, gathered where the form is.
+                         The same icons the prose carries and the same detail
+                         card behind them — reaching one used to mean scrolling
+                         back up through a page of serif prose hunting for a
+                         glyph mid-sentence, and this is read for exactly the
+                         same reason the board is. -->
+                    <div
+                        v-if="chapterMoments.length"
+                        class="flex flex-wrap justify-end gap-1"
+                    >
+                        <button
+                            v-for="event in chapterMoments"
+                            :key="`board-${event.id}`"
+                            type="button"
+                            class="inline-flex h-6 w-6 items-center justify-center rounded-full text-xs transition-transform hover:scale-110"
+                            :class="
+                                detail?.key === `event:${event.id}`
+                                    ? 'bg-violet-500/25 ring-1 ring-violet-500'
+                                    : 'bg-muted'
+                            "
+                            :title="event.label"
+                            data-anchor
+                            @click="openEvent(event, $event)"
+                        >
+                            {{ icon(event.icon) }}
+                        </button>
+                    </div>
+                </div>
                 <dl v-if="board.length" class="mb-4 space-y-2">
                     <div v-for="group in board" :key="group.key">
                         <dt
@@ -1433,7 +1485,47 @@ const healthPct = computed(
                                         :class="TONE_DOTS[group.tone]"
                                         aria-hidden="true"
                                     />
-                                    <span>{{ item }}</span>
+                                    <!-- The same names, tappable in the same
+                                         way they are in the chapter. A noun the
+                                         reader can touch in a paragraph and not
+                                         in the list two inches below it teaches
+                                         them the anchors are decoration. -->
+                                    <span
+                                        ><template
+                                            v-for="(seg, i) in entitySegments(
+                                                item,
+                                            )"
+                                            :key="i"
+                                            ><button
+                                                v-if="seg.entity"
+                                                type="button"
+                                                class="cursor-pointer text-left underline decoration-dotted decoration-2 underline-offset-4 transition-colors hover:decoration-solid"
+                                                :class="
+                                                    detail?.key ===
+                                                    `entity:${seg.entity.key}`
+                                                        ? 'text-violet-600 decoration-violet-500 dark:text-violet-400 dark:decoration-violet-400'
+                                                        : [
+                                                              tone(seg.entity)
+                                                                  .text,
+                                                              tone(seg.entity)
+                                                                  .line,
+                                                          ]
+                                                "
+                                                :title="`${seg.entity.name} — tap for detail`"
+                                                data-anchor
+                                                @click="
+                                                    openEntity(
+                                                        seg.entity,
+                                                        $event,
+                                                    )
+                                                "
+                                            >
+                                                {{ seg.text }}</button
+                                            ><template v-else>{{
+                                                seg.text
+                                            }}</template></template
+                                        ></span
+                                    >
                                 </li>
                             </ul>
                         </dd>
@@ -1473,17 +1565,6 @@ const healthPct = computed(
                 :key="recap.turn_id"
                 class="mb-4"
                 :recap="recap"
-            />
-
-            <!-- The wait ahead. It stands above the form rather than inside
-                 it: the pick is not part of the turn, costs no slot, and is
-                 recorded on its own the moment it is made. -->
-            <DowntimePicker
-                v-if="downtime && turn && !rollTable"
-                class="mb-4"
-                :campaign-id="campaign.id"
-                :turn-id="turn.id"
-                :downtime="downtime"
             />
 
             <div
@@ -1526,9 +1607,9 @@ const healthPct = computed(
                 </p>
             </div>
 
-            <!-- One form, one sentence: a word off the board, the thing it is
-                 aimed at, the manner of it — and then the beats that hang off
-                 the act, quoting what each one actually buys it. -->
+            <!-- One panel, three numbered beats, one list behind all of them.
+                 Every pick offers everything this ground offers; the numbers are
+                 the order they resolve in, and only the middle one is required. -->
             <form
                 v-else-if="turn.cards"
                 class="space-y-4"
@@ -1539,55 +1620,25 @@ const healthPct = computed(
                         class="text-[10px] tracking-widest text-muted-foreground uppercase"
                     >
                         What you do
+                        <span class="tracking-normal normal-case"
+                            >— up to three, in this order</span
+                        >
                     </p>
 
-                    <VerbBoard
-                        :cards="turn.cards.main"
-                        :selected-id="main?.card_id ?? null"
-                        @pick="pickVerb"
+                    <BeatPicker
+                        v-for="step in STEPS"
+                        :key="step.slot"
+                        v-model="plan[step.slot]"
+                        :step="step.step"
+                        :title="step.title"
+                        :hint="step.hint"
+                        :required="step.required"
+                        :cards="turn.cards[step.slot]"
+                        :carried="carriedFor(step.slot)"
+                        :open="openStep === step.slot"
+                        @toggle="toggleStep(step.slot)"
                     />
-
-                    <TargetStrip
-                        label="On what"
-                        :options="mainTargets"
-                        :selected-key="chosenTargetKey"
-                        @pick="pickTarget"
-                    />
-
-                    <HowPanel
-                        v-if="mainCard && main"
-                        :card="mainCard"
-                        :variants="mainVariants"
-                        :choice="main"
-                        :carried="setupGrants"
-                        @pick-card="pickVariant"
-                        @update:choice="main = $event"
-                    />
-                    <p v-else class="text-xs text-muted-foreground italic">
-                        Pick a word to begin. Dim words are things this ground
-                        offers no way to do.
-                    </p>
                 </div>
-
-                <!-- The riders, once there is an act for them to hang off. -->
-                <template v-if="mainCard">
-                    <RiderList
-                        v-model="pre"
-                        title="First…"
-                        hint="before the act"
-                        :cards="turn.cards.pre"
-                        :act-verb="mainCard.verb"
-                        :fold-others="true"
-                    />
-                    <RiderList
-                        v-model="post"
-                        title="Afterward…"
-                        hint="if the moment allows it"
-                        :cards="turn.cards.post"
-                        :act-verb="mainCard.verb"
-                        :carried="setupGrants"
-                    />
-                </template>
 
                 <!-- Each companion carries their own beat: a request costs
                      none of the player's three slots, it is never an order,
@@ -1601,7 +1652,7 @@ const healthPct = computed(
                     hint="a request, not an order — they answer for it"
                     :cards="companion.cards"
                     :act-verb="mainCard?.verb ?? null"
-                    :carried="setupGrants"
+                    :carried="companionCarried"
                     @update:model-value="
                         (choice) => (companionChoices[companion.id] = choice)
                     "
@@ -1622,12 +1673,15 @@ const healthPct = computed(
                                 .join(', ')
                         }}
                     </span>
+                    <!-- The tempo pools the gifts draw on. "No charges spent"
+                         meant nothing to anyone who had not gone looking for
+                         what a charge was. -->
                     <span v-else class="text-xs text-muted-foreground"
-                        >No charges spent.</span
+                        >This plan costs you nothing to attempt.</span
                     >
                     <button
                         type="submit"
-                        :disabled="!main || submitting"
+                        :disabled="!plan.main || submitting"
                         class="rounded-md bg-gradient-to-br from-violet-600 to-violet-800 px-5 py-2.5 text-sm font-semibold text-white shadow-lg shadow-violet-900/20 transition hover:from-violet-500 hover:to-violet-700 hover:shadow-violet-700/30 active:scale-[0.98] disabled:opacity-50"
                     >
                         {{ submitting ? 'Committing…' : 'Commit to it' }}

@@ -181,19 +181,39 @@ class CardComposer
         // one standing first in the list.
         $stream = $dice ?? new Dice($scene->id * 2654435761 % PHP_INT_MAX);
 
-        $cards = $this->offerBargains($cards, $character, $scene, $stream);
+        // One list, not three.
+        //
+        // The turn still resolves as a chain — before, the act, after — because
+        // order is what makes a set-up beat mean anything. What is gone is the
+        // idea that the POSITION decides what may stand in it: bracing was
+        // pre-only and looting post-only, so two of the player's three picks
+        // were a short list of leftovers they learned to skip. Now every
+        // position offers everything the ground offers, and the player decides
+        // what belongs where.
+        //
+        // Composed once and copied, so a beat can never be priced differently
+        // depending on which pick it was reached from. The slot rides in id(),
+        // so the copies are three distinct cards the submission points at
+        // individually — "never resolve a card the engine didn't offer" holds
+        // exactly as it did.
+        $beats = $this->unify($cards, $scene);
+
+        $beats = $this->offerBargains($beats, $character, $scene, $stream);
 
         // The endeavor, after the deals: it is roll-free and never carries a
         // load, so nothing above bears on it — and drawing it last keeps the
         // bargain pass reading exactly the stream it always has.
         foreach (Clocks::cards($scene, $stream) as $card) {
-            $cards[$card->slot->value][] = $card;
+            $beats[] = $card;
         }
 
-        $composed = array_map(
-            fn (array $slotCards) => array_map(fn (ActionCard $c) => $c->toArray($conditions), $slotCards),
-            $cards,
-        );
+        $composed = [];
+        foreach (TurnSlot::playerSlots() as $slot) {
+            $composed[$slot->value] = array_map(
+                fn (ActionCard $c) => $c->withSlot($slot)->toArray($conditions),
+                $beats,
+            );
+        }
 
         // Companions: coordinated, never controlled. Each companion carries
         // their own request slot — asking never spends the player's beats,
@@ -260,6 +280,52 @@ class CardComposer
     }
 
     /**
+     * The three slot buckets, flattened into the one list every pick offers.
+     *
+     * Order is preserved in the order the slots were always resolved in — the
+     * set-up beats first, the acts next, the follow-ups last — so the list a
+     * player reads still moves from "steady yourself" to "hit them" to "search
+     * the body" rather than shuffling into a heap.
+     *
+     * Duplicates collapse on the identity id() is built from, so a beat the
+     * composer happened to author into two buckets appears once.
+     *
+     * This is also where a road already walked into a wall stops being offered:
+     * a route the scene has already refused is dropped here, once, for all three
+     * picks — see Attempts. The generic fallbacks are never in that list, so the
+     * ≥2-legal-cards invariant cannot be reached by this.
+     *
+     * @param  array{pre: list<ActionCard>, main: list<ActionCard>, post: list<ActionCard>}  $cards
+     * @return list<ActionCard>
+     */
+    private function unify(array $cards, Scene $scene): array
+    {
+        $beats = [];
+        $seen = [];
+
+        foreach (TurnSlot::playerSlots() as $slot) {
+            foreach ($cards[$slot->value] ?? [] as $card) {
+                if (Attempts::isSpent($scene, $card)) {
+                    continue;
+                }
+
+                // id() reads the slot, so the identity has to be taken from a
+                // single reference slot or every copy would look unique.
+                $identity = $card->withSlot(TurnSlot::Main)->id();
+
+                if (isset($seen[$identity])) {
+                    continue;
+                }
+
+                $seen[$identity] = true;
+                $beats[] = $card;
+            }
+        }
+
+        return $beats;
+    }
+
+    /**
      * One seeded pass for the deals.
      *
      * A bargain is never the whole offer and never stands alone: it is inserted
@@ -272,60 +338,59 @@ class CardComposer
      * Eligibility is decided entirely by Bargains, which refuses any offer
      * whose complication could not cost the player anything here.
      *
-     * @param  array{pre: list<ActionCard>, main: list<ActionCard>, post: list<ActionCard>}  $cards
-     * @return array{pre: list<ActionCard>, main: list<ActionCard>, post: list<ActionCard>}
+     * It runs on the unified list, before the copies are made, so the one deal
+     * on the table stands beside its plain sibling in every pick — not in
+     * whichever of the three the die happened to land on.
+     *
+     * @param  list<ActionCard>  $beats
+     * @return list<ActionCard>
      */
-    private function offerBargains(array $cards, Character $character, Scene $scene, Dice $dice): array
+    private function offerBargains(array $beats, Character $character, Scene $scene, Dice $dice): array
     {
         $cap = (int) config('game.bargains.per_turn', 1);
         $chance = (float) config('game.bargains.chance', 0);
 
         if ($cap < 1 || $chance <= 0) {
-            return $cards;
+            return $beats;
         }
 
-        $state = Bargains::sceneState($character, $scene, $cards['pre']);
+        $state = Bargains::sceneState($character, $scene, $beats);
 
         $candidates = [];
-        foreach (['pre', 'main', 'post'] as $slot) {
-            foreach ($cards[$slot] as $index => $card) {
-                foreach (Bargains::keysFor($card, $state) as $key) {
-                    $candidates[] = ['slot' => $slot, 'index' => $index, 'key' => $key];
-                }
+        foreach ($beats as $index => $card) {
+            foreach (Bargains::keysFor($card, $state) as $key) {
+                $candidates[] = ['index' => $index, 'key' => $key];
             }
         }
 
         // Nothing eligible costs no die: a turn with no honest deal in it must
         // not shift the stream for the turns that follow.
         if ($candidates === [] || ! $dice->chance($chance)) {
-            return $cards;
+            return $beats;
         }
 
         $chosen = [];
         for ($taken = 0; $taken < $cap && $candidates !== []; $taken++) {
             $pick = $candidates[$dice->between(1, count($candidates)) - 1];
-            $chosen[$pick['slot']][$pick['index']] = $pick['key'];
+            $chosen[$pick['index']] = $pick['key'];
 
             // Never two deals on one card: the player would be reading three
             // versions of the same beat and pricing none of them.
             $candidates = array_values(array_filter(
                 $candidates,
-                fn (array $c) => $c['slot'] !== $pick['slot'] || $c['index'] !== $pick['index'],
+                fn (array $c) => $c['index'] !== $pick['index'],
             ));
         }
 
-        foreach ($chosen as $slot => $picks) {
-            $rebuilt = [];
-            foreach ($cards[$slot] as $index => $card) {
-                $rebuilt[] = $card;
-                if (isset($picks[$index])) {
-                    $rebuilt[] = Bargains::offer($card, $picks[$index]);
-                }
+        $rebuilt = [];
+        foreach ($beats as $index => $card) {
+            $rebuilt[] = $card;
+            if (isset($chosen[$index])) {
+                $rebuilt[] = Bargains::offer($card, $chosen[$index]);
             }
-            $cards[$slot] = $rebuilt;
         }
 
-        return $cards;
+        return $rebuilt;
     }
 
     /**
@@ -705,29 +770,35 @@ class CardComposer
             }
         }
 
+        // Recruitment grows out of the social verbs: a willing soul, or one
+        // already swayed or calmed, can be asked to come along — and asking is
+        // not its own card any more. It is what one conversation is FOR.
+        //
+        // It used to stand beside "Speak with them" as a second verb, which put
+        // two entries under the board's SPEAK word for what the player reads as
+        // one act: talking to somebody. So the ask is a chip on the conversation
+        // instead, and the drawer under SPEAK closes. It stays an engine-offered,
+        // engine-validated option either way — the note box cannot recruit
+        // anybody, because a note colors the telling and never reaches the
+        // mechanics.
+        $canAsk = ! $hostile && $actor->kind !== 'companion'
+            && (($tags['companionable'] ?? false) || in_array($tags['disposition'] ?? null, ['swayed', 'calmed'], true));
+
         // A trained tongue is a capability; plain conversation is not. Anyone
         // the player is not fighting can be spoken to — no gift required, and
-        // no better than the trained verbs it stands in for.
-        if (! $hostile && ! $spokenTo) {
+        // no better than the trained verbs it stands in for. It is also where
+        // the ask lives, so a silver-tongued player still has somewhere to make
+        // one.
+        if (! $hostile && (! $spokenTo || $canAsk)) {
             $cards[] = new ActionCard(
                 slot: TurnSlot::Main,
                 verb: Verb::Speak->value,
                 label: "Speak with {$actor->name}",
-                description: "Open a plain conversation with {$actor->name} — no craft behind it, just what you have to say.",
+                description: $canAsk
+                    ? "Open a plain conversation with {$actor->name} — no craft behind it, just what you have to say. Say what it is for below: talk, or ask them to walk this tale beside you."
+                    : "Open a plain conversation with {$actor->name} — no craft behind it, just what you have to say.",
                 target: $target,
-            );
-        }
-
-        // Recruitment grows out of the social verbs: a willing soul, or one
-        // already swayed or calmed, can be asked to come along.
-        if (! $hostile && $actor->kind !== 'companion'
-            && (($tags['companionable'] ?? false) || in_array($tags['disposition'] ?? null, ['swayed', 'calmed'], true))) {
-            $cards[] = new ActionCard(
-                slot: TurnSlot::Main,
-                verb: Verb::Recruit->value,
-                label: "Ask {$actor->name} to come along",
-                description: "Invite {$actor->name} to walk this tale beside you. They decide.",
-                target: $target,
+                modifiers: $canAsk ? [$this->intentModifier($actor->name)] : [],
             );
         }
 
@@ -1208,6 +1279,17 @@ class CardComposer
      * resolver hands the narrator when that stance was chosen. Values stay
      * `balanced|cautious|bold` so validation and the resolver never care
      * which family dressed the row.
+     *
+     * Each option also carries its TERMS, because the difficulty delta alone
+     * reads as nonsense on half the verbs in the game: "creep, −2 DC" beside
+     * "dash, +2 DC" looks like the engine claiming that running from a fight is
+     * harder than tiptoeing away from one, and no amount of flavour text fixes a
+     * number the player cannot account for. It is not a movement rule — it is
+     * the same trade on every card in the game. Caution buys a surer roll and
+     * spends the top of the result: it can never do better than plainly work,
+     * and the die's wild faces go quiet. Boldness pays for the reverse. The
+     * terms say so, in the same words on every card, beside the number they
+     * explain.
      */
     private function approachModifier(Verb $verb = Verb::Improvise): array
     {
@@ -1260,9 +1342,53 @@ class CardComposer
             'key' => 'approach',
             'label' => 'Approach',
             'options' => [
-                ['value' => 'balanced', 'label' => $balanced],
-                ['value' => 'cautious', 'label' => $cautious, 'fact' => $cautiousFact],
-                ['value' => 'bold', 'label' => $bold, 'fact' => $boldFact],
+                [
+                    'value' => 'balanced',
+                    'label' => $balanced,
+                    'terms' => 'The plain reading: every result on the table, nothing traded either way.',
+                ],
+                [
+                    'value' => 'cautious',
+                    'label' => $cautious,
+                    'terms' => 'Easier to pull off, and it can never do better than simply work — no lucky break, no disaster either.',
+                    'fact' => $cautiousFact,
+                ],
+                [
+                    'value' => 'bold',
+                    'label' => $bold,
+                    'terms' => 'Harder to pull off, and it reaches further when it lands — the best and worst faces of the die both come into play.',
+                    'fact' => $boldFact,
+                ],
+            ],
+        ];
+    }
+
+    /**
+     * What a conversation is for.
+     *
+     * The one place a modifier decides which of two things a beat resolves as,
+     * rather than how hard it is. It exists because the player reads talking to
+     * somebody as one act — and only ever appears on a card where BOTH readings
+     * are legal, so neither option is ever the dead one.
+     *
+     * Both readings cost the same, which is the honest part: `speak` and
+     * `recruit` sit on the same rungs of every table in Odds (the same standing
+     * point, the same ruined-voice scar), so the DC printed on this card is the
+     * DC either answer is measured against. A modifier that quietly moved the
+     * number would be a card promising odds the dice do not honor.
+     */
+    private function intentModifier(string $name): array
+    {
+        return [
+            'key' => 'intent',
+            'label' => 'What for',
+            'options' => [
+                ['value' => 'talk', 'label' => 'Just talk', 'terms' => 'Words, and see where they land.'],
+                [
+                    'value' => 'recruit',
+                    'label' => 'Ask them along',
+                    'terms' => "{$name} decides for themselves — a yes and they walk this tale with you.",
+                ],
             ],
         ];
     }
