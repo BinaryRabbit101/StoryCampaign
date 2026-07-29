@@ -101,25 +101,32 @@ function adopt(suggestion: Suggestion) {
 }
 
 /**
- * What an answer would do to the sheet, in the palette the ledger above it
- * already uses: violet buys, amber pays. A `both` chip is violet with an amber
- * edge, because that is literally what it is — a gift with a price on it.
+ * What an answer would do to the sheet: green gains, red costs. A `both` chip
+ * is green with a red edge, because that is literally what it is — a gift with
+ * a price on it.
  *
- * Deliberately the low-opacity borders rather than the amber-500 the overspent
- * warning and the send errors are written in: a row of chips is an invitation,
- * and a price is a legitimate answer, not a mistake being flagged.
+ * The shades are the ones the balance figure already speaks in on this page
+ * (emerald for a bargain that holds, red for a shortfall), so the chips and the
+ * number are not two different greens arguing.
+ *
+ * Deliberately the low-opacity borders rather than the solid red the overspent
+ * figure is written in: a row of chips is an invitation, and naming a price is
+ * a legitimate answer rather than a mistake being flagged. Colour is never the
+ * only carrier either — red/green is the common colour blindness, so the `both`
+ * chip has a structural edge and every chip carries its kind in text for a
+ * screen reader.
  */
 const KIND_STYLES: Record<Suggestion['kind'], string> = {
-    gift: 'border-violet-500/30 bg-violet-500/10 hover:border-violet-500/60',
-    price: 'border-amber-500/30 bg-amber-500/10 hover:border-amber-500/60',
-    both: 'border-violet-500/30 border-l-2 border-l-amber-500/60 bg-violet-500/10 hover:border-violet-500/60',
+    gift: 'border-emerald-500/40 bg-emerald-500/10 hover:border-emerald-500/70',
+    price: 'border-red-500/40 bg-red-500/10 hover:border-red-500/70',
+    both: 'border-emerald-500/40 border-l-2 border-l-red-500/70 bg-emerald-500/10 hover:border-emerald-500/70',
     neutral: 'border-input bg-background/60 hover:border-violet-500/50',
 };
 
 const KIND_SELECTED: Record<Suggestion['kind'], string> = {
-    gift: 'border-violet-500 bg-violet-600/30',
-    price: 'border-amber-500 bg-amber-600/25',
-    both: 'border-violet-500 border-l-2 border-l-amber-500 bg-violet-600/30',
+    gift: 'border-emerald-500 bg-emerald-600/30',
+    price: 'border-red-500 bg-red-600/25',
+    both: 'border-emerald-500 border-l-2 border-l-red-500 bg-emerald-600/30',
     neutral: 'border-violet-500 bg-violet-600/30',
 };
 
@@ -277,22 +284,49 @@ async function checkAhead() {
 }
 
 // A narrator who could not answer says so here. Nothing was written to the
-// transcript, so the player's words are still in the box and Speak retries.
+// transcript, so the player's words go back in the box and Speak retries.
 const speakError = ref('');
+
+/**
+ * The words in flight: emptied from the box on the tap, and held here until
+ * the transcript has them.
+ *
+ * The box used to keep the sentence until the round trip finished, which is a
+ * Claude call long enough to earn a push notification — so the player sat
+ * looking at words they had already sent, with nothing on screen saying they
+ * had gone. Clearing alone would have been worse: the interview does not write
+ * a player's message until the narrator has answered it (so a failed call
+ * leaves the words in their hands rather than stranded in the transcript), and
+ * an empty box plus an empty transcript would mean the sentence had vanished
+ * entirely for fifteen seconds. So it moves rather than disappears — out of the
+ * box, into the conversation as its own pending line, and back into the box if
+ * the narrator never answers.
+ */
+const spoken = ref('');
 
 function send() {
     if (!body.value.trim() || sending.value) return;
+
+    const words = body.value;
     sending.value = true;
     speakError.value = '';
+    spoken.value = words;
+    body.value = '';
+
     router.post(
         `/campaigns/${props.campaign.id}/interview`,
-        { body: body.value },
+        { body: words },
         {
-            onSuccess: () => (body.value = ''),
-            onError: (errors) =>
-                (speakError.value =
-                    errors.body ??
-                    'The words did not carry. Speak them again.'),
+            // The real message is in the transcript now; the echo has served.
+            onSuccess: () => (spoken.value = ''),
+            onError: (errors) => {
+                // Nothing was written, so the words belong back where the
+                // player can edit and send them again.
+                body.value = words;
+                spoken.value = '';
+                speakError.value =
+                    errors.body ?? 'The words did not carry. Speak them again.';
+            },
             onFinish: () => (sending.value = false),
         },
     );
@@ -314,6 +348,16 @@ onUnmounted(() => {
     if (watchdog) clearInterval(watchdog);
 });
 watch(() => props.messages.length, scrollDown);
+watch(spoken, scrollDown);
+
+// The watchdog can pick the answer up behind the request that asked for it
+// (see checkAhead). However the transcript catches up, the echo is done the
+// moment the real words are in it — or the player would read their sentence
+// twice.
+watch(
+    () => props.messages.length,
+    () => (spoken.value = ''),
+);
 </script>
 
 <template>
@@ -391,10 +435,13 @@ watch(() => props.messages.length, scrollDown);
                 v-if="draft.gifts.length || draft.burdens.length"
                 class="mt-2 flex flex-wrap gap-1.5"
             >
+                <!-- The same chips the character sheet shows in play, in the
+                     same colours: what the player builds here is what they
+                     will read there. -->
                 <span
                     v-for="gift in draft.gifts"
                     :key="`g-${gift.label}`"
-                    class="rounded-lg border border-violet-500/40 bg-violet-500/10 px-2 py-0.5 text-xs text-muted-foreground"
+                    class="rounded-lg bg-emerald-500/10 px-2 py-0.5 text-xs text-emerald-700 dark:text-emerald-400"
                 >
                     {{ gift.label }}
                     <span class="opacity-70">−{{ gift.cost }}</span>
@@ -402,7 +449,7 @@ watch(() => props.messages.length, scrollDown);
                 <span
                     v-for="burden in draft.burdens"
                     :key="`b-${burden.label}`"
-                    class="rounded-lg border border-amber-500/40 bg-amber-500/10 px-2 py-0.5 text-xs text-muted-foreground"
+                    class="rounded-lg bg-red-500/10 px-2 py-0.5 text-xs text-red-700 dark:text-red-400"
                 >
                     {{ burden.label }}
                     <span class="opacity-70">+{{ burden.refund }}</span>
@@ -466,6 +513,17 @@ watch(() => props.messages.length, scrollDown);
                     {{ message.body }}
                 </div>
             </div>
+            <!-- Said, not yet written down. Styled as the player's own line
+                 because that is what it is, dimmed because the narrator has
+                 not answered it yet. -->
+            <div v-if="spoken" class="sc-rise ml-8 flex justify-end">
+                <div
+                    class="inline-block rounded-xl bg-primary/60 px-4 py-2 text-left text-sm whitespace-pre-wrap text-primary-foreground"
+                >
+                    {{ spoken }}
+                </div>
+            </div>
+
             <p
                 v-if="pending"
                 class="sc-rise mr-8 flex items-center gap-2 text-sm text-muted-foreground italic"
@@ -526,8 +584,8 @@ watch(() => props.messages.length, scrollDown);
                         class="rounded-lg border px-2.5 py-1 text-xs transition active:scale-[0.98] disabled:opacity-30"
                         :class="
                             selected.includes(trait.key)
-                                ? 'border-violet-500 bg-violet-600/30 text-foreground'
-                                : 'border-input bg-background/60 text-muted-foreground hover:border-violet-500/50'
+                                ? 'border-emerald-500 bg-emerald-600/30 text-foreground'
+                                : 'border-input bg-background/60 text-muted-foreground hover:border-emerald-500/50'
                         "
                         @click="toggle(trait)"
                     >
@@ -549,8 +607,8 @@ watch(() => props.messages.length, scrollDown);
                         class="rounded-lg border px-2.5 py-1 text-xs transition active:scale-[0.98] disabled:opacity-30"
                         :class="
                             selected.includes(trait.key)
-                                ? 'border-amber-500 bg-amber-600/25 text-foreground'
-                                : 'border-input bg-background/60 text-muted-foreground hover:border-amber-500/50'
+                                ? 'border-red-500 bg-red-600/25 text-foreground'
+                                : 'border-input bg-background/60 text-muted-foreground hover:border-red-500/50'
                         "
                         @click="toggle(trait)"
                     >
@@ -612,7 +670,7 @@ watch(() => props.messages.length, scrollDown);
                  and these chips are on screen before that. One short line, and
                  only while there is actually a contrast to read. -->
             <p v-if="kinded" class="text-[10px] text-muted-foreground">
-                Violet reaches for something; amber names its price.
+                Green reaches for something; red names its price.
             </p>
 
             <div class="flex flex-wrap gap-2">

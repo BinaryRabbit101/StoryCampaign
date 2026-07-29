@@ -283,10 +283,15 @@ adjudicates legality or outcomes — it is only ever handed resolved facts.
   deciding what counts as positive, and there should never be one. Each offered
   answer carries its own `kind` (`gift` / `price` / `both` / `neutral`, closed
   list on `InterviewMessage::KINDS`) — Claude labelling its OWN sentence, which
-  is the only reason a tint may reach the screen at all: violet reaches, amber
-  pays, `both` is violet with an amber edge, and an invented or missing kind
-  falls to `neutral` and no tint, because a wrong tint tells the player a price
-  the engine never charged. The column normalizes on read
+  is the only reason a tint may reach the screen at all: green reaches, red
+  pays, `both` is green with a red edge, and an invented or missing kind falls
+  to `neutral` and no tint, because a wrong tint tells the player a price the
+  engine never charged. Green/red is the app's pro/con palette everywhere
+  (`emerald`/`red`, the same shades the in-play character sheet and the growth
+  ledger use); violet stays the brand accent and amber stays warnings and
+  errors alone. Colour is never the only carrier — red/green is the common
+  colour blindness, so `both` also has a structural left edge and every chip
+  states its kind in screen-reader text. The column normalizes on read
   (`InterviewMessage::normalizeSuggestions`), never by backfill — rows written
   before kinds existed hold bare strings and a backfill would have to guess the
   very thing the kind exists to stop guessing. Growth suggestions have no
