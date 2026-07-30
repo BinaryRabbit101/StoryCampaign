@@ -28,6 +28,19 @@ class CardComposer
     /** The heaviest thing untrained arms may take up — one-hand territory, far below where the lift gift starts paying. */
     private const UNTRAINED_LIFT = 40;
 
+    /** The highest an untrained scramble reaches — below where the trained climb even starts reading as risky. */
+    private const UNTRAINED_CLIMB = 12;
+
+    /** The highest an ordinary standing jump reaches, matching the trained leap's own low-height threshold. */
+    private const UNTRAINED_LEAP = 6;
+
+    /**
+     * The body-plausible ways: anyone can scramble, jump, or paddle — badly.
+     * Everything else in the traversal group (swing, glide, burrow, squeeze
+     * grades) stays a bought power; nerve does not grow wings.
+     */
+    private const UNTRAINED_WAYS = [Capability::Climb, Capability::Descend, Capability::Leap, Capability::Swim];
+
     /**
      * @param  Dice|null  $dice  The seeded stream the bargain pass rolls on. The
      *                           resolver hands down the turn's own dice so the
@@ -454,16 +467,31 @@ class CardComposer
             return [];
         }
 
-        // reachable_via — vertical traversal (pre slot: positioning/setup)
-        foreach ($affordances['reachable_via'] ?? [] as $via) {
+        // reachable_via — vertical traversal (pre slot: positioning/setup).
+        // The trained ways first; the untrained scramble only when NO bought
+        // way up stands, so the floor is never a strictly worse twin offered
+        // beside a real capability — one floor per feature is the whole offer.
+        $waysUp = $affordances['reachable_via'] ?? [];
+        $trainedWayUp = false;
+        foreach ($waysUp as $via) {
             $card = $this->traversalCard($capabilities, $via, $feature, $target, 'Reach', $affordances['height'] ?? null);
             if ($card !== null) {
+                $trainedWayUp = true;
                 $cards[] = $card;
             }
         }
+        if (! $trainedWayUp && ($card = $this->scrambleCard($waysUp, $feature, $target, $affordances['height'] ?? null)) !== null) {
+            $cards[] = $card;
+        }
 
-        // crossable_via — horizontal traversal (main slot: consequential move)
-        foreach ($affordances['crossable_via'] ?? [] as $via) {
+        // crossable_via — horizontal traversal (main slot: consequential move).
+        // Trained ways first; when none stands, the body-plausible ways have
+        // an untrained floor — degraded, bonusless, a leap capped at what an
+        // ordinary standing jump clears — never better than the bought
+        // capability, and never offered beside one.
+        $waysAcross = $affordances['crossable_via'] ?? [];
+        $trainedWayAcross = false;
+        foreach ($waysAcross as $via) {
             $capability = Capability::tryFrom($via);
             if ($capability === null || ! isset($capabilities[$capability->value])) {
                 continue;
@@ -477,6 +505,7 @@ class CardComposer
                 }
                 $risk = $mag >= $gap ? 'safe' : 'degraded';
             }
+            $trainedWayAcross = true;
             $cards[] = new ActionCard(
                 slot: TurnSlot::Main,
                 verb: Verb::Cross->value,
@@ -489,6 +518,28 @@ class CardComposer
                 risk: $risk,
                 modifiers: [$this->approachModifier(Verb::Cross)],
             );
+        }
+        if (! $trainedWayAcross) {
+            foreach ($waysAcross as $via) {
+                $capability = Capability::tryFrom($via);
+                if ($capability === null || ! in_array($capability, self::UNTRAINED_WAYS, true)) {
+                    continue;
+                }
+                if ($capability === Capability::Leap
+                    && (self::GAPS[$affordances['gap'] ?? 'medium'] ?? 2) > 1) {
+                    continue;
+                }
+                $cards[] = new ActionCard(
+                    slot: TurnSlot::Main,
+                    verb: Verb::Cross->value,
+                    label: ucfirst($via)." across {$feature->name}",
+                    description: "Cross the {$feature->name} on nothing but an ordinary body and nerve.",
+                    target: $target,
+                    risk: 'degraded',
+                    modifiers: [$this->approachModifier(Verb::Cross)],
+                );
+                break;
+            }
         }
 
         // flee_destination — escape routes, squeeze-constrained
@@ -669,6 +720,41 @@ class CardComposer
         );
     }
 
+    /**
+     * The untrained way up: when none of a feature's ways is a bought
+     * capability, a body-plausible one may still be scrambled — degraded,
+     * bonusless, and only within an ordinary body's reach. Height is the
+     * honest gate, not training: what an unpracticed climber cannot have is
+     * the tall wall, not the crate. Swing, glide, and burrow never floor;
+     * nerve does not grow wings.
+     *
+     * @param  list<string>  $ways  The feature's reachable_via list.
+     */
+    private function scrambleCard(array $ways, SceneFeature $feature, array $target, ?int $height): ?ActionCard
+    {
+        $plausible = collect($ways)
+            ->map(fn (string $via) => Capability::tryFrom($via))
+            ->first(fn (?Capability $capability) => $capability !== null
+                && in_array($capability, self::UNTRAINED_WAYS, true)
+                && ($height === null || $height <= match ($capability) {
+                    Capability::Leap => self::UNTRAINED_LEAP,
+                    default => self::UNTRAINED_CLIMB,
+                }));
+
+        if ($plausible === null) {
+            return null;
+        }
+
+        return new ActionCard(
+            slot: TurnSlot::Pre,
+            verb: Verb::Ascend->value,
+            label: "Scramble up to {$feature->name}",
+            description: "Get atop {$feature->name} the hard way — no craft to it, just hands, feet, and stubbornness.",
+            target: $target,
+            risk: 'degraded',
+        );
+    }
+
     /** @return list<ActionCard> */
     private function actorCards(Character $character, array $capabilities, Actor $actor, $features): array
     {
@@ -797,18 +883,26 @@ class CardComposer
             );
         }
 
-        if (($tags['intimidatable'] ?? false) && isset($capabilities['intimidate'])) {
-            $scope = $capabilities['intimidate']->scope['vs'] ?? null;
+        if ($tags['intimidatable'] ?? false) {
+            $trainedPresence = isset($capabilities['intimidate']);
             // Scoped presence: intimidate(vs: regular) does not flatten
-            // tougher encounters.
+            // tougher encounters. Untrained nerve carries the same restriction
+            // as the narrowest bought gift — the regular tier and no further —
+            // so bare bluster is never offered where a scoped gift is not.
+            $scope = $trainedPresence
+                ? ($capabilities['intimidate']->scope['vs'] ?? null)
+                : 'regular';
             if ($scope === null || $actor->tier === $scope) {
                 $cards[] = new ActionCard(
                     slot: TurnSlot::Main,
                     verb: Verb::Intimidate->value,
                     label: "Loom over {$actor->name}",
-                    description: "Let your presence do the work — drive {$actor->name} back without a blow.",
+                    description: $trainedPresence
+                        ? "Let your presence do the work — drive {$actor->name} back without a blow."
+                        : "Square up to {$actor->name} and make yourself the worst thing here — nothing behind it but nerve.",
                     target: $target,
-                    capability: 'intimidate',
+                    capability: $trainedPresence ? 'intimidate' : null,
+                    risk: $trainedPresence ? 'safe' : 'degraded',
                     modifiers: [$this->approachModifier(Verb::Intimidate)],
                 );
             }
@@ -828,6 +922,32 @@ class CardComposer
                     description: "Work on {$actor->name} with words.",
                     target: $target,
                     capability: $social,
+                );
+            }
+        }
+
+        // Talking a hostile down has an untrained floor too. Plain speech
+        // covers everyone the player is NOT fighting, but it is never offered
+        // against drawn steel — so a character who never bought a tongue had
+        // no words at all once a fight started, and words are not a gift. One
+        // parley card rather than three degraded twins: on a hostile the three
+        // trained tongues resolve identically (they break and go), and three
+        // copies of one outcome is noise, not choice. Degraded, bonusless,
+        // never better than the bought craft — and never beside a truce, where
+        // the terms on the table ARE the conversation.
+        if ($hostile && ! $spokenTo && ! ($tags['truce'] ?? false)) {
+            $parley = collect([Verb::Calm, Verb::Persuade, Verb::Deceive])->first(
+                fn (Verb $tongue) => ($tags[$tongue->value.'able'] ?? ($tags['talkable'] ?? false))
+                    && ! isset($capabilities[$tongue->value]),
+            );
+            if ($parley !== null) {
+                $cards[] = new ActionCard(
+                    slot: TurnSlot::Main,
+                    verb: $parley->value,
+                    label: "Talk {$actor->name} down",
+                    description: "Try words against {$actor->name} with no craft behind them — just what is true and how you say it.",
+                    target: $target,
+                    risk: 'degraded',
                 );
             }
         }
@@ -864,21 +984,29 @@ class CardComposer
             );
         }
 
-        if (($tags['restrainable'] ?? $hostile) && isset($capabilities['restrain'])) {
+        if ($tags['restrainable'] ?? $hostile) {
+            // The trained hold rides the bought capability; the untrained one
+            // is weight and desperation against the same body — degraded,
+            // bonusless, and a harder DC than the risky trained grapple.
+            $trainedGrip = isset($capabilities['restrain']);
             $cards[] = new ActionCard(
                 slot: TurnSlot::Main,
                 verb: Verb::Restrain->value,
                 label: "Restrain {$actor->name}",
-                description: "Bind {$actor->name} rather than harm them.",
+                description: $trainedGrip
+                    ? "Bind {$actor->name} rather than harm them."
+                    : "Wrap {$actor->name} up and hang on — no holds anyone ever taught you, just weight and grip.",
                 target: $target,
-                capability: 'restrain',
-                risk: 'risky',
+                capability: $trainedGrip ? 'restrain' : null,
+                risk: $trainedGrip ? 'risky' : 'degraded',
                 modifiers: [$this->approachModifier(Verb::Restrain)],
             );
 
             // Composition, not enumeration: restrain + swing + carry_extra
-            // = haul an enemy up with you. Never hand-authored.
-            if (isset($capabilities['swing'], $capabilities['carry_extra'])
+            // = haul an enemy up with you. Never hand-authored — and always
+            // trained: a composed card is spent through its capabilities.
+            if ($trainedGrip
+                && isset($capabilities['swing'], $capabilities['carry_extra'])
                 && ($capabilities['carry_extra']->magnitude ?? 0) >= 1) {
                 foreach ($features as $feature) {
                     $vias = $feature->affordances['reachable_via'] ?? [];
@@ -980,54 +1108,69 @@ class CardComposer
     {
         $cards = [];
 
-        if (isset($capabilities['scout'])) {
-            $hiddenRemains = $scene->allFeatures()->contains(
-                fn (SceneFeature $f) => ($f->state['hidden'] ?? false) && ! ($f->state['destroyed'] ?? false),
+        // Every eye can look and every voice can carry: the awareness verbs
+        // have untrained floors on the same principle as hide, break, and the
+        // bare-hands lift. The bought gift is safe ground with the capability
+        // behind it; the floor is the same beat at degraded risk with no
+        // bonus — never better than training, never a locked verb.
+        $trainedEyes = isset($capabilities['scout']);
+        $hiddenRemains = $scene->allFeatures()->contains(
+            fn (SceneFeature $f) => ($f->state['hidden'] ?? false) && ! ($f->state['destroyed'] ?? false),
+        );
+        if ($hiddenRemains || ! ($scene->state['exit_scouted'] ?? false)) {
+            $cards[] = new ActionCard(
+                slot: TurnSlot::Pre,
+                verb: Verb::Scout->value,
+                label: 'Read the ground',
+                description: $trainedEyes
+                    ? 'Sweep the scene for what others miss — hidden ways, overlooked cover, a route out.'
+                    : 'Look the place over, hard — no woodcraft to it, just patience and attention.',
+                capability: $trainedEyes ? 'scout' : null,
+                risk: $trainedEyes ? 'safe' : 'degraded',
             );
-            if ($hiddenRemains || ! ($scene->state['exit_scouted'] ?? false)) {
-                $cards[] = new ActionCard(
-                    slot: TurnSlot::Pre,
-                    verb: Verb::Scout->value,
-                    label: 'Read the ground',
-                    description: 'Sweep the scene for what others miss — hidden ways, overlooked cover, a route out.',
-                    capability: 'scout',
-                );
-            }
         }
 
-        if (isset($capabilities['detect'])
-            && $scene->activeActors()->contains(fn (Actor $a) => $a->tags['lurking'] ?? false)) {
+        if ($scene->activeActors()->contains(fn (Actor $a) => $a->tags['lurking'] ?? false)) {
+            $trainedSenses = isset($capabilities['detect']);
             $cards[] = new ActionCard(
                 slot: TurnSlot::Pre,
                 verb: Verb::Detect->value,
                 label: 'Something is wrong — find it',
-                description: 'The scene is off in a way you can almost name. Hunt the source before it moves first.',
-                capability: 'detect',
+                description: $trainedSenses
+                    ? 'The scene is off in a way you can almost name. Hunt the source before it moves first.'
+                    : 'The scene is off in a way you cannot name. Stop, and stare, and hope your plain senses are enough.',
+                capability: $trainedSenses ? 'detect' : null,
+                risk: $trainedSenses ? 'safe' : 'degraded',
             );
         }
 
-        if (isset($capabilities['track'])) {
-            foreach ($scene->actors()->where('status', 'fled')->get() as $quarry) {
-                $cards[] = new ActionCard(
-                    slot: TurnSlot::Main,
-                    verb: Verb::Track->value,
-                    label: "Follow {$quarry->name}'s trail",
-                    description: "{$quarry->name} ran. Their trail is still warm — follow it out of this place.",
-                    target: ['type' => 'actor', 'id' => $quarry->id, 'name' => $quarry->name],
-                    capability: 'track',
-                    modifiers: [$this->approachModifier(Verb::Track)],
-                );
-            }
+        $trainedTracker = isset($capabilities['track']);
+        foreach ($scene->actors()->where('status', 'fled')->get() as $quarry) {
+            $cards[] = new ActionCard(
+                slot: TurnSlot::Main,
+                verb: Verb::Track->value,
+                label: "Follow {$quarry->name}'s trail",
+                description: $trainedTracker
+                    ? "{$quarry->name} ran. Their trail is still warm — follow it out of this place."
+                    : "{$quarry->name} ran. You are no tracker, but the signs are fresh enough that stubbornness might serve.",
+                target: ['type' => 'actor', 'id' => $quarry->id, 'name' => $quarry->name],
+                capability: $trainedTracker ? 'track' : null,
+                risk: $trainedTracker ? 'safe' : 'degraded',
+                modifiers: [$this->approachModifier(Verb::Track)],
+            );
         }
 
-        if (isset($capabilities['command'])
-            && $actors->contains(fn (Actor $a) => $a->kind === 'companion')) {
+        if ($actors->contains(fn (Actor $a) => $a->kind === 'companion')) {
+            $trainedVoice = isset($capabilities['command']);
             $cards[] = new ActionCard(
                 slot: TurnSlot::Pre,
                 verb: Verb::Command->value,
                 label: 'Call the play',
-                description: "Direct your companions with a commander's precision — every request lands sharper this turn.",
-                capability: 'command',
+                description: $trainedVoice
+                    ? "Direct your companions with a commander's precision — every request lands sharper this turn."
+                    : 'Shout the plan as you see it — no habit of command behind it, but a plan said out loud is still a plan.',
+                capability: $trainedVoice ? 'command' : null,
+                risk: $trainedVoice ? 'safe' : 'degraded',
             );
         }
 

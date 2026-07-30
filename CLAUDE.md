@@ -219,10 +219,25 @@ adjudicates legality or outcomes — it is only ever handed resolved facts.
   and actor carries capability-free `inspect`/`improvise`/`speak` cards, so
   ground the character's gifts don't fit is still actionable and the card
   list moves with the scene instead of collapsing to fixed fallbacks;
-  the physical verbs have untrained floors on the same principle — a visible
-  `hideable` feature offers hide, a `breakable` offers break, and anything at
-  or under `CardComposer::UNTRAINED_LIFT` offers a bare-hands lift, all
-  DEGRADED risk with no capability bonus, never better than the bought gift;
+  nearly every verb has an untrained floor on the same principle — the sheet
+  moves the ODDS, never the menu. A visible `hideable` feature offers hide, a
+  `breakable` offers break, anything at or under
+  `CardComposer::UNTRAINED_LIFT` offers a bare-hands lift; the awareness
+  verbs (scout/detect/track/command) floor unconditionally; a talkable
+  HOSTILE offers one untrained parley card (plain `speak` already covers
+  everyone the player is not fighting — one card, not three degraded twins,
+  because the trained tongues resolve a hostile identically, and never beside
+  a truce, whose terms ARE the conversation); `intimidatable` floors against
+  the regular tier only, so a scoped bought presence is never outdone; anyone
+  can be grappled untrained; and the body-plausible traversals
+  (`CardComposer::UNTRAINED_WAYS`: climb/descend/leap/swim) floor within an
+  ordinary body's reach (`UNTRAINED_CLIMB`/`UNTRAINED_LEAP` height caps, and
+  only short gaps for the standing jump). Every floor is DEGRADED risk with
+  no capability and no bonus, never better than the bought gift, and NEVER
+  offered beside a trained way at the same thing — a strictly worse twin is a
+  dead choice. What stays bought is the POWERS: swing/glide/burrow, ride, the
+  metered tempo verbs, squeeze grades, and every composed card, because nerve
+  does not grow wings;
   anyone in reach can be fought: strike is offered on every visible
   non-companion actor ("Turn on X" when they are not hostile), and the swing
   itself — landed or not — flips them to `kind = 'enemy'` (tags `was` +
