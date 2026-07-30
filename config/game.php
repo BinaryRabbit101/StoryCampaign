@@ -160,6 +160,37 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Growth (the tale pays for what the sheet learns)
+    |--------------------------------------------------------------------------
+    | Creation is priced to the point and growth was not priced at all — the
+    | interview wrote whatever Claude marked granted. These are the earns: what
+    | each notable moment pays into App\Services\GrowthLedger, which the growth
+    | interview then spends at TraitCatalog prices.
+    |
+    | Two is the price of an ordinary new capability, so a two-point moment is
+    | "this alone was worth a new gift" and a one-point moment is half of one.
+    | That is the whole scale, and raising it does not make growth feel earned —
+    | it makes the interview a formality again.
+    |
+    | WHICH moments qualify is NOT tunable here: that is the closed earn list in
+    | App\Services\GrowthLedger, detected by the resolver from facts it has
+    | already fixed. A scar is deliberately not among them, in any coin — a scar
+    | refunds nothing, and the relief valve for one stays the interview
+    | acknowledging it in words.
+    */
+
+    'growth' => [
+        'earn' => [
+            'elite_beaten' => 2,
+            'endeavor_filled' => 2,
+            'rival_settled' => 2,
+            'first_ground' => 1,
+            'captive_freed' => 1,
+        ],
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
     | Meters (open thread #1: decided defaults)
     |--------------------------------------------------------------------------
     | Tempo meters regenerate in real time across the wait between turns —

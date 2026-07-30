@@ -919,9 +919,24 @@ class CardComposer
                     slot: TurnSlot::Main,
                     verb: $verb->value,
                     label: ucfirst($social)." {$actor->name}",
-                    description: "Work on {$actor->name} with words.",
+                    // Talking somebody out of a fight is the same size of gamble
+                    // as swinging at them, and it prices like one: `risky`,
+                    // through the one ladder, exactly as the strike does. What
+                    // the words BUY is scoped by who is standing there — only a
+                    // regular can be talked off the field on a plain success —
+                    // and getting it wrong brings them on. All three facts are
+                    // the card's to state: nothing about a beat may be a
+                    // surprise once the turn commits.
+                    description: $hostile
+                        ? "Work on {$actor->name} with words while the fight is on — as much of a gamble as a swing. "
+                            .($actor->tier === 'regular'
+                                ? 'Land it and they break off. '
+                                : "Someone like {$actor->name} only leaves on a perfect word; anything less buys a moment with their hand stayed. ")
+                            .'Get it wrong and they come at you.'
+                        : "Work on {$actor->name} with words.",
                     target: $target,
                     capability: $social,
+                    risk: $hostile ? 'risky' : 'safe',
                 );
             }
         }

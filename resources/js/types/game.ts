@@ -358,9 +358,32 @@ export interface GrowthMessage {
     body: string;
     /** Whether the sheet actually changed — the engine's verdict, not prose. */
     granted: boolean | null;
+    /**
+     * `refused` is the engine's own verdict rather than a change: the world
+     * said yes to something the tale has not paid for yet, and a shortfall the
+     * player cannot see is indistinguishable from a plain no.
+     */
     changes:
-        { kind: 'gift' | 'burden'; label: string; detail: string }[] | null;
+        | {
+              kind: 'gift' | 'burden' | 'refused';
+              label: string;
+              detail: string;
+          }[]
+        | null;
     suggestions: Suggestion[] | null;
+}
+
+/**
+ * What the tale has taught, in points — earned by the engine from moments it
+ * already fixed, spent by the growth interview at creation prices.
+ *
+ * Always present, zero included: a stated zero says why the world keeps
+ * answering "not yet", and a panel that hides itself when empty leaves the
+ * player guessing at a rule nobody ever showed them.
+ */
+export interface GrowthLedger {
+    balance: number;
+    line: string;
 }
 
 export interface CharacterItem {

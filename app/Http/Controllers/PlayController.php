@@ -16,6 +16,7 @@ use App\Models\Campaign;
 use App\Models\Scene;
 use App\Models\Turn;
 use App\Services\Claude\Narrator;
+use App\Services\GrowthLedger;
 use App\Services\Mementos;
 use App\Services\PlayerPresence;
 use App\Services\Recap;
@@ -155,6 +156,11 @@ class PlayController extends Controller
                 ->where('kind', 'growth')->orderBy('id')->get()->take(-10)
                 ->map(fn ($m) => $m->only(['id', 'role', 'body', 'granted', 'changes', 'suggestions']))
                 ->values(),
+            // What the tale has paid out and what the sheet has spent of it.
+            // Always present, always a number: a stated zero is information —
+            // "nothing in hand yet" is why the world keeps saying not yet, and
+            // a hidden panel would leave the player guessing at the reason.
+            'growthLedger' => GrowthLedger::panel($character),
             'latestChapter' => $latestChapter === null ? null : [
                 ...$latestChapter->only(['number', 'kind', 'intent_line', 'body']),
                 'events' => $chapterTurn === null ? [] : ChapterEvents::for($chapterTurn),

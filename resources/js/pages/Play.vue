@@ -22,6 +22,7 @@ import type {
     CharacterItem,
     CharacterMeters,
     Endeavor,
+    GrowthLedger,
     GrowthMessage,
     Memento,
     Place,
@@ -93,6 +94,12 @@ const props = defineProps<{
     mementos: Memento[];
     /** The evolution conversation: what was asked, and how the world answered. */
     growth: GrowthMessage[];
+    /**
+     * What the tale has taught, in points. Growth is priced now — the same
+     * coin creation was — so the balance stands beside the conversation that
+     * spends it, zero included.
+     */
+    growthLedger: GrowthLedger;
     /**
      * Previously, on this tale. Null unless the player has genuinely been
      * away — and informational even then: it sits above the form, closes on a
@@ -1055,10 +1062,36 @@ const healthPct = computed(
                     v-if="showGrowth"
                     class="mt-3 space-y-3 border-t border-sidebar-border/50 pt-3"
                 >
+                    <!-- The ledger, stated first and stated always.
+                         Growth used to be free, which made the world's answer
+                         look like a mood. It is priced now, in the same coin
+                         creation was, and the purse is the first thing on the
+                         panel — a zero included, because "nothing in hand yet"
+                         is the answer to why the world keeps saying not yet. -->
+                    <div class="flex items-baseline gap-2">
+                        <span
+                            class="text-lg font-semibold tabular-nums"
+                            :class="
+                                growthLedger.balance > 0
+                                    ? 'text-emerald-600 dark:text-emerald-400'
+                                    : 'text-muted-foreground'
+                            "
+                        >
+                            {{ growthLedger.balance > 0 ? '+' : ''
+                            }}{{ growthLedger.balance }}
+                        </span>
+                        <span class="text-xs text-muted-foreground">
+                            {{ growthLedger.line }}
+                        </span>
+                    </div>
+
                     <p class="text-xs text-muted-foreground">
                         Tell the world how you want to change. It answers in its
                         own voice, and it may say no — a smaller version of the
-                        same ask often lands.
+                        same ask often lands. What the tale has taught you is
+                        what pays for it: a new gift costs what it would have
+                        cost at the start, and deepening one you already carry
+                        costs far less.
                     </p>
 
                     <div
@@ -1099,12 +1132,28 @@ const healthPct = computed(
                                 "
                                 class="mt-2 border-t border-sidebar-border/50 pt-1.5"
                             >
-                                <p
-                                    v-if="!message.granted"
-                                    class="text-xs text-amber-700 dark:text-amber-400"
-                                >
-                                    Nothing on your sheet changed.
-                                </p>
+                                <template v-if="!message.granted">
+                                    <p
+                                        class="text-xs text-amber-700 dark:text-amber-400"
+                                    >
+                                        Nothing on your sheet changed.
+                                    </p>
+                                    <!-- Why, when the engine knows why. The
+                                         world may say yes to something the
+                                         tale has not paid for; a shortfall the
+                                         player cannot see reads exactly like a
+                                         plain refusal, which is the same
+                                         vacuum the verdict exists to end. -->
+                                    <p
+                                        v-for="change in (
+                                            message.changes ?? []
+                                        ).filter((c) => c.kind === 'refused')"
+                                        :key="change.label"
+                                        class="mt-0.5 text-xs text-muted-foreground"
+                                    >
+                                        {{ change.detail }}
+                                    </p>
+                                </template>
                                 <template v-else>
                                     <p
                                         class="text-xs font-medium text-emerald-700 dark:text-emerald-400"

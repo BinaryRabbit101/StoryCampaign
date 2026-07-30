@@ -26,6 +26,7 @@ use App\Services\Claude\ClaudeCli;
 use App\Services\Claude\Narrator;
 use App\Services\Claude\StageBuilder;
 use App\Services\Claude\ZoneForge;
+use App\Services\GrowthLedger;
 use App\Services\TurnStarter;
 use Database\Seeders\WorldSeeder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -2580,7 +2581,15 @@ class GameEngineTest extends TestCase
     public function test_an_evolution_request_records_what_actually_changed()
     {
         $campaign = $this->createCatCampaign();
-        app(TurnStarter::class)->openFirstTurn($campaign);
+        $turn = app(TurnStarter::class)->openFirstTurn($campaign);
+
+        // Growth is priced now (App\Services\GrowthLedger), so the tale has to
+        // have paid for the deepening before the world can hand it over —
+        // otherwise this asks the same question the refusal test asks. One step
+        // of a reach costs one point, and new country is worth one.
+        GrowthLedger::earn($turn, [
+            ['trigger' => 'first_ground', 'subject' => 'The Harbor', 'place' => 'the long quay'],
+        ]);
 
         $this->mock(ClaudeCli::class, function ($mock) {
             $mock->shouldReceive('promptForJson')->andReturn([

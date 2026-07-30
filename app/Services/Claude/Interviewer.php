@@ -15,6 +15,7 @@ use App\Models\Turn;
 use App\Notifications\InterviewReplyNotification;
 use App\Notifications\StoryBegunNotification;
 use App\Services\CapabilityClamp;
+use App\Services\GrowthLedger;
 use App\Services\TurnStarter;
 use Illuminate\Support\Facades\DB;
 
@@ -870,6 +871,13 @@ PROMPT;
 
         SCARS;
 
+        // What the tale has actually paid them, in the same plain words the
+        // panel shows. The creation interview carries its running balance for
+        // exactly this reason: a narrator that cannot see the ledger has only
+        // two ways to be safe — refuse everything, or grant anything — and it
+        // picks one at random per reply.
+        $ledger = $this->growthBalanceSection($character);
+
         $response = $this->claude->promptForJson(<<<PROMPT
 A player asks to evolve their character. Either translate the request into a small capability/magnitude change, or push back in-world if it overreaches ("your tail can hold one more item, but lifting a grown person is beyond it — perhaps with training, later"). One change at a time; deepening an existing magnitude is cheaper than a new capability.
 
@@ -877,6 +885,8 @@ Capabilities must come from this vocabulary: {$vocabulary}
 Current capabilities: {$sheet}
 Current constraints: {$constraints}
 {$scars}Hard bounds (engine-enforced): {$bounds}
+
+{$ledger}
 {$transcript}
 Player's request: {$request}
 
@@ -904,6 +914,21 @@ PROMPT);
         $applied = [];
         if (($response['granted'] ?? false) && is_array($response['changes'] ?? null)) {
             $clamped = $this->clamp->clamp($response['changes']);
+
+            // The second gate, and the one the clamp never was. The clamp asks
+            // whether a magnitude is inside the bible's bounds; it has never
+            // asked whether the character can AFFORD what they are asking for.
+            // Priced against the whole ask at once — half a grant is a sheet
+            // the player cannot read back off the reply they were handed — and
+            // refused outright when the ledger is short, however Claude
+            // answered. Claude labels; the engine decides.
+            $price = GrowthLedger::priceAll($character, $clamped['capabilities']);
+            $balance = GrowthLedger::balance($character);
+
+            if ($price > $balance) {
+                return $this->refuseForWantOfPoints($campaign, $response, $price, $balance);
+            }
+
             foreach ($clamped['capabilities'] as $entry) {
                 $before = $character->capabilities()->where('capability', $entry['capability'])->first();
                 $character->capabilities()->updateOrCreate(
@@ -929,6 +954,13 @@ PROMPT);
                     ];
                 }
             }
+
+            // One row for the whole ask, naming what it bought. A burden that
+            // came along behind the gift is on the sheet and NOT on the ledger:
+            // growth never refunds, or asking to be worse becomes a way to shop.
+            if ($applied !== []) {
+                GrowthLedger::spend($character, $price, $this->spendLabel($applied), $campaign->currentTurn);
+            }
         }
 
         // Claude can say yes and change nothing — an unusable capability name,
@@ -949,6 +981,68 @@ PROMPT);
             // the literal word "Array" on somebody's screen.
             'suggestions' => $response['suggestions'] ?? [],
         ]);
+    }
+
+    /**
+     * Where the growth bargain stands, for the prompt.
+     *
+     * The creation interview carries its running balance for a reason
+     * (`balanceSection`): a narrator blind to the ledger hedges the only way it
+     * can. Here the failure was worse — there was no ledger at all, so the world
+     * granted whatever it felt generous about. The engine prices the sheet
+     * anyway, so it hands the same number over, states plainly that it is the
+     * one that decides, and asks for a smaller version rather than a promise
+     * that cannot be kept. The numbers stay OUT of the reply itself, exactly as
+     * they do at creation.
+     */
+    private function growthBalanceSection(Character $character): string
+    {
+        $line = GrowthLedger::balanceLine($character);
+
+        return <<<LEDGER
+        ## What this tale has taught them so far (engine-enforced — you cannot spend what is not there)
+        {$line}
+        Points are earned by what the tale actually does: an elite brought down, a long endeavor finished, an old score closed, new country walked, somebody cut loose. A capability they do not have yet costs what it would have cost at the very beginning; deepening one they already carry is far cheaper, a point per step.
+        If the ask costs more than they hold, the engine REFUSES it whatever you answer — so do not promise it. Say the world is not ready to give them that yet, and hand back a way FORWARD in the same breath: the smaller cousin of the same gift, one step instead of three, a narrower version of the same power. Never quote any of these numbers to the player; speak in the world's own terms, the way a teacher says "not yet, but soon".
+        LEDGER;
+    }
+
+    /**
+     * The refusal the engine owns: Claude said yes to something the tale has
+     * not paid for.
+     *
+     * Its words still stand — the reply is in-world and the player is owed the
+     * answer they were given — but the verdict beside it is the engine's, and
+     * it says which of the two is true. Without a stated reason a shortfall is
+     * indistinguishable from a world that simply said no, which is the same
+     * information vacuum the granted/changes columns exist to end.
+     */
+    private function refuseForWantOfPoints(Campaign $campaign, array $response, int $price, int $balance): InterviewMessage
+    {
+        $short = $price - $balance;
+
+        return InterviewMessage::create([
+            'campaign_id' => $campaign->id,
+            'kind' => 'growth',
+            'role' => 'narrator',
+            'body' => $response['reply'] ?? '…',
+            'granted' => false,
+            'changes' => [[
+                'kind' => 'refused',
+                'label' => 'not yet earned',
+                'detail' => "this would cost {$price}, and you have {$balance} — {$short} short. Live a little more of the tale, or ask for something smaller.",
+            ]],
+            'suggestions' => $response['suggestions'] ?? [],
+        ]);
+    }
+
+    /** What a spend bought, in the words already written for the screen. */
+    private function spendLabel(array $applied): string
+    {
+        return collect($applied)
+            ->filter(fn (array $change) => $change['kind'] === 'gift')
+            ->map(fn (array $change) => "{$change['label']} ({$change['detail']})")
+            ->join(', ');
     }
 
     /**

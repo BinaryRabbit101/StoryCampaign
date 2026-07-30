@@ -141,7 +141,9 @@ class UntrainedVerbFloorsTest extends TestCase
             fn ($c) => $c['verb'] === 'calm' && ($c['target']['id'] ?? null) === $enemy->id);
         $this->assertCount(1, $calms, 'the floor must never stand beside the bought gift');
         $this->assertSame('calm', $calms[0]['capability']);
-        $this->assertSame('safe', $calms[0]['risk']);
+        // Mid-fight the bought tongue is a gamble too — but a cheaper one than
+        // bare words, which is what "outclasses" has to keep meaning.
+        $this->assertSame('risky', $calms[0]['risk']);
     }
 
     public function test_a_truce_is_a_conversation_already_and_gets_no_parley()

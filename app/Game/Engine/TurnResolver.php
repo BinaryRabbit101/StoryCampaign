@@ -15,6 +15,7 @@ use App\Models\SceneExit;
 use App\Models\Turn;
 use App\Models\Zone;
 use App\Services\Echoes;
+use App\Services\GrowthLedger;
 use App\Services\Mementos;
 use App\Services\Rumors;
 use Illuminate\Support\Facades\DB;
@@ -27,6 +28,21 @@ use Illuminate\Support\Facades\DB;
  */
 class TurnResolver
 {
+    /**
+     * Beats a turn gets exactly one of, whichever of the three positions they
+     * were taken in, with the plain words the skip says so in.
+     *
+     * ONE LIST copies every composed card into pre/main/post, so without this
+     * a wounded character could bind the same wound three times in one turn and
+     * outheal anything the world is able to spend on them — which quietly
+     * starves the scars, the danger band, and the ending that reads them. It is
+     * a short closed list on purpose: repeating a strike or a lift is ordinary
+     * play, and a generic per-verb dedup would forbid it.
+     */
+    private const ONCE_PER_TURN = [
+        Verb::Bandage->value => 'They have already seen to their wounds this turn.',
+    ];
+
     public function __construct(
         private readonly CardComposer $composer,
         private readonly SceneDresser $dresser,
@@ -176,8 +192,10 @@ class TurnResolver
                     break;
                 }
 
-                // Legality re-check against the ACTUAL current state.
-                $illegalReason = $this->illegalReason($card, $scene, $character, $conditions);
+                // Legality re-check against the ACTUAL current state — and
+                // against what this chain has already done, for the beats a
+                // turn only gets one of.
+                $illegalReason = $this->illegalReason($card, $scene, $character, $conditions, $outcomes);
                 if ($illegalReason !== null) {
                     if ($conditions['prior_failure']) {
                         // No longer legal after an earlier failure: abort the
@@ -485,18 +503,31 @@ class TurnResolver
             // and the board that goes with them — are composed under the new one.
             $hourChange = Hours::advance($campaign, $turn->created_at);
 
-            // What this turn leaves on the shelf.
+            // What this turn leaves behind it.
             //
-            // The facts are final above, so the moment is settled: the engine
-            // reads the notable ones straight out of them and hands them
-            // outward. It is minted NOW, not at narration, so the keepsake
-            // survives an evening Claude is down — and the engine keeps no
-            // reference to what came back, because a memento is memory and
-            // must never be able to reach the mechanics that made it.
-            Mementos::mint($turn, $this->mementoTriggers(
+            // The facts are final above, so the moments are settled: the engine
+            // reads the notable ones straight out of them, ONCE, and hands the
+            // same list to both readers of it. Detecting them twice is how two
+            // readings of one turn start to disagree about what happened in it.
+            //
+            // The shelf takes the rarest and keeps an object. It is minted NOW,
+            // not at narration, so the keepsake survives an evening Claude is
+            // down — and the engine keeps no reference to what came back,
+            // because a memento is memory and must never be able to reach the
+            // mechanics that made it.
+            //
+            // The ledger takes every one that is on its own closed earn table
+            // and pays for it. Same discipline, different register: the engine
+            // detects, something outside it decides what that is worth, and
+            // nothing under app/Game may so much as name the row. Both may fire
+            // on one moment — memory and coin — and neither caps the other.
+            $moments = $this->notableMoments(
                 $turn, $sceneBefore, $scene, $elitesBefore, $captivesBefore, $companionsBefore,
                 $fall, $reactionRolls, $endeavorFilled,
-            ));
+            );
+
+            Mementos::mint($turn, $moments);
+            GrowthLedger::earn($turn, $moments);
 
             // And what a tale that is already finished has to say about it.
             //
@@ -661,9 +692,22 @@ class TurnResolver
         return $outcomes;
     }
 
-    private function illegalReason(array $card, Scene $scene, Character $character, array $conditions): ?string
+    /**
+     * @param  list<BeatOutcome>  $resolved  Everything this turn's chain has
+     *                                       already put through the dice. Only what actually RESOLVED
+     *                                       counts: a beat skipped for any other reason never burns
+     *                                       the turn's one of anything.
+     */
+    private function illegalReason(array $card, Scene $scene, Character $character, array $conditions, array $resolved = []): ?string
     {
         $target = $card['target'] ?? null;
+
+        $onlyOnce = self::ONCE_PER_TURN[$card['verb']] ?? null;
+        if ($onlyOnce !== null && collect($resolved)->contains(
+            fn (BeatOutcome $outcome) => ! $outcome->skipped && $outcome->verb === $card['verb'],
+        )) {
+            return $onlyOnce;
+        }
 
         if (($target['type'] ?? null) === 'actor') {
             $actor = Actor::find($target['id']);
@@ -1197,14 +1241,47 @@ class TurnResolver
             case Verb::Deceive:
             case Verb::Calm:
                 $actor = Actor::find($card['target']['id']);
+                // Two readings of the same verb. Outside a fight it is a
+                // conversation and stays what it always was. Inside one it is a
+                // gamble the card priced as `risky`, and who is standing across
+                // from you decides what winning it BUYS — the ladder never
+                // learns the tier, only the outcome does.
+                $fighting = $actor !== null && $actor->kind === 'enemy';
+                $disposition = $word === Verb::Calm ? 'calmed' : 'swayed';
+
                 if ($succeeded && $actor !== null) {
                     $tags = $actor->tags ?? [];
-                    $tags['disposition'] = $word === Verb::Calm ? 'calmed' : 'swayed';
-                    if ($actor->kind === 'enemy') {
+                    $tags['disposition'] = $disposition;
+
+                    // A regular can be talked off the field on a plain success.
+                    // Anything above one needs the perfect word — a strong beat
+                    // — and nothing less will move them.
+                    if ($fighting && ($actor->tier === 'regular' || $degree === BeatOutcome::STRONG)) {
                         $tags['fled_how'] = 'talked';
+                        $actor->update(['tags' => $tags, 'status' => 'fled']);
+                        $facts[] = "Words landed: {$actor->name} was ".($word === Verb::Calm ? 'calmed' : 'won over').'.';
+                    } elseif ($fighting) {
+                        // The words reached them; the will did not break. They
+                        // spend this turn not swinging — written as the guard
+                        // the reaction phase already knows how to read, and
+                        // re-rolled with everyone else's telegraph at the end of
+                        // the turn, so it buys exactly the one beat.
+                        $tags['intent'] = 'guard';
+                        $actor->update(['tags' => $tags]);
+                        $facts[] = "The words reached {$actor->name}; the blade did not fall — but they did not leave.";
+                    } else {
+                        $actor->update(['tags' => $tags]);
+                        $facts[] = "Words landed: {$actor->name} was ".($word === Verb::Calm ? 'calmed' : 'won over').'.';
                     }
-                    $actor->update(['tags' => $tags, 'status' => $actor->kind === 'enemy' ? 'fled' : $actor->status]);
-                    $facts[] = "Words landed: {$actor->name} was ".($word === Verb::Calm ? 'calmed' : 'won over').'.';
+                } elseif ($degree === BeatOutcome::FAILURE && $fighting && $actor->status === 'active'
+                    && ($card['capability'] ?? null) !== null) {
+                    // The price the card quoted. Only a bought tongue pays it:
+                    // the untrained parley is degraded and bonusless already,
+                    // and a floor that also bites is a trap rather than a floor.
+                    $tags = $actor->tags ?? [];
+                    $tags['intent'] = 'press';
+                    $actor->update(['tags' => $tags]);
+                    $facts[] = "The words found no purchase on {$targetName} — and gave them the distance. {$actor->name} comes on.";
                 } else {
                     $facts[] = "The words found no purchase on {$targetName}.";
                 }
@@ -1405,9 +1482,23 @@ class TurnResolver
                 break;
 
             case Verb::Bandage:
-                $heal = $degree === BeatOutcome::STRONG ? 3 : 2;
-                Meters::heal($character, $heal);
-                $facts[] = "They bound their wounds (+{$heal} health).";
+                // Tending the body is an attempt like every other beat: the
+                // dressing holds as well as the roll went, and a failure leaves
+                // the wound exactly as it was. Partial still pays one — a
+                // half-dressed wound is still dressed — so the beat is never a
+                // coin-flip that gives back nothing.
+                $heal = match ($degree) {
+                    BeatOutcome::STRONG => 3,
+                    BeatOutcome::SUCCESS => 2,
+                    BeatOutcome::PARTIAL => 1,
+                    default => 0,
+                };
+                if ($heal > 0) {
+                    Meters::heal($character, $heal);
+                    $facts[] = "They bound their wounds (+{$heal} health).";
+                } else {
+                    $facts[] = 'The dressing would not hold — the wound is as it was.';
+                }
                 break;
 
             case Verb::Loot:
@@ -2068,11 +2159,17 @@ class TurnResolver
     /**
      * The notable moments this turn left behind, as plain candidate records.
      *
-     * DETECTION ONLY. The engine never holds a memento, prices one, or reads
-     * one back — nothing under app/Game may even name the model. Every
-     * candidate below is read from facts this resolution has already fixed,
-     * and what (if anything) becomes an object on the shelf is decided
-     * entirely outside the engine, by App\Services\Mementos.
+     * DETECTION ONLY. The engine never holds a memento or a ledger row, prices
+     * one, or reads one back — nothing under app/Game may even name either
+     * model. Every candidate below is read from facts this resolution has
+     * already fixed, and what (if anything) becomes an object on the shelf or a
+     * point in the ledger is decided entirely outside the engine, by
+     * App\Services\Mementos and App\Services\GrowthLedger.
+     *
+     * Read ONCE and handed to both, because two detections of the same turn are
+     * two chances to disagree about it. Each reader owns its own closed list and
+     * ignores whatever is not on it — the shelf keeps a fall, the ledger
+     * deliberately does not pay for one.
      *
      * The list is closed and its priority order lives with the service, and
      * anything later arrives the way `endeavor_filled` just did — one more
@@ -2087,7 +2184,7 @@ class TurnResolver
      *                                       saw all the way through, if it saw one.
      * @return list<array{trigger:string, subject:string, place:string}>
      */
-    private function mementoTriggers(Turn $turn, Scene $before, Scene $after, array $elitesBefore, array $captivesBefore, array $companionsBefore, ?array $fall, array $reactionRolls, ?string $endeavorFilled = null): array
+    private function notableMoments(Turn $turn, Scene $before, Scene $after, array $elitesBefore, array $captivesBefore, array $companionsBefore, ?array $fall, array $reactionRolls, ?string $endeavorFilled = null): array
     {
         $candidates = [];
         $place = $before->title;
