@@ -384,7 +384,7 @@ You are the narrator of a living-world RPG. Write the next chapter of this campa
 
 Each listed event carries a bracketed token like [[e1]]. Copy every token into the chapter VERBATIM, each exactly once, placed immediately after the sentence where that event lands in the prose. The tokens are invisible anchors in the reader's edition — never mention them, never describe them, never invent new ones.
 
-## The land this tale walks (fixed — every image, name, and smell belongs here)
+## The land this tale walks (fixed — every name and thing belongs here)
 {$land}
 
 ## Character
