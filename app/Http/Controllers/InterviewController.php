@@ -20,7 +20,16 @@ class InterviewController extends Controller
     {
         abort_unless($campaign->user_id === $request->user()->id, 403);
 
-        if ($campaign->status !== 'interview') {
+        // The birth is not over when the status flips. Beginning opens the
+        // world in a transaction and writes the prologue LAST, against the
+        // scene that now exists — another multi-minute Claude call (see
+        // Interviewer::recordPrologue). A reload inside that window used to
+        // land the player on a play page with no first chapter and nothing
+        // watching for one. Until the prologue exists the world is still
+        // being made, and this page is where the waiting belongs.
+        $birthing = $campaign->status === 'active' && ! $campaign->chapters()->exists();
+
+        if ($campaign->status !== 'interview' && ! $birthing) {
             // Straight to the story, not to the campaign index. Landing here
             // on an already-started tale means the interview finished without
             // the player seeing it — sending them one more click away from
@@ -32,6 +41,9 @@ class InterviewController extends Controller
         }
 
         return Inertia::render('Interview', [
+            // The status is how the page knows it is watching a birth rather
+            // than a conversation: an 'active' campaign only reaches this
+            // render through the guard above, mid-birth.
             'campaign' => $campaign->only(['id', 'name', 'status']),
             // Suggested hero names: the first pre-fills the name field, the
             // rest feed its reroll. Seeded by campaign so a reload offers
@@ -116,6 +128,14 @@ class InterviewController extends Controller
      * request it is watching. Plain JSON, no side effects — it exists so a
      * player whose connection dropped mid-birth still gets told the world
      * opened without them.
+     *
+     * `ready` is the second half of that fact, and the status alone is not
+     * enough: the campaign turns 'active' minutes BEFORE the prologue is
+     * written (it is written last, into the scene that now exists). A client
+     * that hands over on the status alone drops the player onto a play page
+     * with no chapter — and the play page only re-polls while a turn is
+     * resolving, so nothing there would ever fetch the prologue. So the
+     * hand-off waits for the first chapter to land.
      */
     public function status(Request $request, Campaign $campaign): JsonResponse
     {
@@ -123,6 +143,7 @@ class InterviewController extends Controller
 
         return response()->json([
             'status' => $campaign->status,
+            'ready' => $campaign->status !== 'active' || $campaign->chapters()->exists(),
             'messages' => $campaign->interviewMessages()->where('kind', 'creation')->count(),
             'play_url' => route('play.show', $campaign),
         ]);

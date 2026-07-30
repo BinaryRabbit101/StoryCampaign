@@ -251,8 +251,19 @@ function begin(owing = false) {
 
 let watchdog: ReturnType<typeof setInterval> | null = null;
 
+/**
+ * A birth already underway, watched by a page that did not start it.
+ *
+ * The server only renders this page for a campaign still interviewing or one
+ * mid-birth — live, first turn open, prologue not yet written. So an 'active'
+ * status here means the world is being made right now, and the page must keep
+ * waiting exactly as if it had pressed Begin itself: a reload used to leave
+ * the watchdog asleep and the player looking at a finished-looking interview.
+ */
+const birthing = computed(() => props.campaign.status === 'active');
+
 const pending = computed(
-    () => sending.value || beginning.value || building.value,
+    () => sending.value || beginning.value || building.value || birthing.value,
 );
 
 async function checkAhead() {
@@ -266,12 +277,19 @@ async function checkAhead() {
         if (!res.ok) return;
         const state = await res.json();
 
-        // The tale opened without us. Go there — a hard navigation, because
-        // whatever request we were waiting on is no longer worth resuming.
-        if (state.status === 'active') {
+        // The tale opened without us, prologue and all. Go there — a hard
+        // navigation, because whatever request we were waiting on is no
+        // longer worth resuming.
+        if (state.status === 'active' && state.ready) {
             window.location.href = state.play_url;
             return;
         }
+
+        // Live but not ready: the world is open and the prologue is still
+        // being written. There is nowhere to go yet and nothing to pick up —
+        // and a reload here would be an Inertia visit that cancels the very
+        // request writing it. Wait.
+        if (state.status === 'active') return;
 
         // The narrator answered but the reply never reached us (the request
         // died on the way back). Pick it up rather than sitting on a spinner.
@@ -305,7 +323,10 @@ const speakError = ref('');
 const spoken = ref('');
 
 function send() {
-    if (!body.value.trim() || sending.value) return;
+    // `pending`, not `sending`: the Speak button is already disabled while
+    // anything is in flight, but Ctrl+Enter is not — and the server refuses
+    // a word spoken to a campaign that has already begun.
+    if (!body.value.trim() || pending.value) return;
 
     const words = body.value;
     sending.value = true;
@@ -541,7 +562,7 @@ watch(
                         style="animation-delay: 0.4s"
                     />
                 </span>
-                <span v-if="beginning || building">
+                <span v-if="beginning || building || birthing">
                     The world is making room for you — this one takes a moment.
                     You can close this; you will be told when it is ready.
                 </span>

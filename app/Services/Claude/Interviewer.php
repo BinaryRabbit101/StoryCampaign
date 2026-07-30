@@ -118,7 +118,11 @@ class Interviewer
         });
 
         // The prologue is written LAST, against the scene that now exists.
-        $this->recordPrologue($campaign, $this->returningPrologue($campaign, $original, $turn));
+        $this->recordPrologue(
+            $campaign,
+            fn () => $this->returningPrologue($campaign, $original, $turn),
+            $this->stockPrologue($original->name),
+        );
 
         $this->announceBegun($campaign);
     }
@@ -205,9 +209,25 @@ LANDING;
      * Write down the opening chapter. Called after the world is already open,
      * so a narrator that falls over costs the tale its prologue's polish and
      * nothing else — the campaign is live either way.
+     *
+     * The words are handed over as a closure with a plain fallback behind
+     * them, because a chapter row must ALWAYS land here. The interview page
+     * holds the player in the waiting state until the first chapter exists
+     * (see InterviewController::status), so a prologue lost between the world
+     * opening and the words being written would be an endless wait rather
+     * than a rough opening. Both writers already fall back to stock prose on
+     * a failed CLI run; this catches everything around them.
      */
-    private function recordPrologue(Campaign $campaign, string $body): void
+    private function recordPrologue(Campaign $campaign, \Closure $prose, string $fallback): void
     {
+        try {
+            $body = $prose();
+        } catch (\Throwable $e) {
+            report($e);
+
+            $body = $fallback;
+        }
+
         Chapter::create([
             'campaign_id' => $campaign->id,
             'turn_id' => null,
@@ -450,7 +470,11 @@ PROMPT)) ?: $this->stockPrologue($name);
         });
 
         // Written last, into the scene that now exists — see landing().
-        $this->recordPrologue($campaign, $this->creationPrologue($campaign, $sheet, $turn));
+        $this->recordPrologue(
+            $campaign,
+            fn () => $this->creationPrologue($campaign, $sheet, $turn),
+            $this->stockPrologue($sheet['name'] ?? 'The Nameless'),
+        );
 
         $this->announceBegun($campaign);
     }
@@ -544,10 +568,14 @@ PROMPT)) ?: $this->stockPrologue($name);
         });
 
         // Written last, into the scene that now exists — see landing().
-        $this->recordPrologue($campaign, $this->creationPrologue($campaign, [
-            'name' => $name,
-            'description' => $prose['description'],
-        ], $turn));
+        $this->recordPrologue(
+            $campaign,
+            fn () => $this->creationPrologue($campaign, [
+                'name' => $name,
+                'description' => $prose['description'],
+            ], $turn),
+            $this->stockPrologue($name),
+        );
 
         $this->announceBegun($campaign);
     }

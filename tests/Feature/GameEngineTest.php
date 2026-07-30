@@ -15,6 +15,7 @@ use App\Game\StoryAspects;
 use App\Game\WorldFlavor;
 use App\Models\Actor;
 use App\Models\Campaign;
+use App\Models\Chapter;
 use App\Models\Character;
 use App\Models\Item;
 use App\Models\Scene;
@@ -1503,6 +1504,13 @@ class GameEngineTest extends TestCase
     {
         $campaign = $this->createCatCampaign();
         app(TurnStarter::class)->openFirstTurn($campaign);
+        Chapter::create([
+            'campaign_id' => $campaign->id,
+            'turn_id' => null,
+            'number' => 1,
+            'kind' => 'prologue',
+            'body' => 'The tale opened, and here is how.',
+        ]);
 
         $this->actingAs($campaign->user)
             ->get("/campaigns/{$campaign->id}/interview")
@@ -1515,7 +1523,83 @@ class GameEngineTest extends TestCase
             ->getJson("/campaigns/{$campaign->id}/interview/status")
             ->assertOk()
             ->assertJsonPath('status', 'active')
+            ->assertJsonPath('ready', true)
             ->assertJsonPath('play_url', route('play.show', $campaign));
+    }
+
+    /**
+     * The race under that hand-off: the campaign turns 'active' and the first
+     * turn opens inside a transaction, and the PROLOGUE is written after it —
+     * another multi-minute Claude call. A client that leaves on the status
+     * alone lands on a play page with no chapter, and the play page only
+     * re-polls while a turn is resolving. So the birth is reported as still
+     * underway until the first chapter exists, through both doors.
+     */
+    public function test_the_hand_off_waits_for_the_prologue()
+    {
+        $campaign = $this->createCatCampaign();
+        app(TurnStarter::class)->openFirstTurn($campaign);
+
+        // Live, playable, and not yet worth arriving at.
+        $this->actingAs($campaign->user)
+            ->getJson("/campaigns/{$campaign->id}/interview/status")
+            ->assertOk()
+            ->assertJsonPath('status', 'active')
+            ->assertJsonPath('ready', false);
+
+        // Same race through the other door: a reload mid-birth keeps the
+        // interview page on screen, still polling, rather than shipping the
+        // player to a story with nothing written in it.
+        $this->actingAs($campaign->user)
+            ->get("/campaigns/{$campaign->id}/interview")
+            ->assertOk()
+            ->assertInertia(fn ($page) => $page->component('Interview')
+                ->where('campaign.status', 'active'));
+
+        Chapter::create([
+            'campaign_id' => $campaign->id,
+            'turn_id' => null,
+            'number' => 1,
+            'kind' => 'prologue',
+            'body' => 'The prologue that was worth waiting for.',
+        ]);
+
+        $this->actingAs($campaign->user)
+            ->getJson("/campaigns/{$campaign->id}/interview/status")
+            ->assertOk()
+            ->assertJsonPath('ready', true);
+
+        $this->actingAs($campaign->user)
+            ->get("/campaigns/{$campaign->id}/interview")
+            ->assertRedirect("/play/{$campaign->id}");
+    }
+
+    /**
+     * And the wait cannot become endless: a chapter row lands even when the
+     * words for it never arrive. Both prologue writers already fall back to
+     * stock prose on a failed CLI run; this covers the ground around them.
+     */
+    public function test_a_birth_always_leaves_a_chapter_behind_it()
+    {
+        $this->seed(WorldSeeder::class);
+        $user = User::factory()->create();
+
+        // Every Claude call falls over — the forge, the sheet, the prologue.
+        $this->mock(ClaudeCli::class, function ($mock) {
+            $mock->shouldReceive('promptForJson')->andThrow(new \RuntimeException('offline'))->byDefault();
+            $mock->shouldReceive('prompt')->andThrow(new \RuntimeException('offline'))->byDefault();
+        });
+
+        $this->actingAs($user)->post('/campaigns', ['name' => 'Cold Birth']);
+        $campaign = $user->campaigns()->first();
+
+        $this->actingAs($user)->post("/campaigns/{$campaign->id}/interview/build", [
+            'name' => 'The Unwritten',
+            'traits' => ['long-reach'],
+        ])->assertRedirect("/play/{$campaign->id}");
+
+        $this->assertSame('active', $campaign->fresh()->status);
+        $this->assertTrue($campaign->chapters()->where('kind', 'prologue')->exists());
     }
 
     public function test_the_interview_sheet_pays_the_same_coin_as_the_point_buy()
