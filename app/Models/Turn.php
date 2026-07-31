@@ -10,7 +10,8 @@ use Illuminate\Database\Eloquent\Relations\HasOne;
 #[Fillable([
     'campaign_id', 'scene_id', 'number', 'status', 'situation', 'situation_board',
     'cards', 'submission', 'resolution', 'branch_trigger', 'meters_snapshot',
-    'downtime', 'submitted_at', 'resolved_at', 'narrated_at', 'rolls_seen_at',
+    'downtime', 'submitted_at', 'resolved_at', 'narration_claimed_at',
+    'narrated_at', 'rolls_seen_at',
 ])]
 class Turn extends Model
 {
@@ -38,6 +39,9 @@ class Turn extends Model
             'downtime' => 'array',
             'submitted_at' => 'datetime',
             'resolved_at' => 'datetime',
+            // Who holds the pen. Written by the atomic claim at the top of
+            // Narrator::narrate and never read by anything the player sees.
+            'narration_claimed_at' => 'datetime',
             'narrated_at' => 'datetime',
             'rolls_seen_at' => 'datetime',
         ];

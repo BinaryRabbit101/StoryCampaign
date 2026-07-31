@@ -126,6 +126,11 @@ class Bargains
             // the same turn (the resolver clears the clock the moment hostilities
             // stop), so `loud` would cost exactly nothing.
             'hostilities' => $active->contains(fn (Actor $a) => $a->kind === 'enemy' && ! ($a->tags['lurking'] ?? false)),
+            // Whether a step out of here is a roll at all. A deal buys an edge
+            // on a die: offered against a beat that casts none, it would be a
+            // complication with nothing on the other side of it — the free
+            // lunch in reverse, and just as unreadable.
+            'contested' => Odds::contestedGround($scene),
             'lurkers' => $active->contains(fn (Actor $a) => $a->tags['lurking'] ?? false),
             // Concealment is a within-turn condition — it never survives a
             // resolution — so "are you concealed?" cannot be asked at compose
@@ -152,8 +157,19 @@ class Bargains
      */
     public static function keysFor(ActionCard $card, array $state): array
     {
-        // Already a deal, or a beat there is nothing to sweeten.
-        if ($card->bargain !== null || ! Odds::rolls($card->verb)) {
+        // Already a deal, or a beat there is nothing to sweeten — including the
+        // beat that is certain only here and now, which Odds answers off the
+        // card rather than off the verb.
+        if ($card->bargain !== null || Odds::certain($card->oddsCard(), $state)) {
+            return [];
+        }
+
+        // A named way out is never a deal, even when it does roll. Whether that
+        // step casts a die at all depends on what is standing in the room and
+        // what the air is doing, so a bargain hung on it would appear and
+        // vanish with the weather — and the air may move what a card COSTS,
+        // never what is on the menu.
+        if ($card->verb === 'cross' && ($card->target['type'] ?? null) === 'exit') {
             return [];
         }
 

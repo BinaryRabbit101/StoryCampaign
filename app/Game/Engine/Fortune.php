@@ -41,6 +41,12 @@ class Fortune
     private const ELIGIBLE = [
         'time_slow', 'haste', 'ready', 'examine', 'inspect', 'wait',
         'catch_breath', 'reposition', 'shield', 'brace', 'command', 'drop',
+        // Walking out through a way nothing is contesting. It reaches this
+        // list as an ACT — a body moving through the scene — and it reaches
+        // the die at all only where Odds::certain already made it roll-free,
+        // which is exactly the open door. A contested crossing has its own
+        // d20 and takes nothing from here.
+        'cross',
     ];
 
     public static function eligible(string $verb): bool
@@ -66,7 +72,7 @@ class Fortune
         }
 
         $face = $dice->d20();
-        $luckyFrom = (int) config('game.fortune.lucky_from', 18);
+        $luckyFrom = (int) config('game.fortune.lucky_from', 17);
         $unluckyTo = (int) config('game.fortune.unlucky_to', 2);
 
         if ($face >= $luckyFrom) {

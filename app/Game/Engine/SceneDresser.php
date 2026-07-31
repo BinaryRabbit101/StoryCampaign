@@ -3,6 +3,7 @@
 namespace App\Game\Engine;
 
 use App\Models\Actor;
+use App\Models\Character;
 use App\Models\Scene;
 use App\Models\SceneExit;
 use App\Models\SceneFeature;
@@ -98,14 +99,32 @@ class SceneDresser
      * Instantiate a subset of the zone's template features as scene-scoped
      * copies. Templates tagged `hidden` arrive concealed — discovery content
      * for examine and scout, invisible to the cards until revealed.
+     *
+     * Two rules shape the draw beyond the seeded shuffle, both added after a
+     * playtest arrived on ground holding ONE feature while the character's five
+     * bought gifts produced no cards at all:
+     *
+     *  - A floor of two, whenever the zone has two to give. One prop is not a
+     *    thin scene, it is an empty one.
+     *  - One thing the sheet can act on, whenever the zone holds one. The
+     *    character is handed to the dresser for this and nothing else, and it
+     *    moves no number anywhere — it decides which ground appears, which is
+     *    the dresser's whole job. "The scene arrives thin" still holds: the
+     *    floor is two, not a crowd, and actors are untouched.
      */
-    public function instantiateFeatures(Scene $scene, Dice $dice, int $min, int $max): void
+    public function instantiateFeatures(Scene $scene, Dice $dice, int $min, int $max, ?Character $character = null): void
     {
         $templates = SceneFeature::whereNull('scene_id')
             ->where('zone_id', $scene->zone_id)
             ->get();
 
-        foreach ($this->draw($templates->all(), $dice, $min, $max) as $template) {
+        // An empty room is a legitimate reading of a place; a room with one
+        // thing in it is a corridor with a prop. Floor at two where the zone
+        // has two — never above what the ground can actually supply.
+        $min = min(max($min, 2), $templates->count());
+        $max = max($min, $max);
+
+        foreach ($this->drawForSheet($templates->all(), $dice, $min, $max, $character) as $template) {
             SceneFeature::create([
                 'scene_id' => $scene->id,
                 'zone_id' => $scene->zone_id,
@@ -183,6 +202,80 @@ class SceneDresser
     }
 
     /**
+     * The ordinary seeded draw, then one swap for the sheet.
+     *
+     * The shuffle and the count are untouched — same stream, same size, same
+     * ground for a given seed — so this cannot shift what any other scene in
+     * the game has ever drawn. All it does is make sure that when the zone
+     * holds something a bought gift has an opinion about, the drawn subset
+     * holds one too: the FIRST qualifying template in the already-shuffled
+     * order takes the LAST drawn slot, which keeps the choice as deterministic
+     * as the shuffle it reads.
+     *
+     * @param  list<SceneFeature>  $templates
+     * @return list<SceneFeature>
+     */
+    private function drawForSheet(array $templates, Dice $dice, int $min, int $max, ?Character $character): array
+    {
+        $shuffled = $this->shuffle($templates, $dice);
+        $drawn = array_slice($shuffled, 0, min(count($shuffled), $dice->between($min, $max)));
+
+        if ($character === null || $drawn === []) {
+            return $drawn;
+        }
+
+        $gifts = array_keys($character->effectiveCapabilities());
+
+        $fits = fn (SceneFeature $f) => collect($gifts)
+            ->contains(fn (string $gift) => self::actsOn($gift, $f->affordances ?? []));
+
+        if (collect($drawn)->contains($fits)) {
+            return $drawn;
+        }
+
+        $wanted = collect($shuffled)->first($fits);
+
+        if ($wanted === null) {
+            return $drawn;
+        }
+
+        $drawn[count($drawn) - 1] = $wanted;
+
+        return $drawn;
+    }
+
+    /**
+     * What a bought gift needs the ground to be.
+     *
+     * This is NOT a second copy of the composer's grammar and must never become
+     * one: it decides which ground turns up, never what a card costs or whether
+     * one is offered — the composer alone answers that, off the real feature,
+     * exactly as it always has. It is deliberately LOOSER than the composer's
+     * own tests (no height caps, no gap widths, no grades), because a near miss
+     * still puts something on the ground the character has an opinion about,
+     * and being wrong costs nothing but a feature that could have been drawn
+     * anyway. A gift not named here simply does not bias the draw.
+     *
+     * @param  array<string,mixed>  $affordances
+     */
+    private static function actsOn(string $gift, array $affordances): bool
+    {
+        $via = fn (string $key) => in_array($gift, (array) ($affordances[$key] ?? []), true);
+
+        return match ($gift) {
+            'break' => ($affordances['breakable'] ?? false) === true,
+            'lift', 'carry_extra', 'pull', 'throw' => isset($affordances['lift_weight']),
+            'conceal', 'quiet_move' => ($affordances['hideable'] ?? false) === true,
+            'squeeze' => ($affordances['flee_destination'] ?? false) === true,
+            'scout', 'detect' => ($affordances['hidden'] ?? false) === true,
+            'climb', 'descend', 'swing', 'glide', 'leap', 'swim', 'burrow' => $via('reachable_via')
+                || $via('crossable_via')
+                || $via('rideable_via'),
+            default => false,
+        };
+    }
+
+    /**
      * A seeded draw of between $min and $max items, order shuffled by the
      * same dice — deterministic for a given seed, different between scenes.
      *
@@ -193,11 +286,29 @@ class SceneDresser
      */
     private function draw(array $items, Dice $dice, int $min, int $max): array
     {
+        $items = $this->shuffle($items, $dice);
+
+        return array_slice($items, 0, min(count($items), $dice->between($min, $max)));
+    }
+
+    /**
+     * The seeded shuffle both draws walk. Kept apart so the sheet-aware draw
+     * reads the same order in the same stream position as the plain one — a
+     * second shuffle written anywhere else would move every dressed scene the
+     * game has ever produced.
+     *
+     * @template T
+     *
+     * @param  list<T>  $items
+     * @return list<T>
+     */
+    private function shuffle(array $items, Dice $dice): array
+    {
         for ($i = count($items) - 1; $i > 0; $i--) {
             $j = $dice->between(0, $i);
             [$items[$i], $items[$j]] = [$items[$j], $items[$i]];
         }
 
-        return array_slice($items, 0, min(count($items), $dice->between($min, $max)));
+        return $items;
     }
 }

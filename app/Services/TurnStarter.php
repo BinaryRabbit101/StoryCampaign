@@ -56,12 +56,17 @@ class TurnStarter
         // three strangers at once has spent the whole world in one breath —
         // and it reads as clutter, because nothing in it has had a chance to
         // mean anything yet. The world adds as the tale goes.
+        // Read before the ground is dressed rather than after it: the draw is
+        // shaped by what this character can act on, so opening ground is never
+        // ground their whole sheet is a stranger to.
+        $sheet = $campaign->character()->first();
+
         if ($opening !== null) {
             // The stage sets the cast; the zone still lends some ground.
             $this->dressScene($scene, $opening);
-            $this->dresser->instantiateFeatures($scene, $dice, 1, 2);
+            $this->dresser->instantiateFeatures($scene, $dice, 1, 2, $sheet);
         } else {
-            $this->dresser->instantiateFeatures($scene, $dice, 2, 3);
+            $this->dresser->instantiateFeatures($scene, $dice, 2, 3, $sheet);
             $this->dresser->spawnActors($scene, $dice, 0, 2);
         }
 

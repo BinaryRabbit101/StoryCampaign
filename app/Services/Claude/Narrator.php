@@ -37,12 +37,36 @@ class Narrator
         private readonly BookCompiler $books,
     ) {}
 
-    public function narrate(Turn $turn): Chapter
+    /**
+     * Write this turn's chapter, or stand down because somebody else already is.
+     *
+     * Null means the pen was already taken — never that anything failed. Two
+     * paths reach here (the inline dispatch after the player's own response,
+     * and the every-minute sweep), a Claude call runs well past a minute, and
+     * `narrated_at` is not written until that call comes back. Without the
+     * claim below both paths read an unnarrated turn and both write a chapter,
+     * which is how five of nine turns in one playthrough got told twice.
+     */
+    public function narrate(Turn $turn): ?Chapter
     {
+        if (! $this->claim($turn)) {
+            return null;
+        }
+
         $campaign = $turn->campaign;
         $character = $campaign->character;
 
-        $response = $this->claude->promptForJson($this->buildPrompt($turn), $this->tone());
+        try {
+            $response = $this->claude->promptForJson($this->buildPrompt($turn), $this->tone());
+        } catch (\Throwable $e) {
+            // The pen goes back on the table. A call that failed HERE is
+            // retryable on the next sweep without waiting out the staleness
+            // window — that window exists for the process that died still
+            // holding the claim, which by definition cannot put it down.
+            Turn::whereKey($turn->id)->whereNull('narrated_at')->update(['narration_claimed_at' => null]);
+
+            throw $e;
+        }
 
         $chapter = Chapter::create([
             'campaign_id' => $campaign->id,
@@ -143,6 +167,28 @@ class Narrator
         return $chapter;
     }
 
+    /**
+     * Take the pen, or find it already taken.
+     *
+     * ONE conditional UPDATE, because the whole point is that two processes
+     * asking at the same instant must get two different answers: the database
+     * decides, not a read-then-write in PHP. A turn is claimable when nobody
+     * holds it, or when whoever held it has been holding it long enough
+     * (`game.narration_claim_minutes`) to have died — and never once the
+     * chapter exists, which is what makes `narrated_at` the real end of it.
+     */
+    private function claim(Turn $turn): bool
+    {
+        $stale = now()->subMinutes((int) config('game.narration_claim_minutes', 10));
+
+        $won = Turn::whereKey($turn->id)
+            ->whereNull('narrated_at')
+            ->where(fn ($q) => $q->whereNull('narration_claimed_at')->orWhere('narration_claimed_at', '<=', $stale))
+            ->update(['narration_claimed_at' => now()]);
+
+        return $won === 1;
+    }
+
     private function buildPrompt(Turn $turn): string
     {
         $campaign = $turn->campaign;
@@ -205,6 +251,10 @@ class Narrator
         $land = $campaign->worldBrief();
         $stage = $campaign->stageBrief() ?: '(none set — let the tale find its own direction)';
         $register = ProseStyle::rules();
+
+        // Who walked through with them, on the chapter where the ground
+        // changed. Empty on every other chapter.
+        $crossing = $this->crossingBlock($turn, $nextTurn);
 
         // Long-range memory: the one-line-per-chapter record kept by earlier
         // narrations. Without it, anything older than the two recent chapters
@@ -375,6 +425,9 @@ You are the narrator of a living-world RPG. Write the next chapter of this campa
 
 {$register}
 
+## Who may be in this chapter (standing rule)
+Only the people the facts below say are present may appear, speak, or act. Anyone the facts do not list is somewhere else — they may be remembered, named, worried about or spoken of, and they may not be shown in the scene. The story-so-far and the recent chapters are MEMORY, never a roster: somebody who was standing beside the character two chapters ago is not standing there now unless the facts of this turn say so. If you find yourself needing a person the facts do not name, that is the scene telling you they are gone.
+
 ## Style: action over atmosphere
 - The beats carry the chapter. Every paragraph must have something HAPPENING — movement, contact, exchange, consequence.
 - Description rides inside the action: a clause on the way through a beat, never a standalone scene-painting paragraph. If a detail doesn't change what someone does or feels next, cut it.
@@ -407,7 +460,7 @@ Some beats carry the player's own words for that moment. Those words are voice a
 
 ## How the scene answered
 {$reaction}
-{$world}{$endeavor}{$figures}{$company}{$standing}{$sideStory}{$fall}{$closing}{$news}{$remembering}{$keepsake}{$criticals}
+{$world}{$crossing}{$endeavor}{$figures}{$company}{$standing}{$sideStory}{$fall}{$closing}{$news}{$remembering}{$keepsake}{$criticals}
 ## Where the vignette stops
 {$stopNote} The chapter must end on this note, mid-situation and unresolved. {$wordLow}-{$wordHigh} words.
 
@@ -419,6 +472,60 @@ Close the chapter inside this moment, with the people and surroundings named abo
 Respond with ONLY a JSON object:
 {"intent_line": "<the chapter's italic epigraph — the ONE place a turned phrase is welcome; a compact line in the spirit of 'She chose to take the rooftops.' or 'They read the shack before they read the woman.' The prose register's image limit does not bind this single line. Or null.>", "chapter": "<the chapter prose>", "synopsis_line": "<ONE factual line for the campaign's running record: what this chapter changed — names met, promises made, injuries taken, debts owed. Plain record-keeping, no style.>"{$mementoField}{$rumorField}{$echoField}}
 PROMPT;
+    }
+
+    /**
+     * Who came through the door, and who did not.
+     *
+     * The synopsis is memory, and memory is not a roster: handed a wounded
+     * stranger from two chapters ago it will keep writing her into the scene,
+     * while her actor row never left the ground she was met on. The board and
+     * the cards cannot see her, so the player is reading a story they are not
+     * allowed to act on — which is the worst kind of desync, because nothing
+     * looks broken.
+     *
+     * So on the turn the ground changes, the facts say plainly who crossed and
+     * name who stayed. Prompt-side only: nothing here moves an actor, and the
+     * engine has already decided every word of it.
+     */
+    private function crossingBlock(Turn $turn, ?Turn $next): string
+    {
+        $before = $turn->scene;
+        $after = $next?->scene;
+
+        if ($before === null || $after === null || $before->id === $after->id) {
+            return '';
+        }
+
+        // Exactly who the resolver moves at a transition: whoever walks beside
+        // them, and whoever has taken to following without being asked.
+        $crossed = Companions::beside($after)
+            ->merge(Companions::strays($after))
+            ->pluck('name')->unique()->values();
+
+        // And whoever is still standing where they were met. Hidden stays
+        // hidden here as everywhere: a lurker in the old scene is not a name
+        // the chapter gets to mourn.
+        $stayed = $before->visibleActors()
+            ->filter(fn ($actor) => $actor->kind !== 'enemy')
+            ->pluck('name')->unique()->values();
+
+        $came = $crossed->isEmpty()
+            ? 'Nobody crossed with them: they walked into this ground alone.'
+            : 'Crossed with them, and standing here now: '.$crossed->join(', ').'.';
+
+        $left = $stayed->isEmpty()
+            ? 'Everyone met on the old ground stayed behind on it.'
+            : 'Stayed behind on the old ground and is NOT here: '.$stayed->join(', ')
+                .'. They may be remembered, missed, or spoken of — they may not appear, speak, or act in this chapter.';
+
+        return <<<CROSSING
+
+        ## Who came through with them (fixed facts — this chapter changed ground)
+        {$came}
+        {$left}
+
+        CROSSING;
     }
 
     /**

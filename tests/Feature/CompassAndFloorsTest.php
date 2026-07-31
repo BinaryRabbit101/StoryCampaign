@@ -3,10 +3,13 @@
 namespace Tests\Feature;
 
 use App\Game\Engine\Ambient;
+use App\Game\Engine\Attempts;
+use App\Game\Engine\BeatOutcome;
 use App\Game\Engine\CardComposer;
 use App\Game\Engine\Compass;
 use App\Game\Engine\Dice;
 use App\Game\Engine\Fortune;
+use App\Game\Engine\Odds;
 use App\Game\Engine\Standings;
 use App\Game\Engine\TurnResolver;
 use App\Game\Meters;
@@ -440,5 +443,105 @@ class CompassAndFloorsTest extends TestCase
             $next->exits()->pluck('direction')->all(),
             'departure is irreversible — no way may point back where you came from',
         );
+    }
+
+    // ------------------------------------------------------------------
+    // The open door (2026-07-30): an uncontested way out is a step, not a test
+    // ------------------------------------------------------------------
+
+    public function test_an_uncontested_way_out_is_certain_and_simply_happens()
+    {
+        $campaign = $this->createCampaign();
+        $turn = $this->openBareTurn($campaign);
+        $scene = $campaign->activeScene;
+
+        $way = $scene->exits()->firstOrFail();
+        $turn = $this->refreshCards($turn);
+        $card = $this->cardWhere($turn, 'main',
+            fn ($c) => ($c['target']['type'] ?? null) === 'exit' && ($c['target']['id'] ?? null) === $way->id);
+
+        $this->assertNotNull($card);
+        $this->assertFalse($card['forecast']['rolls'], 'an empty room does not test a doorway');
+        $this->assertSame('Certain', $card['forecast']['band']);
+        $this->assertSame(0, $card['forecast']['difficulty']);
+
+        $beat = $this->resolveCard($turn, 'main', $card);
+
+        $this->assertSame('success', $beat['degree'], 'a certain step cannot fail');
+        $this->assertSame(0, $beat['roll'], 'a certain step casts no d20');
+        $this->assertNotSame($scene->id, $campaign->fresh()->activeScene->id, 'and it still moves the tale');
+        $this->assertSame($campaign->fresh()->activeScene->id, $way->fresh()->to_scene_id);
+    }
+
+    public function test_a_contested_way_out_rolls_exactly_as_before()
+    {
+        $campaign = $this->createCampaign();
+        $turn = $this->openBareTurn($campaign);
+        $scene = $campaign->activeScene;
+
+        Actor::create([
+            'scene_id' => $scene->id, 'zone_id' => $scene->zone_id,
+            'name' => 'a dock-gang bruiser', 'kind' => 'enemy', 'tier' => 'regular',
+            'stats' => ['health' => ['current' => 5, 'max' => 5], 'attack' => 2],
+            'tags' => [], 'status' => 'active', 'source' => 'seed',
+        ]);
+
+        $way = $scene->exits()->firstOrFail();
+        $turn = $this->refreshCards($turn->fresh());
+        $card = $this->cardWhere($turn, 'main',
+            fn ($c) => ($c['target']['type'] ?? null) === 'exit' && ($c['target']['id'] ?? null) === $way->id);
+
+        $this->assertNotNull($card);
+        $this->assertTrue($card['forecast']['rolls'], 'somebody in the open contests the door');
+        $this->assertGreaterThan(0, $card['forecast']['difficulty']);
+    }
+
+    public function test_violent_air_contests_the_door_and_plain_dark_does_not()
+    {
+        $campaign = $this->createCampaign();
+        $turn = $this->openBareTurn($campaign);
+        $scene = $campaign->activeScene;
+
+        $scene->update(['state' => array_merge($scene->state ?? [], ['ambient' => Ambient::GLOOM])]);
+        $this->assertFalse(Odds::contestedGround($scene->fresh()), 'the dark is dark, not dangerous');
+
+        $scene->update(['state' => array_merge($scene->state ?? [], ['ambient' => Ambient::SQUALL])]);
+        $this->assertTrue(Odds::contestedGround($scene->fresh()));
+
+        $way = $scene->exits()->firstOrFail();
+        $turn = $this->refreshCards($turn->fresh());
+        $card = $this->cardWhere($turn, 'main',
+            fn ($c) => ($c['target']['type'] ?? null) === 'exit' && ($c['target']['id'] ?? null) === $way->id);
+
+        $this->assertTrue($card['forecast']['rolls'], 'violent air makes the step a question again');
+    }
+
+    public function test_a_doorway_is_never_a_settled_question()
+    {
+        $this->assertNotContains('cross', Attempts::CLOSING,
+            'a failed crossing must never seal that way for the rest of the scene');
+    }
+
+    /**
+     * One bad look at the ground is a bad look. Only the second says the
+     * reading is finished — and it is still keyed to this ground alone.
+     */
+    public function test_scout_takes_two_misses_to_close()
+    {
+        $campaign = $this->createCampaign();
+        $this->openBareTurn($campaign);
+        $scene = $campaign->activeScene->fresh();
+
+        $missed = new BeatOutcome('main', 'scout', null, BeatOutcome::FAILURE, 3, 3, 14);
+
+        Attempts::record($scene, $missed);
+        $scene = $scene->fresh();
+        $this->assertSame([], Attempts::spent($scene), 'one miss closes nothing');
+        $this->assertNotSame([], Attempts::missed($scene), 'but it is remembered');
+
+        Attempts::record($scene, $missed);
+        $scene = $scene->fresh();
+        $this->assertSame(['scout:scene:'.$scene->id], Attempts::spent($scene),
+            'the second miss is the ground refusing to be read');
     }
 }

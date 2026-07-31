@@ -30,6 +30,26 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Narration claim and grace
+    |--------------------------------------------------------------------------
+    | Two paths can reach a chapter: the inline dispatch the player's own
+    | submission fires, and the every-minute sweep. The claim is how they stop
+    | writing the same chapter twice — Narrator::narrate takes it with one
+    | conditional UPDATE, and only a claim older than `claim_minutes` (a
+    | process that died holding it) may be taken off somebody.
+    |
+    | The grace is the other half, and it is what keeps the ordinary case out
+    | of the race entirely: the sweep leaves a freshly resolved turn alone
+    | until the inline narration has had `grace_minutes` to finish. Keep it
+    | comfortably above the worst honest narration time.
+    */
+
+    'narration_claim_minutes' => env('GAME_NARRATION_CLAIM_MINUTES', 10),
+
+    'narration_grace_minutes' => env('GAME_NARRATION_GRACE_MINUTES', 5),
+
+    /*
+    |--------------------------------------------------------------------------
     | Claude CLI
     |--------------------------------------------------------------------------
     | The narration and evolution jobs shell out to the Claude CLI. Each run
@@ -312,7 +332,12 @@ return [
     */
 
     'fortune' => [
-        'lucky_from' => 18,
+        // Widened from 18 after a playthrough where the die was cast a dozen
+        // times and broke either way twice: at 3 faces in 20 the good half of
+        // the mechanic was rare enough that players never learned it existed.
+        // The bad half stays where it was — a wrinkle that lands as often as a
+        // find is not weather, it is a tax.
+        'lucky_from' => 17,
         'unlucky_to' => 2,
     ],
 

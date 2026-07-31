@@ -84,15 +84,113 @@ class ZoneForge
     /** Claude-forged, engine-clamped; engine-built from the campaign's land when the forge is cold. */
     public function forge(Campaign $campaign, ?Zone $leaving): Zone
     {
+        $opening = $leaving === null;
+
         try {
             $plan = $this->sanitize($this->claude->promptForJson($this->buildPrompt($campaign, $leaving)));
 
-            return $this->materialize($campaign, $plan);
+            return $this->materialize($campaign, $this->stock($plan, $campaign, $opening));
         } catch (Throwable $e) {
             report($e);
 
-            return $this->coldForge($campaign);
+            return $this->coldForge($campaign, $opening);
         }
+    }
+
+    /**
+     * What every zone must hold, whatever the forge proposed.
+     *
+     * A playtest ran nine turns without meeting a single hostile, on ground
+     * whose whole enemy roster was one template — the wandering-threat roll had
+     * almost nothing to draw from, so the world could not bite even when it
+     * rolled to. Both rules here are about giving that roll something to find;
+     * neither touches a number anywhere.
+     *
+     *  - TWO threats, minimum. Topped up from this campaign's own land kit (the
+     *    same kit the cold forge builds from), never from the shared world.
+     *  - The PREMISE, given a body. A tale premised on banishing a demon should
+     *    have something in it the engine can actually put in the player's way,
+     *    and this is the cheapest honest way to do it: one more actor template,
+     *    marked so nothing later mistakes it for surplus. Claude names it (the
+     *    prompt asks, and the name is clamped like every other actor's); the
+     *    cold path names one from the kit. It spawns through the machinery that
+     *    already existed and carries no mechanics of its own.
+     *
+     * @param  array{name:string,description:string,locales:list<array>,features:list<array>,actors:list<array>}  $plan
+     * @return array{name:string,description:string,locales:list<array>,features:list<array>,actors:list<array>}
+     */
+    private function stock(array $plan, Campaign $campaign, bool $opening): array
+    {
+        $budget = (int) config('game.bounds.zone_forge')['actors'];
+        $kit = collect(WorldFlavor::coldPlan($campaign->worldFlavor())['actors']);
+        $taken = collect($plan['actors'])->pluck('name')->map(fn ($n) => mb_strtolower((string) $n))->all();
+
+        // By reference: each name this takes is a name it must not take again,
+        // or a zone short of two threats would be topped up with the same
+        // figure standing in it twice.
+        $spare = function (string $kind) use ($kit, &$taken): ?array {
+            return $kit->first(fn (array $a) => $a['kind'] === $kind
+                && ! in_array(mb_strtolower($a['name']), $taken, true));
+        };
+
+        // The premise, embodied. Only the opening zone, only where the player
+        // actually set one, and only when Claude did not already answer the
+        // prompt's request for it.
+        $premise = trim((string) $campaign->premise);
+        $anchored = collect($plan['actors'])->contains(fn (array $a) => ($a['tags']['premise_anchor'] ?? false) === true);
+
+        if ($opening && $premise !== '' && ! $anchored) {
+            // Whatever this zone already holds that could stand in the way,
+            // before inventing anything: a bespoke forged threat is a better
+            // face for the premise than a kit name dropped into somebody
+            // else's region. Only ground with nothing hostile on it at all
+            // borrows from the kit.
+            $index = collect($plan['actors'])
+                ->search(fn (array $a) => in_array($a['kind'], ['enemy', 'creature'], true));
+
+            if ($index === false) {
+                $stand = $spare('enemy') ?? $spare('creature');
+
+                if ($stand !== null) {
+                    $plan['actors'][] = $stand;
+                    $taken[] = mb_strtolower($stand['name']);
+                    $index = array_key_last($plan['actors']);
+                }
+            }
+
+            if ($index !== false) {
+                $plan['actors'][$index]['tags'] = array_merge(
+                    $plan['actors'][$index]['tags'] ?? [], ['premise_anchor' => true],
+                );
+            }
+        }
+
+        // And enough of a roster for the world to have something to send.
+        while (collect($plan['actors'])->filter(fn (array $a) => $a['kind'] === 'enemy')->count() < 2) {
+            $threat = $spare('enemy');
+
+            if ($threat === null) {
+                break;
+            }
+
+            $plan['actors'][] = $threat;
+            $taken[] = mb_strtolower($threat['name']);
+        }
+
+        // The budget still binds — but it now sheds the people rather than the
+        // threats, because an over-budget plan that dropped the last enemy
+        // would undo the very thing above it.
+        if (count($plan['actors']) > $budget) {
+            $plan['actors'] = collect($plan['actors'])
+                ->sortBy(fn (array $a) => match (true) {
+                    ($a['tags']['premise_anchor'] ?? false) === true => 0,
+                    $a['kind'] === 'enemy' => 1,
+                    default => 2,
+                })
+                ->take($budget)->values()->all();
+        }
+
+        return $plan;
     }
 
     /**
@@ -249,13 +347,13 @@ class ZoneForge
      * a shared-world zone instead, which is why every offline campaign woke
      * up in the same harbor. Nothing here touches the shared world.
      */
-    private function coldForge(Campaign $campaign): Zone
+    private function coldForge(Campaign $campaign, bool $opening = false): Zone
     {
         $used = $campaign->zones()->pluck('name')->all();
 
         return $this->materialize(
             $campaign,
-            WorldFlavor::coldPlan($campaign->worldFlavor(), $used),
+            $this->stock(WorldFlavor::coldPlan($campaign->worldFlavor(), $used), $campaign, $opening),
             source: 'cold',
         );
     }
@@ -294,12 +392,33 @@ class ZoneForge
 
         $existing = $campaign->zones()->pluck('name')->join(', ') ?: '(none yet)';
 
+        // The player's own words for the land outrank the genre's idea of what
+        // is plausible. A tale set in "a forbidden section of a voyager
+        // spaceship" under a modern-realistic genre came back as a SEA
+        // passenger ship with wharf rats on it — the genre quietly substituted
+        // a cousin it found more believable. It does not get to: the genre is a
+        // register to write the named place IN, never a reason to move it.
+        $typed = trim((string) $campaign->setting) !== '' ? <<<'TYPED'
+
+            The land above is the player's OWN words, not a catalog entry, and it outranks everything — the genre, the design bible's examples, and any land the engine keeps in a kit. Build THAT place. Render the genre inside it (its tone, its people, its idea of trouble) and never swap it for a more ordinary cousin the genre finds easier to believe: if the words say a ship between stars, it is a ship between stars, whatever the genre would otherwise suggest.
+
+            TYPED : '';
+
+        // Two threats, minimum, and a face for the premise. The engine tops
+        // both up if this comes back short (see stock()), but the forge's own
+        // words for them are always better than the kit's.
+        $anchor = ($leaving === null && trim((string) $campaign->premise) !== '') ? <<<'ANCHOR'
+            EXACTLY ONE actor must be the thing the player's premise is about — the trouble at the heart of it, wearing this land's own materials. Give it `"premise_anchor": true` in its tags, a name and description drawn from the premise above, and make it a real presence in the world rather than an idea: kind enemy or creature.
+
+            ANCHOR : '';
+
         return <<<PROMPT
 You are the world-forge of a living-world RPG. Forge ONE new zone — a whole region of this campaign's private world — colored by the land below, the player's stage, and the story so far. {$context}
 
 ## The world this campaign is set in (FIXED — build inside it, and nowhere else)
 {$land}
 Every name, feature, and creature you invent must belong to this world — its land, its genre, and its stated level of magic and machinery. Do not import the setting or genre of any example you have been shown: anything the design bible below illustrates is an example of VOICE, not of place or genre, and this world overrides it.
+{$typed}
 
 ## Design bible (honor its voice, guardrails, and bounds — but NOT its examples of place or genre)
 {$bible}
@@ -321,6 +440,8 @@ Locales are the named grounds scenes open onto inside this zone — each a disti
 Feature affordances use ONLY these keys: reachable_via (climb|swing|leap|glide, + height 1-30), crossable_via (swim|swing|leap|glide, + gap short|medium|far), flee_destination (+ squeeze_required small|medium|large), hideable (+ max_size small|medium|large), breakable, lift_weight (10-400), hidden (true for 1-2 secret features found only by examining or scouting).
 The fiction and the tags must agree: any feature a body could plausibly duck behind or slip inside — a vent, a locker, a stand of reeds, a doorway — MUST carry hideable, and at least ONE feature in the zone must be hideable without also being hidden. A breakable thing carries breakable; a portable thing carries lift_weight. A feature whose fiction promises something its tags don't deliver is a door painted on a wall.
 Actors: kind enemy|npc|creature, tier regular|elite, health max ≤ 12, attack ≤ 4. Mix threats with people worth talking to. Give NPCs tags like {"talkable": true, "persuadeable": true, "companionable": true} and enemies {"intimidatable": true, "restrainable": true, "deceiveable": true} as fits.
+At least TWO of them must be kind enemy. These are spawn templates, not a cast list — the world draws on them for as long as the tale stays here, and a region with one threat in it is a region nothing can ever happen in.
+{$anchor}
 
 Respond with ONLY a JSON object:
 {

@@ -3,6 +3,7 @@
 namespace App\Game\Engine;
 
 use App\Models\Actor;
+use App\Models\Scene;
 
 /**
  * The odds ledger: every number that stands between a die and an outcome,
@@ -323,6 +324,73 @@ class Odds
     public static function rolls(string $verb): bool
     {
         return ! in_array($verb, self::QUIET, true);
+    }
+
+    /**
+     * Does this particular card cast a die at all?
+     *
+     * QUIET above is the verb-level answer and covers almost everything. The
+     * one card-level exception is walking out of a room nobody is contesting:
+     * an open, unwatched doorway is not a test of anything, and pricing it as
+     * one meant a coin-flip whose failure burned the whole turn and — before
+     * `cross` left Attempts — sealed that door for the rest of the scene. A
+     * player who cannot reliably walk through a door is not playing a game,
+     * they are being held.
+     *
+     * Contested is a fact about the ground, not about the player: somebody in
+     * the open who might stop them, or air violent enough to make the step
+     * itself a question. Either one and the crossing rolls exactly as it
+     * always did.
+     *
+     * @param  array{verb:string,risk?:string,target?:?array}  $card
+     * @param  array<string,mixed>  $conditions
+     */
+    public static function certain(array $card, array $conditions = []): bool
+    {
+        return ! self::rolls($card['verb'] ?? '') || self::uncontestedCrossing($card, $conditions);
+    }
+
+    /**
+     * A step through a way out that nothing is standing against.
+     *
+     * Narrow on purpose, and all four gates matter. It is only ever a named
+     * WAY OUT (`cross` at a chasm, a leap over a gap, is the ground itself
+     * contesting it, and the card's own risk says so); only at ordinary risk;
+     * only where the conditions say the ground is uncontested; and never for a
+     * bargained twin, whose whole shape is an edge traded against a price on a
+     * roll that has to exist.
+     *
+     * @param  array{verb:string,risk?:string,target?:?array,bargain?:?array}  $card
+     * @param  array<string,mixed>  $conditions
+     */
+    public static function uncontestedCrossing(array $card, array $conditions): bool
+    {
+        return ($card['verb'] ?? null) === 'cross'
+            && ($card['target']['type'] ?? null) === 'exit'
+            && ($card['risk'] ?? 'safe') === 'safe'
+            && ($card['bargain'] ?? null) === null
+            && ($conditions['contested'] ?? true) === false;
+    }
+
+    /**
+     * Is this ground contested — read once per turn, by the composer for the
+     * cards and by the resolver for the dice, off this one method so a card
+     * can never promise a certain step the resolver then rolls for.
+     *
+     * Two things contest it, and nothing else does. Somebody hostile standing
+     * in the open (a lurker does not: hidden is hidden, and a card that
+     * silently hardened would announce the ambush), and a squall — violent air
+     * that makes stepping out of shelter a real question. Plain gloom does not:
+     * it is dark, not dangerous, and it already prices what it should through
+     * Odds::AMBIENT.
+     */
+    public static function contestedGround(Scene $scene): bool
+    {
+        if (Ambient::of($scene) === Ambient::SQUALL) {
+            return true;
+        }
+
+        return $scene->visibleActors()->contains(fn (Actor $actor) => $actor->kind === 'enemy');
     }
 
     public static function band(int $difficulty): string

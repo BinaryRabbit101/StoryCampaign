@@ -353,7 +353,10 @@ class Clocks
      * not blows landed.
      *
      * A beat that cast no die cannot pay for progress either: quiet verbs
-     * always "succeed", so counting them would make any clock free.
+     * always "succeed", so counting them would make any clock free. Read off
+     * the outcome as well as off the verb, because one verb is certain only
+     * sometimes — an uncontested step through a door is free the same way a
+     * quiet beat is, and the card it was chosen from promised no progress.
      */
     public static function qualifies(Clock $clock, BeatOutcome $outcome): bool
     {
@@ -362,6 +365,7 @@ class Clocks
         }
 
         return Odds::rolls($outcome->verb)
+            && $outcome->castADie()
             && in_array($outcome->verb, $clock->advance_verbs, true);
     }
 

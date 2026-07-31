@@ -171,6 +171,12 @@ class CardComposer
         $conditions = [
             'elevated' => (bool) ($scene->state['elevated'] ?? false),
             'ambient' => Ambient::of($scene),
+            // Whether anything is standing against a step out of here. It
+            // decides one thing only: whether walking through an open way is a
+            // roll at all. Read from Odds and nowhere else, by the same call
+            // the resolver makes, so a card that says "Certain" is met by a
+            // resolution that agrees.
+            'contested' => Odds::contestedGround($scene),
             // And the light it stands in. The air was rolled once for this
             // ground and holds; the hour keeps turning under the same scene, so
             // it is read fresh off the tale every time cards are composed —

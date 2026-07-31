@@ -39,6 +39,18 @@ use App\Models\Scene;
  * Note on the quiet verbs: `examine` and `inspect` never roll (Odds::QUIET), so
  * they can never fail and are deliberately absent — a rule the dice can never
  * trigger is a rule nobody can read.
+ *
+ * Two things are deliberately NOT here any more, both for the same reason: a
+ * refusal has to be an answer about the world, not an accident of one die.
+ *
+ *  - `cross` is gone entirely. A doorway is never a settled question. Walking
+ *    out of a room was a coin flip whose failure burned the turn AND sealed
+ *    that exact way for the rest of the scene, and a player who tried the only
+ *    two doors was simply held in the room. An uncontested way now casts no die
+ *    at all (Odds::certain), and a contested one is a fight worth trying twice.
+ *  - `scout` needs TWO misses. One bad look at the ground is a bad look, not
+ *    the ground refusing to be read — so the first failure is written down and
+ *    closes nothing, and only the second says the reading is finished.
  */
 class Attempts
 {
@@ -47,11 +59,21 @@ class Attempts
      * table for the rest of the scene.
      */
     public const CLOSING = [
-        'flee', 'cross', 'ascend', 'scout', 'track',
+        'flee', 'ascend', 'scout', 'track',
     ];
+
+    /**
+     * Verbs that take two failures to settle, and where the first one is
+     * remembered. A single miss on these is a bad attempt rather than an
+     * answer about the ground.
+     */
+    public const TWO_STRIKE = ['scout'];
 
     /** Where the scene keeps them. */
     private const KEY = 'spent_attempts';
+
+    /** Where the scene keeps the first miss of a two-strike verb. */
+    private const MISSED_KEY = 'missed_attempts';
 
     public static function closes(string $verb): bool
     {
@@ -99,6 +121,20 @@ class Attempts
             return;
         }
 
+        // The first miss of a two-strike verb is remembered and nothing else.
+        // The card stays on the table, because one failed sweep of a room is a
+        // failed sweep and not the room's final answer.
+        if (in_array($outcome->verb, self::TWO_STRIKE, true)) {
+            $missed = self::missed($scene);
+
+            if (! in_array($key, $missed, true)) {
+                $missed[] = $key;
+                $scene->update(['state' => array_merge($scene->state ?? [], [self::MISSED_KEY => $missed])]);
+
+                return;
+            }
+        }
+
         $spent[] = $key;
 
         $scene->update(['state' => array_merge($scene->state ?? [], [self::KEY => $spent])]);
@@ -107,8 +143,20 @@ class Attempts
     /** @return list<string> */
     public static function spent(Scene $scene): array
     {
+        return self::keysUnder($scene, self::KEY);
+    }
+
+    /** The first misses, still open. Read by nothing but the second miss. @return list<string> */
+    public static function missed(Scene $scene): array
+    {
+        return self::keysUnder($scene, self::MISSED_KEY);
+    }
+
+    /** @return list<string> */
+    private static function keysUnder(Scene $scene, string $key): array
+    {
         return array_values(array_filter(
-            (array) ($scene->state[self::KEY] ?? []),
+            (array) ($scene->state[$key] ?? []),
             fn ($entry) => is_string($entry),
         ));
     }
@@ -152,7 +200,6 @@ class Attempts
 
             $line = match (Verb::tryFrom($verb)) {
                 Verb::Flee => $name === null ? null : "{$name} is no way out of here — you have tried it.",
-                Verb::Cross => $name === null ? null : "{$name} will not be crossed — you have tried it.",
                 Verb::Ascend => $name === null ? null : "{$name} will not be climbed — you have tried it.",
                 Verb::Scout => 'You have read this ground as closely as it can be read.',
                 Verb::Track => $name === null ? null : "{$name}'s trail is cold for good.",

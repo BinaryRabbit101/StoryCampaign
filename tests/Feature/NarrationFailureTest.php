@@ -159,4 +159,98 @@ class NarrationFailureTest extends TestCase
 
         Notification::assertSentTo($campaign->user, TurnReadyNotification::class);
     }
+
+    /**
+     * One turn, one chapter, however many narrators turn up.
+     *
+     * The inline dispatch and the every-minute sweep both read "resolved and
+     * unnarrated", and a Claude call outlives the minute between sweeps — so
+     * in prod five of nine turns were told twice, in two different retellings
+     * of the same beats. The claim is what makes the second narrator stand
+     * down, and it has to hold while the first one is still mid-call, which is
+     * exactly when `narrated_at` is still null.
+     */
+    public function test_only_one_narrator_writes_a_turn(): void
+    {
+        Notification::fake();
+        $campaign = $this->activeCampaign();
+        $turn = $this->unnarratedTurn($campaign, now());
+
+        $this->mock(ClaudeCli::class, function ($mock) {
+            $mock->shouldReceive('promptForJson')->andReturn([
+                'intent_line' => null,
+                'chapter' => 'A chapter.',
+            ]);
+        });
+
+        // The first narrator is mid-call: it holds the claim, and the chapter
+        // does not exist yet. That is the exact window the race lived in.
+        $this->assertTrue($this->claimFor($turn), 'the first narrator takes the pen');
+
+        $this->assertNull(app(Narrator::class)->narrate($turn->fresh()),
+            'a second narrator must stand down rather than write a rival chapter');
+        $this->assertSame(0, $campaign->chapters()->count());
+
+        // The pen comes free again only once it has been held long enough to
+        // mean the process holding it died.
+        $turn->fresh()->update([
+            'narration_claimed_at' => now()->subMinutes((int) config('game.narration_claim_minutes') + 1),
+        ]);
+        $this->assertNotNull(app(Narrator::class)->narrate($turn->fresh()));
+        $this->assertSame(1, $campaign->chapters()->count());
+
+        // And a written turn is closed to everyone, stale claim or not.
+        $turn->fresh()->update(['narration_claimed_at' => null]);
+        $this->assertNull(app(Narrator::class)->narrate($turn->fresh()));
+        $this->assertSame(1, $campaign->chapters()->count(), 'the chapter is written exactly once');
+    }
+
+    /** A failed call puts the pen back — the sweep must not wait out the window for it. */
+    public function test_a_failed_narration_releases_its_claim(): void
+    {
+        $campaign = $this->activeCampaign();
+        $turn = $this->unnarratedTurn($campaign, now());
+
+        try {
+            app(Narrator::class)->narrate($turn);
+            $this->fail('the offline narrator should have thrown');
+        } catch (\RuntimeException $e) {
+            // Expected: the mocked CLI is offline.
+        }
+
+        $this->assertNull($turn->fresh()->narration_claimed_at);
+    }
+
+    /** The sweep leaves a freshly resolved turn to the request that resolved it. */
+    public function test_the_sweep_gives_inline_narration_its_grace_window(): void
+    {
+        Notification::fake();
+        $campaign = $this->activeCampaign();
+        $turn = $this->unnarratedTurn($campaign, now());
+
+        $this->mock(ClaudeCli::class, function ($mock) {
+            $mock->shouldReceive('promptForJson')->andReturn([
+                'intent_line' => null,
+                'chapter' => 'A chapter.',
+            ]);
+        });
+
+        $this->artisan('game:resolve-due')->assertSuccessful();
+        $this->assertSame(0, $campaign->chapters()->count(),
+            'a turn resolved seconds ago is still being narrated by the request that resolved it');
+
+        // Past the window it is a genuine recovery, and the sweep takes it.
+        $turn->update(['resolved_at' => now()->subMinutes((int) config('game.narration_grace_minutes') + 1)]);
+        $this->artisan('game:resolve-due')->assertSuccessful();
+        $this->assertSame(1, $campaign->chapters()->count());
+    }
+
+    /** Stand in for a narrator that is mid-call: the claim taken, nothing written. */
+    private function claimFor(Turn $turn): bool
+    {
+        return Turn::whereKey($turn->id)
+            ->whereNull('narrated_at')
+            ->whereNull('narration_claimed_at')
+            ->update(['narration_claimed_at' => now()]) === 1;
+    }
 }

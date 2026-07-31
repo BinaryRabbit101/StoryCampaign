@@ -146,7 +146,9 @@ class Campaign extends Model
         return implode("\n", array_filter([
             $setting !== ''
                 ? "This campaign's world is the one the player named: {$setting}\n"
-                    .'That is the world. It outranks every other description of place, including anything the design bible uses as an example.'
+                    .'That is the world. It outranks every other description of place, including anything the design bible uses as an example — '
+                    .'and it outranks the genre below. The genre is the register this place is written IN, never a reason to move it somewhere '
+                    .'more ordinary: build the place the player named, exactly as named, and let the genre colour how it is told.'
                 : WorldFlavor::brief($this->worldFlavor()),
             StoryAspects::brief(StoryAspects::genres(), $this->genre, 'Genre of this world:'),
             StoryAspects::brief(StoryAspects::techLevels(), $this->tech_level, 'Magic and machinery here:'),

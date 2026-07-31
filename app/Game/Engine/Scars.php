@@ -342,7 +342,7 @@ class Scars
 
         // Thin, and empty of people. The alarm clock and the wandering-threat
         // roll are how company shows up again — not the moment they wake.
-        $dresser->instantiateFeatures($woke, $dice, 1, 2);
+        $dresser->instantiateFeatures($woke, $dice, 1, 2, $character);
 
         foreach ($carried as $companion) {
             $companion->update(['scene_id' => $woke->id]);

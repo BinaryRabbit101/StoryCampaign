@@ -70,6 +70,11 @@ class TurnResolver
                 // The cards were priced against it a turn ago; the dice read
                 // the same key off the same scene, so the quoted DC is paid.
                 'ambient' => Ambient::of($scene),
+                // Whether anything is standing against a step out of here,
+                // read off the same ground the cards were composed against a
+                // turn ago. An uncontested way out is a step, not a test —
+                // and the card already said so.
+                'contested' => Odds::contestedGround($scene),
                 // The light these cards were priced under, read BEFORE the
                 // wheel turns below. The hour keeps moving where the air holds,
                 // so this is the one place the two differ in handling: the die
@@ -773,8 +778,10 @@ class TurnResolver
             Meters::spend($character, $cost['meter'], $cost['amount']);
         }
 
-        // Tempo and quiet beats auto-succeed; everything else rolls.
-        if (! Odds::rolls($verb)) {
+        // Tempo and quiet beats auto-succeed, and so does a step through a way
+        // out nothing is contesting; everything else rolls. Same call the card
+        // made when it printed its forecast.
+        if (Odds::certain($card, $conditions)) {
             return $this->quietBeat($card, $character, $scene, $conditions, $turn, $dice, $this->note($choice));
         }
 
@@ -957,6 +964,16 @@ class TurnResolver
                     ? 'What they went to look at was no longer there to look at.'
                     : "They read {$feature->name} closely. ".implode(' ', $feature->readings());
                 break;
+            case Verb::Cross:
+                // A way out nobody is contesting. The beat that reaches here
+                // has already been through Odds::certain, so this is only ever
+                // the open door — the transition itself is decided further up
+                // the resolution off the outcome's degree, exactly as it is for
+                // a crossing that rolled.
+                $facts[] = 'They walked out through '.($card['target']['name'] ?? 'the way out')
+                    .', unhurried, with nothing standing in the way.';
+                break;
+
             case Verb::Wait:
                 $facts[] = 'They held still and let the scene move first.';
                 break;
@@ -2116,8 +2133,14 @@ class TurnResolver
 
     private function maybeIntroduceThreat(Scene $scene, Dice $dice, Turn $turn, bool $forced = false): ?Actor
     {
+        // A tale that played nine turns without meeting anything is not a quiet
+        // tale, it is an empty one — so the stationary draw came up from one in
+        // twenty to two in twenty-five. Deliberately modest, and deliberately
+        // the ONLY escalator here: Pressure already answers stillness on its own
+        // schedule, and a second one stacked on top would make holding still a
+        // punishment rather than a choice.
         $hostilities = $scene->actors()->where('status', 'active')->where('kind', 'enemy')->exists();
-        $chance = $hostilities ? 0.12 : 0.05;
+        $chance = $hostilities ? 0.12 : 0.08;
 
         if (! $forced && ! $dice->chance($chance)) {
             return null;
@@ -2573,7 +2596,10 @@ class TurnResolver
         // props and two strangers reads as a set rather than a place, and it
         // leaves the world nowhere to go: things should be able to turn up
         // over time, which they cannot if everything is there on arrival.
-        $this->dresser->instantiateFeatures($next, $dice, 1, 3);
+        // The sheet rides along: not to make the ground richer, but to keep it
+        // from being ground this character has no way of touching. It shapes
+        // WHICH templates are drawn and nothing else — no odds, no cards.
+        $this->dresser->instantiateFeatures($next, $dice, 1, 3, $scene->campaign?->character);
 
         // A pursuit arrives where the trail ends: the tracked quarry stands
         // cornered in the new scene. Otherwise the ground rolls its own

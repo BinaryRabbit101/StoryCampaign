@@ -35,7 +35,9 @@ class SituationBoard
         $groups = [];
 
         if ($trigger !== null) {
-            $groups[] = self::group('moment', 'Where this leaves you', 'neutral', [$trigger->description()]);
+            $groups[] = self::group('moment', 'Where this leaves you', 'neutral', [
+                self::momentLine($trigger, $scene),
+            ]);
         }
 
         // A lurking ambusher is not yet the player's to know.
@@ -219,6 +221,47 @@ class SituationBoard
         return $parts === []
             ? 'Nothing stands against them, and nothing here asks anything of them.'
             : implode(' ', $parts);
+    }
+
+    /**
+     * Where the last beat left them, in this ground's own words.
+     *
+     * Every trigger but one keeps the enum's plain sentence, which is the right
+     * shape for it: they are statements about the SITUATION, and the situation
+     * is the same wherever it happens. Arrival is the exception. "The character
+     * has entered a new space" is the placeholder that shipped, and after a
+     * dozen transitions it reads as the engine having nothing to say about a
+     * moment that just cost the player a whole turn.
+     *
+     * So arrival says where they are, drawn from what the scene already knows —
+     * its locale name and its open ways — off a closed list of plain-words
+     * templates, seeded on the scene so one ground always greets them the same
+     * way. No mechanics language, and nothing here is a fact the board did not
+     * already hold.
+     */
+    private static function momentLine(BranchTrigger $trigger, Scene $scene): string
+    {
+        if ($trigger !== BranchTrigger::SceneTransition) {
+            return $trigger->description();
+        }
+
+        $here = trim((string) $scene->title);
+
+        if ($here === '') {
+            return $trigger->description();
+        }
+
+        $ways = $scene->exits()->whereNull('to_scene_id')->pluck('direction')->all();
+        $way = $ways === [] ? null : $ways[$scene->id % count($ways)];
+
+        $lines = array_values(array_filter([
+            "New ground: {$here}. Whatever is here has not been read yet.",
+            "They are standing in {$here} now, and the way behind them is closed.",
+            "{$here} — arrived in, not yet known.",
+            $way === null ? null : "New ground: {$here}, with the {$way} way still open off it.",
+        ]));
+
+        return $lines[$scene->id % count($lines)];
     }
 
     /**

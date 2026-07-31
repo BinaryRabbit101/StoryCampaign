@@ -21,7 +21,7 @@ use Throwable;
  */
 class ResolveDueTurns extends Command
 {
-    protected $signature = 'game:resolve-due {--force : Resolve every locked turn, ignoring the abandonment window}';
+    protected $signature = 'game:resolve-due {--force : Resolve every locked turn and narrate every unwritten one, ignoring the abandonment and grace windows}';
 
     protected $description = 'Recover abandoned turns and narrate any chapter still unwritten';
 
@@ -41,9 +41,20 @@ class ResolveDueTurns extends Command
             }
         }
 
+        // The grace window. A turn resolved seconds ago is being narrated
+        // right now by the request that resolved it — the Claude call runs
+        // well past the minute this sweep fires on, so picking it up here is
+        // not recovery, it is a second author. The claim in Narrator::narrate
+        // catches what slips through; this keeps the ordinary turn from ever
+        // reaching that contest in the first place.
+        $grace = now()->subMinutes((int) config('game.narration_grace_minutes', 5));
+
         $unnarrated = Turn::where('status', Turn::STATUS_COMPLETE)
             ->whereNull('narrated_at')
             ->whereNotNull('resolution')
+            ->when(! $this->option('force'), fn ($q) => $q->where(
+                fn ($w) => $w->whereNull('resolved_at')->orWhere('resolved_at', '<=', $grace),
+            ))
             ->get();
 
         foreach ($unnarrated as $turn) {

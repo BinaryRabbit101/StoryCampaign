@@ -128,23 +128,33 @@ class ActionCard
      *
      * @return array{rolls:bool,difficulty:int,band:string,parts:list<array{label:string,amount:int}>,stances:array<string,int>,bonus:int,bonus_parts:list<array{label:string,amount:int}>,grant:?array,endeavor:?string,thread:?string}
      */
-    private function forecast(array $conditions): array
+    /**
+     * This card in the shape Odds reads it — the same shape the resolver hands
+     * over when the beat comes due, so the forecast and the die are answering
+     * questions about the same object.
+     *
+     * The capability travels with it because some of the ledger prices the
+     * body, not the verb: a leap taken as a `cross` and a leap taken as an
+     * `ascend` meet the same wind. So does the deal, which is one more itemized
+     * reason the number is what it is.
+     *
+     * @return array{verb:string,risk:string,capability:?string,target:?array,slot:string,bargain:?array}
+     */
+    public function oddsCard(): array
     {
-        // The capability travels with the forecast because some of the ledger
-        // prices the body, not the verb: a leap taken as a `cross` and a leap
-        // taken as an `ascend` meet the same wind, and the card has to quote
-        // what the resolver — which reads the stored card, capability and all —
-        // is going to charge.
-        $card = [
+        return [
             'verb' => $this->verb,
             'risk' => $this->risk,
             'capability' => $this->capability,
             'target' => $this->target,
             'slot' => $this->slot->value,
-            // The deal rides into the ledger the same way it will at
-            // resolution: as one more itemized reason the number is what it is.
             'bargain' => $this->bargain,
         ];
+    }
+
+    private function forecast(array $conditions): array
+    {
+        $card = $this->oddsCard();
 
         $grant = Odds::grant($this->verb);
 
@@ -163,7 +173,11 @@ class ActionCard
         // a die, and `examine` casts none while turning things up all the same.
         $helps = self::helpsThread($conditions['thread'] ?? null, $this->verb, $this->target);
 
-        if (! Odds::rolls($this->verb)) {
+        // Odds decides whether this card casts a die — verb first, and then the
+        // one card-level exception: an uncontested way out is a step through a
+        // door, not a test. The resolver asks the same question of the same
+        // table, so "Certain" here is certain there.
+        if (Odds::certain($card, $conditions)) {
             return [
                 'rolls' => false,
                 'difficulty' => 0,

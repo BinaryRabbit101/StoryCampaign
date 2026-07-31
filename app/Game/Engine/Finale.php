@@ -484,7 +484,12 @@ class Finale
             foreach ($turn->resolution['beats'] ?? [] as $beat) {
                 $verb = $beat['verb'] ?? null;
 
-                if (($beat['skipped'] ?? false) || ! is_string($verb) || ! Odds::rolls($verb)) {
+                // Beats the tale cast dice for, and only those. The roll is
+                // read as well as the verb because one verb is certain only
+                // sometimes: a step through an uncontested door risked nothing,
+                // and a tale of open doors is not a tale of hard crossings.
+                if (($beat['skipped'] ?? false) || ! is_string($verb)
+                    || ! Odds::rolls($verb) || (int) ($beat['roll'] ?? 0) < 1) {
                     continue;
                 }
 

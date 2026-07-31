@@ -59,6 +59,20 @@ class BeatOutcome
         public readonly ?array $fortune = null,
     ) {}
 
+    /**
+     * Did this beat actually cast a die?
+     *
+     * A d20 never lands on 0, so a zero roll IS the record of a beat that was
+     * certain — the quiet verbs, and the step out through a way nothing was
+     * contesting. Read where progress has to be paid for: a beat that risked
+     * nothing cannot fill a clock, or any clock naming a quiet verb would
+     * fill itself.
+     */
+    public function castADie(): bool
+    {
+        return $this->roll > 0;
+    }
+
     public function succeeded(): bool
     {
         return in_array($this->degree, [self::STRONG, self::SUCCESS], true);
