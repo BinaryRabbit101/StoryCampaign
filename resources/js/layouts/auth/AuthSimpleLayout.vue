@@ -20,12 +20,12 @@ defineProps<{
                         :href="home()"
                         class="flex flex-col items-center gap-2 font-medium"
                     >
+                        <!-- 64px, the shared estate sign-in size: the mark is what
+                             tells you which app is asking, so it leads the screen. -->
                         <div
-                            class="mb-1 flex h-9 w-9 items-center justify-center rounded-md"
+                            class="mb-1 flex h-16 w-16 items-center justify-center"
                         >
-                            <AppLogoIcon
-                                class="size-9 fill-current text-[var(--foreground)] dark:text-white"
-                            />
+                            <AppLogoIcon class="size-16" />
                         </div>
                         <span class="sr-only">{{ title }}</span>
                     </Link>
