@@ -60,9 +60,22 @@ class User extends Authenticatable implements PasskeyUser
     public function ensureWidgetToken(): string
     {
         if ($this->widget_token === null) {
-            $this->forceFill(['widget_token' => Str::random(48)])->save();
+            $this->regenerateWidgetToken();
         }
 
         return $this->widget_token;
+    }
+
+    /** Mint or roll the phone key; any previous key stops working at once. */
+    public function regenerateWidgetToken(): string
+    {
+        $this->forceFill(['widget_token' => Str::random(48)])->save();
+
+        return $this->widget_token;
+    }
+
+    public function revokeWidgetToken(): void
+    {
+        $this->forceFill(['widget_token' => null])->save();
     }
 }

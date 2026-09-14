@@ -8,4 +8,5 @@ project, not in this repo:
 `StoryCampaignWidget.js.lnk` is a Windows shortcut to that file. The script
 is kept out of this repo on purpose — its CONFIG block carries a personal
 widget token once set up, which must never be committed. It reads
-`GET /api/widget/status?token=…` (token from `POST /widget/token`).
+`GET /api/widget/status?token=…` — copy the ready-made link (or just the key) from
+**Settings → Phone**, which also rolls and revokes it (`POST /widget/token` still answers).

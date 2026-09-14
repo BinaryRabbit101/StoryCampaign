@@ -1,5 +1,6 @@
 <?php
 
+use App\Http\Controllers\Settings\PhoneController;
 use App\Http\Controllers\Settings\ProfileController;
 use App\Http\Controllers\Settings\SecurityController;
 use Illuminate\Auth\Middleware\RequirePassword;
@@ -24,6 +25,12 @@ Route::middleware(['auth', 'verified'])->group(function () {
         ->name('user-password.update');
 
     Route::inertia('settings/appearance', 'settings/Appearance')->name('appearance.edit');
+
+    // Settings → Phone: the widget key. Mint/roll and revoke are POST/DELETE
+    // of their own so a profile "Save" can never trip them.
+    Route::get('settings/phone', [PhoneController::class, 'edit'])->name('phone.edit');
+    Route::post('settings/phone/token', [PhoneController::class, 'regenerate'])->name('phone.token.regenerate');
+    Route::delete('settings/phone/token', [PhoneController::class, 'revoke'])->name('phone.token.revoke');
 });
 
 Route::get('.well-known/passkey-endpoints', function () {
