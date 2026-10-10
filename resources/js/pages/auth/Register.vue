@@ -52,6 +52,9 @@ defineOptions({
                 <Input
                     id="email"
                     type="email"
+                    autocapitalize="none"
+                    autocorrect="off"
+                    spellcheck="false"
                     required
                     :tabindex="2"
                     autocomplete="email"

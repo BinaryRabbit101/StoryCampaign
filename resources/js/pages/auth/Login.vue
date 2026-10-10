@@ -50,6 +50,9 @@ defineProps<{
                 <Input
                     id="email"
                     type="email"
+                    autocapitalize="none"
+                    autocorrect="off"
+                    spellcheck="false"
                     name="email"
                     required
                     autofocus

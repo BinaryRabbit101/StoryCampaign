@@ -38,8 +38,11 @@ defineProps<{
                 <Input
                     id="email"
                     type="email"
+                    autocapitalize="none"
+                    autocorrect="off"
+                    spellcheck="false"
                     name="email"
-                    autocomplete="off"
+                    autocomplete="email"
                     autofocus
                     placeholder="email@example.com"
                 />

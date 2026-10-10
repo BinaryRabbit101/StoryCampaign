@@ -40,6 +40,9 @@ const inputEmail = ref(props.email);
                 <Input
                     id="email"
                     type="email"
+                    autocapitalize="none"
+                    autocorrect="off"
+                    spellcheck="false"
                     name="email"
                     autocomplete="email"
                     v-model="inputEmail"
